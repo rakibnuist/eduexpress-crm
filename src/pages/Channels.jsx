@@ -30,7 +30,7 @@ const ChannelIcon = ({ type, size = 16 }) => {
   return <MessageCircle size={size} />;
 };
 
-const emptyForm = { name: '', type: 'whatsapp', phone_number_id: '', waba_id: '', page_id: '', ig_account_id: '', access_token: '', webhook_verify_token: '', active: 1 };
+const emptyForm = { name: '', consultant: '', type: 'whatsapp', phone_number_id: '', waba_id: '', page_id: '', ig_account_id: '', access_token: '', webhook_verify_token: '', active: 1 };
 
 export default function Channels() {
   const [channels, setChannels] = useState([]);
@@ -194,6 +194,11 @@ export default function Channels() {
                     <div className="flex items-center gap-2 mb-0.5">
                       <p className="font-semibold text-slate-800 text-sm">{ch.name}</p>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${meta.light}`}>{meta.label}</span>
+                      {ch.consultant && (
+                        <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                          {ch.consultant}
+                        </span>
+                      )}
                       {ch.active ? (
                         <span className="flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
                           <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>Active
@@ -286,7 +291,11 @@ export default function Channels() {
             </div>
             <div className="p-5 space-y-4">
               <FormField label="Channel Name *" placeholder="e.g. EduExpress WhatsApp Main">
-                <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="e.g. EduExpress WhatsApp Main" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="e.g. UK Team WhatsApp" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </FormField>
+
+              <FormField label="Consultant / Owner" hint="Which consultant manages this account">
+                <input value={form.consultant} onChange={e => setForm(f => ({...f, consultant: e.target.value}))} placeholder="e.g. Rakib Ahmed" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </FormField>
 
               <FormField label="Platform *">

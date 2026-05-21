@@ -220,6 +220,7 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN meta_ad_id TEXT`,
     `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
     `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
+    `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 }
@@ -637,8 +638,8 @@ app.get('/api/channels', (req, res) => {
 
 app.post('/api/channels', (req, res) => {
   const d = req.body;
-  const info = db.prepare(`INSERT INTO channels (type,name,phone_number_id,waba_id,page_id,ig_account_id,access_token,webhook_verify_token,status,color) VALUES (@type,@name,@phone_number_id,@waba_id,@page_id,@ig_account_id,@access_token,@webhook_verify_token,@status,@color)`)
-    .run({ type: d.type, name: d.name, phone_number_id: d.phone_number_id||null, waba_id: d.waba_id||null, page_id: d.page_id||null, ig_account_id: d.ig_account_id||null, access_token: d.access_token||null, webhook_verify_token: d.webhook_verify_token||'eduexpress_verify_2024', status: d.status||'active', color: d.color||'#3b82f6' });
+  const info = db.prepare(`INSERT INTO channels (type,name,consultant,phone_number_id,waba_id,page_id,ig_account_id,access_token,webhook_verify_token,status,color,active) VALUES (@type,@name,@consultant,@phone_number_id,@waba_id,@page_id,@ig_account_id,@access_token,@webhook_verify_token,@status,@color,@active)`)
+    .run({ type: d.type, name: d.name, consultant: d.consultant||null, phone_number_id: d.phone_number_id||null, waba_id: d.waba_id||null, page_id: d.page_id||null, ig_account_id: d.ig_account_id||null, access_token: d.access_token||null, webhook_verify_token: d.webhook_verify_token||'eduexpress_verify_2024', status: d.status||'active', color: d.color||'#3b82f6', active: d.active ?? 1 });
   res.json(db.prepare("SELECT * FROM channels WHERE id=?").get(info.lastInsertRowid));
 });
 
@@ -647,8 +648,8 @@ app.put('/api/channels/:id', (req, res) => {
   const existing = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const token = (d.access_token && !d.access_token.includes('••')) ? d.access_token : existing.access_token;
-  db.prepare(`UPDATE channels SET type=@type,name=@name,phone_number_id=@phone_number_id,waba_id=@waba_id,page_id=@page_id,ig_account_id=@ig_account_id,access_token=@access_token,webhook_verify_token=@webhook_verify_token,status=@status,color=@color WHERE id=@id`)
-    .run({ ...d, id: req.params.id, access_token: token });
+  db.prepare(`UPDATE channels SET type=@type,name=@name,consultant=@consultant,phone_number_id=@phone_number_id,waba_id=@waba_id,page_id=@page_id,ig_account_id=@ig_account_id,access_token=@access_token,webhook_verify_token=@webhook_verify_token,status=@status,color=@color,active=@active WHERE id=@id`)
+    .run({ ...d, id: req.params.id, consultant: d.consultant||null, access_token: token, active: d.active ?? existing.active ?? 1 });
   res.json(db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id));
 });
 
@@ -681,6 +682,7 @@ const CONV_SELECT = `
     channels.name  AS channel_name,
     channels.type  AS channel_type,
     channels.color AS channel_color,
+    channels.consultant AS channel_consultant,
     channels.phone_number_id
   FROM conversations
   LEFT JOIN contacts  ON contacts.id  = conversations.contact_id
@@ -688,10 +690,11 @@ const CONV_SELECT = `
 `;
 
 app.get('/api/conversations', (req, res) => {
-  const { status, channel_type, search, page=1, limit=30 } = req.query;
+  const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;
   const where=[]; const params={};
   if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
   if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
+  if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
   if (search) { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id ${ws}`).get(params).c;

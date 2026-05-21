@@ -147,6 +147,7 @@ export default function Inbox() {
   const [quickReplies, setQuickReplies] = useState([]);
   const [search, setSearch] = useState('');
   const [channelFilter, setChannelFilter] = useState('All');
+  const [channelIdFilter, setChannelIdFilter] = useState('all'); // specific account
   const [statusFilter, setStatusFilter] = useState('all');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -172,12 +173,16 @@ export default function Inbox() {
       const params = {};
       // ← was params.type (wrong) — server param is channel_type
       if (channelFilter !== 'All') params.channel_type = channelFilter.toLowerCase();
+      if (channelIdFilter !== 'all') params.channel_id = channelIdFilter;
       if (statusFilter !== 'all') params.status = statusFilter;
       const data = await api.conversations(params);
-      setConvs(sortConvs(Array.isArray(data) ? data : []));
+      const list = sortConvs(Array.isArray(data) ? data : []);
+      // Preserve unread=0 for the currently open conversation
+      const curId = selectedRef.current?.id;
+      setConvs(curId ? list.map(c => c.id === curId ? { ...c, unread_count: 0 } : c) : list);
     } catch {}
     setLoading(false);
-  }, [channelFilter, statusFilter]);
+  }, [channelFilter, channelIdFilter, statusFilter]);
 
   useEffect(() => { loadConvs(); }, [loadConvs]);
 
@@ -286,6 +291,64 @@ export default function Inbox() {
     };
   }, [loadConvs]); // loadConvs is stable (useCallback with deps)
 
+  /* ─── Polling fallback ───
+     Hostinger (Passenger/Nginx) often kills long-lived SSE connections, so
+     incoming messages never push to the browser. Polling guarantees the inbox
+     stays fresh regardless. Runs every 4s, quietly merges new data. */
+  useEffect(() => {
+    const POLL_MS = 4000;
+
+    const tick = async () => {
+      if (document.hidden) return; // don't poll when tab is in background
+
+      // 1) Refresh conversation list (previews, unread counts, order)
+      try {
+        const params = {};
+        if (channelFilter !== 'All') params.channel_type = channelFilter.toLowerCase();
+        if (channelIdFilter !== 'all') params.channel_id = channelIdFilter;
+        if (statusFilter !== 'all') params.status = statusFilter;
+        const data = await api.conversations(params);
+        if (Array.isArray(data)) {
+          const curId = selectedRef.current?.id;
+          setConvs(prev => {
+            const next = sortConvs(data.map(c => c.id === curId ? { ...c, unread_count: 0 } : c));
+            // Skip update if nothing changed (avoid needless re-render)
+            if (next.length === prev.length &&
+                next.every((c, i) => prev[i] && prev[i].id === c.id &&
+                  prev[i].last_message_at === c.last_message_at &&
+                  prev[i].unread_count === c.unread_count)) return prev;
+            return next;
+          });
+        }
+      } catch {}
+
+      // 2) Refresh messages for the open conversation
+      const cur = selectedRef.current;
+      if (cur) {
+        try {
+          const msgs = await api.messages(cur.id);
+          if (Array.isArray(msgs)) {
+            setMessages(prev => {
+              // Keep optimistic messages that haven't yet been confirmed by server
+              const optimistic = prev.filter(m => String(m.id).startsWith('opt-'));
+              const keptOpt = optimistic.filter(o =>
+                !msgs.some(sm => isOutbound(sm) && sm.content === o.content));
+              const merged = [...msgs, ...keptOpt];
+              // Skip update if identical
+              if (merged.length === prev.length &&
+                  merged.every((m, i) => prev[i] && prev[i].id === m.id && prev[i].status === m.status))
+                return prev;
+              return merged;
+            });
+          }
+        } catch {}
+      }
+    };
+
+    const interval = setInterval(tick, POLL_MS);
+    return () => clearInterval(interval);
+  }, [channelFilter, channelIdFilter, statusFilter]);
+
   /* ─── Load messages when conversation selected ─── */
   useEffect(() => {
     if (!selected) return;
@@ -387,6 +450,12 @@ export default function Inbox() {
     } catch {}
   };
 
+  /* ─── Accounts available for the selected channel type ─── */
+  const accountOptions = channels.filter(c => {
+    if (channelFilter === 'All') return true;
+    return c.type === channelFilter.toLowerCase();
+  });
+
   /* ─── Filter conversations ─── */
   const filtered = convs.filter(c => {
     if (!search) return true;
@@ -444,9 +513,9 @@ export default function Inbox() {
               )}
             </div>
             <div className="flex items-center gap-1">
-              {/* SSE indicator */}
-              <div title={sseStatus === 'connected' ? 'Live' : sseStatus === 'error' ? 'Reconnecting…' : 'Connecting…'}
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${sseStatus === 'connected' ? 'bg-emerald-400' : sseStatus === 'error' ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`} />
+              {/* Live indicator — green = instant push (SSE), blue = auto-refresh (polling) */}
+              <div title={sseStatus === 'connected' ? 'Live · instant' : 'Live · auto-refresh every 4s'}
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${sseStatus === 'connected' ? 'bg-emerald-400' : 'bg-blue-400'}`} />
               <button onClick={() => loadConvs()}
                 className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="Refresh">
                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -471,16 +540,33 @@ export default function Inbox() {
             )}
           </div>
 
-          {/* Channel filter */}
+          {/* Channel type filter */}
           <div className="flex gap-1">
             {CHANNEL_FILTERS.map(f => (
-              <button key={f} onClick={() => setChannelFilter(f)}
+              <button key={f} onClick={() => { setChannelFilter(f); setChannelIdFilter('all'); }}
                 className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all
                   ${channelFilter === f ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}>
                 {f}
               </button>
             ))}
           </div>
+
+          {/* Account selector — shows when there are multiple accounts of the selected type */}
+          {accountOptions.length > 1 && (
+            <div className="relative">
+              <select value={channelIdFilter} onChange={e => setChannelIdFilter(e.target.value)}
+                className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-7 py-1.5 text-[11px] font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer">
+                <option value="all">All accounts ({accountOptions.length})</option>
+                {accountOptions.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.consultant ? ` · ${c.consultant}` : ''}
+                  </option>
+                ))}
+              </select>
+              <Phone size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          )}
 
           {/* Status filter */}
           <div className="flex gap-1">
@@ -559,7 +645,11 @@ export default function Inbox() {
                       </div>
                     </div>
                     {conv.channel_name && (
-                      <p className="text-[10px] text-slate-300 mt-0.5 truncate">{conv.channel_name}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5 truncate flex items-center gap-1">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${cs.bg}`} />
+                        {conv.channel_name}
+                        {conv.channel_consultant && <span className="text-slate-300">· {conv.channel_consultant}</span>}
+                      </p>
                     )}
                   </div>
                 </button>
