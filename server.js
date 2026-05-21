@@ -718,6 +718,36 @@ app.post('/api/conversations/:id/read', (req, res) => {
   res.json({ ok:true });
 });
 
+// Delete an entire conversation (and its messages)
+app.delete('/api/conversations/:id', (req, res) => {
+  try {
+    db.prepare("DELETE FROM messages WHERE conversation_id=?").run(req.params.id);
+    db.prepare("DELETE FROM conversations WHERE id=?").run(req.params.id);
+    broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id) });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Delete a single message
+app.delete('/api/messages/:id', (req, res) => {
+  try {
+    const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(req.params.id);
+    db.prepare("DELETE FROM messages WHERE id=?").run(req.params.id);
+    if (msg) {
+      // Refresh conversation's last_message preview
+      const last = db.prepare("SELECT content, type, created_at FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(msg.conversation_id);
+      db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
+        .run(last?.content || (last ? `[${last.type}]` : ''), last?.created_at || null, msg.conversation_id);
+      broadcast('message_deleted', { conversation_id: msg.conversation_id, message_id: parseInt(req.params.id) });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // MESSAGES
 // ─────────────────────────────────────────────────────────

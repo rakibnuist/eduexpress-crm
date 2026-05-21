@@ -36,6 +36,10 @@ const ChannelIcon = ({ type, size = 14 }) => {
 };
 
 /* ─── Helpers ─── */
+// DB stores direction as 'in'/'out'; SSE/optimistic use 'inbound'/'outbound'. Normalize both.
+const isOutbound = (m) => m?.direction === 'out' || m?.direction === 'outbound';
+const isInbound = (m) => m?.direction === 'in' || m?.direction === 'inbound';
+
 const parseDate = (ts) => {
   if (!ts) return null;
   if (typeof ts === 'string' && !ts.includes('Z') && !ts.includes('+')) return new Date(ts + 'Z');
@@ -211,7 +215,7 @@ export default function Inbox() {
                     ...c,
                     last_message: data.content || '',
                     last_message_at: data.created_at,
-                    unread_count: curSelected?.id === convId ? 0 : (c.unread_count || 0) + (data.direction === 'inbound' ? 1 : 0)
+                    unread_count: curSelected?.id === convId ? 0 : (c.unread_count || 0) + (isInbound(data) ? 1 : 0)
                   } : c
                 );
                 // Sort by latest message
@@ -235,7 +239,7 @@ export default function Inbox() {
             }
 
             // Browser notification for incoming messages
-            if (data.direction === 'inbound' && curSelected?.id !== convId) {
+            if (isInbound(data) && curSelected?.id !== convId) {
               if ('Notification' in window && Notification.permission === 'granted') {
                 new Notification(`New message`, {
                   body: data.content || 'New message',
@@ -243,6 +247,22 @@ export default function Inbox() {
                   tag: `conv-${convId}`,
                 });
               }
+            }
+          }
+
+          // Message deleted elsewhere
+          if (data.type === 'message_deleted') {
+            if (selectedRef.current?.id === data.conversation_id) {
+              setMessages(prev => prev.filter(m => m.id !== data.message_id));
+            }
+          }
+
+          // Conversation deleted elsewhere
+          if (data.type === 'conversation_deleted') {
+            setConvs(prev => prev.filter(c => c.id !== data.conversation_id));
+            if (selectedRef.current?.id === data.conversation_id) {
+              setSelected(null);
+              setMessages([]);
             }
           }
         } catch {}
@@ -337,6 +357,30 @@ export default function Inbox() {
       await api.updateConversation(selected.id, { status });
       setSelected(s => ({ ...s, status }));
       setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, status } : c));
+    } catch {}
+  };
+
+  /* ─── Delete a single message ─── */
+  const deleteMessage = async (msgId) => {
+    setContextMenu(null);
+    // Optimistic remove
+    const prevMessages = messages;
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    try {
+      if (!String(msgId).startsWith('opt-')) {
+        await api.deleteMessage(msgId);
+      }
+    } catch {
+      setMessages(prevMessages); // rollback
+    }
+  };
+
+  /* ─── Delete entire conversation ─── */
+  const deleteConversation = async (convId) => {
+    try {
+      await api.deleteConversation(convId);
+      setConvs(prev => prev.filter(c => c.id !== convId));
+      if (selected?.id === convId) { setSelected(null); setMessages([]); }
     } catch {}
   };
 
@@ -580,6 +624,10 @@ export default function Inbox() {
                   title="Contact info">
                   <Info size={17} />
                 </button>
+
+                <HeaderMenu
+                  onDelete={() => deleteConversation(selected.id)}
+                  onMarkResolved={() => updateStatus('resolved')} />
               </div>
             </div>
 
@@ -614,11 +662,11 @@ export default function Inbox() {
                       {/* Messages in group */}
                       <div className="space-y-1">
                         {msgs.map((msg, i) => {
-                          const isOut = msg.direction === 'outbound';
+                          const isOut = isOutbound(msg);
                           const prev = msgs[i - 1];
                           const next = msgs[i + 1];
-                          const isSameGroup = prev?.direction === msg.direction;
-                          const isLastInGroup = !next || next.direction !== msg.direction;
+                          const isSameGroup = prev && isOutbound(prev) === isOut;
+                          const isLastInGroup = !next || isOutbound(next) !== isOut;
                           const isOptimistic = String(msg.id).startsWith('opt-');
 
                           return (
@@ -850,6 +898,11 @@ export default function Inbox() {
             className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
             <Forward size={14} className="text-slate-400" /> Quote
           </button>
+          <div className="h-px bg-slate-100 my-1" />
+          <button onClick={() => deleteMessage(contextMenu.msg.id)}
+            className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+            <Trash2 size={14} /> Delete
+          </button>
         </div>
       )}
 
@@ -888,6 +941,50 @@ function StatusDropdown({ status, onChange }) {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Header "more options" Menu ── */
+function HeaderMenu({ onDelete, onMarkResolved }) {
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(v => !v)}
+        className={`p-1.5 rounded-lg transition-colors ${open ? 'bg-slate-100 text-slate-600' : 'text-slate-400 hover:bg-slate-100'}`}
+        title="More options">
+        <MoreVertical size={17} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => { setOpen(false); setConfirm(false); }} />
+          <div className="absolute right-0 top-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl z-30 min-w-[180px] py-1">
+            <button onClick={() => { onMarkResolved(); setOpen(false); }}
+              className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+              <CheckCircle2 size={15} className="text-slate-400" /> Mark as Resolved
+            </button>
+            <div className="h-px bg-slate-100 my-1" />
+            {!confirm ? (
+              <button onClick={() => setConfirm(true)}
+                className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">
+                <Trash2 size={15} /> Delete Conversation
+              </button>
+            ) : (
+              <div className="px-3 py-2">
+                <p className="text-xs text-slate-500 mb-2 px-1">Delete this conversation and all its messages?</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirm(false)}
+                    className="flex-1 text-xs py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+                  <button onClick={() => { onDelete(); setOpen(false); setConfirm(false); }}
+                    className="flex-1 text-xs py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 font-medium">Delete</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

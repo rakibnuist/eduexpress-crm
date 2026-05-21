@@ -67,10 +67,12 @@ export const api = {
   getConversation: (id) => req(`/conversations/${id}`),
   updateConversation: (id, d) => req(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   createConversation: (d) => req('/conversations', { method: 'POST', body: JSON.stringify(d) }),
+  deleteConversation: (id) => req(`/conversations/${id}`, { method: 'DELETE' }),
 
   // Messages
   messages: (convId) => req(`/conversations/${convId}/messages`),
   sendMessage: (convId, d) => req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
+  deleteMessage: (id) => req(`/messages/${id}`, { method: 'DELETE' }),
 
   // Quick Replies
   quickReplies: () => req('/quick-replies'),
