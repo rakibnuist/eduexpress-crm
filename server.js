@@ -675,18 +675,32 @@ app.put('/api/channels/:id', (req, res) => {
 
 app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
+// Track in-flight syncs so a channel can't be synced twice at once.
+const activeSyncs = new Set();
+
 // ─── Sync historical messages from a Messenger / Instagram channel ───────────
+// Runs in the BACKGROUND and responds immediately — a long sync would otherwise
+// exceed nginx's gateway timeout (504). Progress streams over SSE; the inbox
+// polling picks up new conversations as they're imported.
 app.post('/api/channels/:id/sync', async (req, res) => {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
   if (!channel.access_token) return res.status(400).json({ error: 'No access token on this channel' });
   if (channel.type !== 'messenger' && channel.type !== 'instagram')
     return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
+  if (activeSyncs.has(channel.id))
+    return res.status(409).json({ error: 'A sync is already running for this channel' });
 
   const token   = channel.access_token;
   const pageId  = channel.page_id;
   const { months = 6 } = req.body || {};
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
+
+  // Respond NOW — everything below runs in the background.
+  activeSyncs.add(channel.id);
+  res.json({ ok: true, started: true, channel: channel.name });
+  runSync().catch(e => console.error('[sync] fatal:', e.message));
+  async function runSync() {
   const MAX_MESSAGES = 5000; // safety cap (OOM is now prevented by paused autosave)
 
   let imported = 0, skipped = 0, conversations = 0;
@@ -829,21 +843,24 @@ app.post('/api/channels/:id/sync', async (req, res) => {
         if (++convCounter % 10 === 0 && db.resumeSave && db.pauseSave) {
           db.resumeSave();
           db.pauseSave();
+          broadcast('sync_progress', { channel_id: channel.id, channel: channel.name, conversations, imported });
         }
       }
     }
 
     const capped = (imported + skipped >= MAX_MESSAGES);
     console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped${capped ? ' (capped)' : ''}`);
-    res.json({ ok: true, imported, skipped, conversations, channel: channel.name, capped });
+    broadcast('sync_done', { channel_id: channel.id, channel: channel.name, imported, skipped, conversations, capped });
 
   } catch (e) {
     console.error('[sync] error:', e.message);
-    res.status(500).json({ error: e.message, imported, skipped, conversations });
+    broadcast('sync_error', { channel_id: channel.id, channel: channel.name, error: e.message, imported, conversations });
   } finally {
-    // Always re-enable disk writes and persist whatever was imported.
+    // Always re-enable disk writes, persist, and clear the in-flight flag.
     if (db.resumeSave) db.resumeSave();
+    activeSyncs.delete(channel.id);
   }
+  } // end runSync
 });
 
 // ─────────────────────────────────────────────────────────

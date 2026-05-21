@@ -60,12 +60,14 @@ export default function Channels() {
   const syncChannel = async (ch, months = 6) => {
     setSyncing(ch.id);
     try {
-      const result = await api.syncChannel(ch.id, months);
-      showToast(`✅ ${result.channel}: ${result.imported} new messages from ${result.conversations} conversations imported (${result.skipped} already existed)`);
+      await api.syncChannel(ch.id, months);
+      // Sync runs in the background on the server (avoids gateway timeouts).
+      showToast(`⏳ Importing ${ch.name}'s last ${months} month${months > 1 ? 's' : ''} in the background — conversations will appear in your Inbox as they sync.`);
     } catch (e) {
       showToast(e.message || 'Sync failed — check your access token permissions', 'error');
     }
-    setSyncing(null);
+    // Don't keep the button spinning; the work continues server-side.
+    setTimeout(() => setSyncing(null), 1500);
   };
 
   const openAdd = () => {
