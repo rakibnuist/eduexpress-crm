@@ -679,7 +679,7 @@ const CONV_SELECT = `
     contacts.wa_id, contacts.messenger_id, contacts.instagram_id,
     contacts.lead_id AS contact_lead_id,
     channels.name  AS channel_name,
-    channels.type  AS ch_type,
+    channels.type  AS channel_type,
     channels.color AS channel_color,
     channels.phone_number_id
   FROM conversations

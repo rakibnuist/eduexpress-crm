@@ -121,6 +121,13 @@ function ChannelBadge({ type }) {
   );
 }
 
+// Sort conversations: most recent last_message_at first
+const sortConvs = (list) =>
+  [...list].sort((a, b) => {
+    const toMs = (ts) => ts ? new Date(ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z').getTime() : 0;
+    return toMs(b.last_message_at) - toMs(a.last_message_at);
+  });
+
 const CHANNEL_FILTERS = ['All', 'WhatsApp', 'Messenger', 'Instagram'];
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -163,10 +170,11 @@ export default function Inbox() {
     if (!quiet) setLoading(true);
     try {
       const params = {};
-      if (channelFilter !== 'All') params.type = channelFilter.toLowerCase();
+      // ← was params.type (wrong) — server param is channel_type
+      if (channelFilter !== 'All') params.channel_type = channelFilter.toLowerCase();
       if (statusFilter !== 'all') params.status = statusFilter;
       const data = await api.conversations(params);
-      setConvs(Array.isArray(data) ? data : []);
+      setConvs(sortConvs(Array.isArray(data) ? data : []));
     } catch {}
     setLoading(false);
   }, [channelFilter, statusFilter]);
@@ -218,12 +226,7 @@ export default function Inbox() {
                     unread_count: curSelected?.id === convId ? 0 : (c.unread_count || 0) + (isInbound(data) ? 1 : 0)
                   } : c
                 );
-                // Sort by latest message
-                return [...updated].sort((a, b) => {
-                  const da = parseDate(a.last_message_at) || new Date(0);
-                  const db2 = parseDate(b.last_message_at) || new Date(0);
-                  return db2 - da;
-                });
+                return sortConvs(updated);
               }
               // New conversation — reload list
               loadConvs(true);
