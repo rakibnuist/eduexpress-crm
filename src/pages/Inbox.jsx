@@ -178,7 +178,7 @@ export default function Inbox() {
     setText('');
     setSending(true);
     try {
-      const sent = await api.sendMessage(selected.id, { text: msg });
+      const sent = await api.sendMessage(selected.id, { content: msg });
       setMessages(prev => [...prev, sent]);
       setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, last_message: msg, last_message_at: new Date().toISOString() } : c));
     } catch (e) {
