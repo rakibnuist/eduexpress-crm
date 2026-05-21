@@ -16,9 +16,17 @@ const InstagramIcon = ({ size = 14 }) => (
 import { Link as RouterLink } from 'react-router-dom';
 
 /* ─── helpers ─── */
+// SQLite stores datetime('now') as "2024-01-01 12:00:00" (no Z) — add Z for correct UTC parsing
+const parseDate = (ts) => {
+  if (!ts) return null;
+  // If no timezone info, treat as UTC
+  if (typeof ts === 'string' && !ts.includes('Z') && !ts.includes('+')) return new Date(ts + 'Z');
+  return new Date(ts);
+};
+
 const fmtTime = (ts) => {
   if (!ts) return '';
-  const d = new Date(ts);
+  const d = parseDate(ts);
   const now = new Date();
   const diffDays = Math.floor((now - d) / 86400000);
   if (diffDays === 0) return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -29,7 +37,7 @@ const fmtTime = (ts) => {
 
 const fmtFull = (ts) => {
   if (!ts) return '';
-  return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return parseDate(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const WhatsAppIcon = ({ size = 16 }) => (
@@ -178,7 +186,8 @@ export default function Inbox() {
     setText('');
     setSending(true);
     try {
-      const sent = await api.sendMessage(selected.id, { content: msg });
+      const resp = await api.sendMessage(selected.id, { content: msg });
+      const sent = resp.message || resp; // server returns { message, apiResult }
       setMessages(prev => [...prev, sent]);
       setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, last_message: msg, last_message_at: new Date().toISOString() } : c));
     } catch (e) {
@@ -393,7 +402,7 @@ export default function Inbox() {
                         {showDate && (
                           <div className="flex items-center justify-center my-3">
                             <span className="text-[11px] text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-100 shadow-sm">
-                              {new Date(msg.created_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                              {parseDate(msg.created_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                             </span>
                           </div>
                         )}
