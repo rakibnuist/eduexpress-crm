@@ -221,6 +221,7 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
     `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
     `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 }
@@ -663,86 +664,90 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   if (channel.type !== 'messenger' && channel.type !== 'instagram')
     return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
 
-  const token = channel.access_token;
-  const pageId = channel.page_id;
+  const token   = channel.access_token;
+  const pageId  = channel.page_id;
+  const { months = 6 } = req.body || {};
+  const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
+
   let imported = 0, skipped = 0, conversations = 0;
 
-  // 6 months ago as Unix timestamp
-  const { months = 6 } = req.body || {};
-  const since = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
-
-  // Helper: fetch ALL pages of a URL, following next cursors
-  async function fetchAllPages(startUrl, onItem) {
-    let url = startUrl;
-    let pageCount = 0;
-    while (url && pageCount < 200) { // safety cap
-      const res2 = await fetch(url);
-      const data = await res2.json();
-      if (data.error) throw new Error(`FB API: ${data.error.message} (code ${data.error.code})`);
-      for (const item of data.data || []) await onItem(item);
-      url = data.paging?.next || null;
-      pageCount++;
-    }
+  // Fetch one page of FB API results; returns { items, nextUrl }
+  async function fbGet(url) {
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.error) throw new Error(`FB API: ${d.error.message}`);
+    return { items: d.data || [], nextUrl: d.paging?.next || null };
   }
 
-  // Helper: save one message to DB
-  function saveMsg(conv, msg, pageId) {
-    if (!msg.message && !msg.sticker && !msg.attachments) return false;
-    const dup = db.prepare("SELECT id FROM messages WHERE wa_message_id=?").get(msg.id);
-    if (dup) { skipped++; return false; }
+  // Pre-prepare statements ONCE — avoids re-compiling SQL in wasm on every row
+  const stmtInsertMsg = db.prepare(
+    `INSERT OR IGNORE INTO messages
+       (conversation_id, direction, type, content, wa_message_id, status, created_at)
+     VALUES (?, ?, 'text', ?, ?, 'delivered', ?)`
+  );
+  const stmtConvUpdate = db.prepare(
+    `UPDATE conversations SET last_message=?, last_message_at=?
+     WHERE id=? AND (last_message_at IS NULL OR last_message_at < ?)`
+  );
 
-    const fromPage = String(msg.from?.id) === String(pageId);
-    const content = msg.message
-      || (msg.attachments?.data?.[0] ? `[${msg.attachments.data[0].mime_type || 'Attachment'}]` : null)
-      || (msg.sticker ? '[Sticker]' : '[message]');
-    const createdAt = msg.created_time
-      ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
-      : null;
+  // Batch-insert all messages for one conversation inside a single transaction
+  const insertBatch = db.transaction((rows, conv) => {
+    let added = 0;
+    for (const msg of rows) {
+      const fromPage = String(msg.from?.id) === String(pageId);
+      const content  = msg.message
+        || (msg.attachments?.data?.[0] ? '[Attachment]' : null)
+        || (msg.sticker ? '[Sticker]' : null)
+        || '[message]';
+      const createdAt = msg.created_time
+        ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
+        : null;
 
-    try {
-      db.prepare(`INSERT INTO messages
-        (conversation_id, direction, type, content, wa_message_id, status, created_at)
-        VALUES (?, ?, 'text', ?, ?, 'delivered', ?)`)
-        .run(conv.id, fromPage ? 'out' : 'in', content, msg.id, createdAt);
-
-      // Keep conversation last_message up to date with newest message
-      const cur = db.prepare("SELECT last_message_at FROM conversations WHERE id=?").get(conv.id);
-      if (!cur?.last_message_at || (createdAt && createdAt > cur.last_message_at)) {
-        db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
-          .run(content, createdAt, conv.id);
+      const result = stmtInsertMsg.run(
+        conv.id, fromPage ? 'out' : 'in', content, msg.id, createdAt
+      );
+      if (result.changes > 0) {
+        added++;
+        if (createdAt) stmtConvUpdate.run(content, createdAt, conv.id, createdAt);
       }
-      imported++;
-      return true;
-    } catch (e) {
-      if (!e.message.includes('UNIQUE')) console.error('[sync] insert:', e.message);
-      skipped++;
-      return false;
     }
-  }
+    return added;
+  });
 
   try {
-    // ── Step 1: get ALL conversations (paginated), filtered since 6 months ago
-    const convListUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
+    // ── Step 1: paginate through ALL conversations ────────────────────────────
+    let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
       + `?fields=participants&limit=100&since=${since}&access_token=${token}`;
 
-    await fetchAllPages(convListUrl, async (fbConv) => {
-      conversations++;
+    while (convUrl) {
+      const { items: fbConvs, nextUrl } = await fbGet(convUrl);
+      convUrl = nextUrl;
 
-      // Identify the non-page participant
-      const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
-      if (!other) return;
+      for (const fbConv of fbConvs) {
+        conversations++;
+        const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
+        if (!other) continue;
 
-      const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id });
-      const conv    = upsertConversation(contact.id, channel.id, 'messenger');
+        const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id });
+        const conv    = upsertConversation(contact.id, channel.id, 'messenger');
 
-      // ── Step 2: fetch ALL messages in this conversation (separate paginated call)
-      const msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
-        + `?fields=message,from,created_time,sticker,attachments&limit=100&since=${since}&access_token=${token}`;
+        // ── Step 2: paginate through ALL messages for this conversation ───────
+        let msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
+          + `?fields=message,from,created_time,sticker,attachments&limit=100&since=${since}&access_token=${token}`;
 
-      await fetchAllPages(msgUrl, async (msg) => {
-        saveMsg(conv, msg, pageId);
-      });
-    });
+        while (msgUrl) {
+          const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl);
+          msgUrl = nextMsgUrl;
+
+          if (msgs.length === 0) break;
+
+          // Insert entire page as one transaction — drastically reduces wasm heap pressure
+          const added = insertBatch(msgs, conv);
+          imported += added;
+          skipped  += msgs.length - added;
+        }
+      }
+    }
 
     console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped`);
     res.json({ ok: true, imported, skipped, conversations, channel: channel.name });
