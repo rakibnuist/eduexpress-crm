@@ -655,6 +655,101 @@ app.put('/api/channels/:id', (req, res) => {
 
 app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
+// ─── Sync historical messages from a Messenger / Instagram channel ───────────
+app.post('/api/channels/:id/sync', async (req, res) => {
+  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
+  if (!channel) return res.status(404).json({ error: 'Channel not found' });
+  if (!channel.access_token) return res.status(400).json({ error: 'No access token on this channel' });
+  if (channel.type !== 'messenger' && channel.type !== 'instagram')
+    return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
+
+  const token = channel.access_token;
+  const pageId = channel.page_id;
+  let imported = 0, skipped = 0;
+
+  try {
+    // Step 1: fetch all conversations on this page
+    let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations?fields=participants,messages{message,from,to,created_time,sticker,attachments}&limit=25&access_token=${token}`;
+
+    while (convUrl) {
+      const convRes = await fetch(convUrl);
+      const convData = await convRes.json();
+      if (convData.error) {
+        console.error('[sync] FB API error:', convData.error.message);
+        return res.status(400).json({ error: convData.error.message });
+      }
+
+      for (const fbConv of convData.data || []) {
+        // Find the participant who is NOT the page
+        const other = (fbConv.participants?.data || []).find(p => p.id !== pageId);
+        if (!other) continue;
+
+        const senderId = other.id;
+        const senderName = other.name || 'Messenger User';
+
+        // Upsert contact
+        const contact = upsertContact({
+          name: senderName,
+          messenger_id: senderId
+        });
+
+        // Upsert conversation
+        const conv = upsertConversation(contact.id, channel.id, 'messenger');
+
+        // Step 2: import each message in this conversation
+        for (const msg of fbConv.messages?.data || []) {
+          if (!msg.message && !msg.sticker) { skipped++; continue; }
+
+          // Check for duplicate by a unique key (FB message ID stored as wa_message_id)
+          const existing = db.prepare("SELECT id FROM messages WHERE wa_message_id=?").get(msg.id);
+          if (existing) { skipped++; continue; }
+
+          const fromPage = msg.from?.id === pageId;
+          const content = msg.message || (msg.sticker ? '[Sticker]' : '[Attachment]');
+          const createdAt = msg.created_time
+            ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
+            : null;
+
+          try {
+            db.prepare(`INSERT INTO messages
+              (conversation_id, direction, type, content, wa_message_id, status, created_at)
+              VALUES (?, ?, 'text', ?, ?, ?, ?)`)
+              .run(
+                conv.id,
+                fromPage ? 'out' : 'in',
+                content,
+                msg.id,
+                fromPage ? 'delivered' : 'delivered',
+                createdAt
+              );
+            imported++;
+
+            // Update conversation last_message if this is newer
+            const existing_conv = db.prepare("SELECT last_message_at FROM conversations WHERE id=?").get(conv.id);
+            if (!existing_conv?.last_message_at || (createdAt && createdAt > existing_conv.last_message_at)) {
+              db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
+                .run(content, createdAt, conv.id);
+            }
+          } catch (e) {
+            if (!e.message.includes('UNIQUE')) console.error('[sync] msg insert:', e.message);
+            skipped++;
+          }
+        }
+      }
+
+      // Follow pagination cursor
+      convUrl = convData.paging?.next || null;
+    }
+
+    console.log(`[sync] Channel ${channel.name}: imported ${imported}, skipped ${skipped}`);
+    res.json({ ok: true, imported, skipped, channel: channel.name });
+
+  } catch (e) {
+    console.error('[sync] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // CONTACTS
 // ─────────────────────────────────────────────────────────

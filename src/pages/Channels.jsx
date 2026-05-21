@@ -42,6 +42,7 @@ export default function Channels() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [syncing, setSyncing] = useState(null); // channel id being synced
 
   const load = () => {
     setLoading(true);
@@ -53,6 +54,17 @@ export default function Channels() {
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const syncChannel = async (ch) => {
+    setSyncing(ch.id);
+    try {
+      const result = await api.syncChannel(ch.id);
+      showToast(`✅ Synced! ${result.imported} messages imported, ${result.skipped} already existed.`);
+    } catch (e) {
+      showToast(e.message || 'Sync failed', 'error');
+    }
+    setSyncing(null);
   };
 
   const openAdd = () => {
@@ -214,6 +226,17 @@ export default function Channels() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Sync history button — Messenger & Instagram only */}
+                    {(ch.type === 'messenger' || ch.type === 'instagram') && (
+                      <button
+                        onClick={() => syncChannel(ch)}
+                        disabled={syncing === ch.id}
+                        title="Import historical messages from this page"
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border text-indigo-600 border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <RefreshCw size={13} className={syncing === ch.id ? 'animate-spin' : ''} />
+                        {syncing === ch.id ? 'Syncing…' : 'Sync History'}
+                      </button>
+                    )}
                     <button onClick={() => toggleActive(ch)}
                       className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border
                         ${ch.active ? 'text-slate-500 border-slate-200 hover:bg-slate-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>
