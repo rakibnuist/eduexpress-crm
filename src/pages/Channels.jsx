@@ -198,7 +198,7 @@ export default function Channels() {
             const meta = channelMeta(ch.type);
             const expanded = expandedId === ch.id;
             return (
-              <div key={ch.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              <div key={ch.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-visible">
                 <div className="flex items-center gap-4 p-4">
                   <div className={`w-10 h-10 ${meta.color} rounded-xl flex items-center justify-center text-white flex-shrink-0`}>
                     <ChannelIcon type={ch.type} size={18} />
