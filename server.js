@@ -9,11 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
 
-// ── Bootstrap: init DB then start Express ──────────────────
-const db = await initDatabase(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -23,14 +18,50 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(join(__dirname, 'dist')));
 }
 
+// ── DB state — routes use `db` by reference ────────────────
+let db = null;
+let dbReady = false;
+
+// Health check — always responds (lets Hostinger know we're alive)
+app.get('/health', (_req, res) => res.json({ status: dbReady ? 'ready' : 'starting' }));
+
+// Block all API calls until DB is ready
+app.use((req, res, next) => {
+  if (!dbReady && req.path.startsWith('/api')) {
+    return res.status(503).json({ error: 'Server is starting up, please retry in a few seconds.' });
+  }
+  next();
+});
+
+// Start HTTP server IMMEDIATELY so Hostinger health check passes
+app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
+
+// ── Init DB async in background ────────────────────────────
+(async () => {
+  try {
+    console.log('[startup] Loading database...');
+    db = await initDatabase(DB_PATH);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    setupSchema();
+    runMigrations();
+    seedData();
+    dbReady = true;
+    console.log('[startup] Database ready ✅');
+  } catch (e) {
+    console.error('[startup] DB init failed:', e.message);
+    process.exit(1);
+  }
+})();
+
 // Graceful shutdown — flush DB before exit
-process.on('SIGTERM', () => { db.flush(); process.exit(0); });
-process.on('SIGINT',  () => { db.flush(); process.exit(0); });
+process.on('SIGTERM', () => { if (db) db.flush(); process.exit(0); });
+process.on('SIGINT',  () => { if (db) db.flush(); process.exit(0); });
 
 // ─────────────────────────────────────────────────────────
-// SCHEMA
+// SCHEMA / MIGRATIONS / SEED  (called after DB ready)
 // ─────────────────────────────────────────────────────────
-db.exec(`
+function setupSchema() { db.exec(`
   CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id TEXT UNIQUE,
@@ -174,55 +205,54 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_conv      ON messages(conversation_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_conv_contact       ON conversations(contact_id);
   CREATE INDEX IF NOT EXISTS idx_conv_status        ON conversations(status, last_message_at);
-`);
+`); }
 
-// Safe migrations
-const migrations = [
-  `ALTER TABLE attendance ADD COLUMN check_in TEXT`,
-  `ALTER TABLE attendance ADD COLUMN check_out TEXT`,
-  `ALTER TABLE attendance ADD COLUMN hours_worked REAL`,
-  `ALTER TABLE attendance ADD COLUMN source TEXT DEFAULT 'manual'`,
-  `ALTER TABLE attendance ADD COLUMN notes TEXT`,
-  `ALTER TABLE employees  ADD COLUMN join_date TEXT`,
-  `ALTER TABLE leads      ADD COLUMN meta_lead_id TEXT`,
-  `ALTER TABLE leads      ADD COLUMN meta_form_id TEXT`,
-  `ALTER TABLE leads      ADD COLUMN meta_ad_id TEXT`,
-  `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
-];
-migrations.forEach(m => { try { db.exec(m); } catch {} });
-
-// ─────────────────────────────────────────────────────────
-// SEED
-// ─────────────────────────────────────────────────────────
-const seedFile = join(__dirname, 'seed_data.json');
-if (existsSync(seedFile) && db.prepare('SELECT COUNT(*) as c FROM leads').get().c === 0) {
-  const seed = JSON.parse(readFileSync(seedFile, 'utf8'));
-  const insertLead = db.prepare(`INSERT OR IGNORE INTO leads
-    (lead_id,date_added,client_name,phone,email,destination,last_education,gpa,english_score,program,lead_source,lead_status,assigned_consultant,service_fee,paid,balance,payment_status,next_followup,notes)
-    VALUES (@lead_id,@date_added,@client_name,@phone,@email,@destination,@last_education,@gpa,@english_score,@program,@lead_source,@lead_status,@assigned_consultant,@service_fee,@paid,@balance,@payment_status,@next_followup,@notes)`);
-  const txn = db.transaction(leads => leads.forEach(l => {
-    if (l.lead_id) insertLead.run({ ...l, phone: String(l.phone || ''), service_fee: l.service_fee || 0, paid: l.paid || 0, balance: l.balance || 0 });
-  }));
-  txn(seed.leads);
-  const insertEmp = db.prepare(`INSERT INTO employees (emp_id,name,role,email,phone,device_id,salary,active) VALUES (@emp_id,@name,@role,@email,@phone,@device_id,@salary,@active)`);
-  seed.employees.filter(e => e.name).forEach(e => insertEmp.run({ ...e, salary: e.salary || 0, active: e.active || 'Yes' }));
-  const insertAttn = db.prepare(`INSERT INTO attendance (emp_id,name,date,check_in,status,device_id,ssid,source) VALUES (@emp_id,@name,@date,@check_in,@status,@device_id,@ssid,@source)`);
-  seed.attendance.forEach(a => insertAttn.run({ emp_id: a.emp_id, name: a.name, date: a.date?.slice(0,10), check_in: a.time, status: a.status, device_id: a.device_id, ssid: a.ssid, source: 'wifi' }));
-  console.log('✅ Seeded from Excel');
+function runMigrations() {
+  const migrations = [
+    `ALTER TABLE attendance ADD COLUMN check_in TEXT`,
+    `ALTER TABLE attendance ADD COLUMN check_out TEXT`,
+    `ALTER TABLE attendance ADD COLUMN hours_worked REAL`,
+    `ALTER TABLE attendance ADD COLUMN source TEXT DEFAULT 'manual'`,
+    `ALTER TABLE attendance ADD COLUMN notes TEXT`,
+    `ALTER TABLE employees  ADD COLUMN join_date TEXT`,
+    `ALTER TABLE leads      ADD COLUMN meta_lead_id TEXT`,
+    `ALTER TABLE leads      ADD COLUMN meta_form_id TEXT`,
+    `ALTER TABLE leads      ADD COLUMN meta_ad_id TEXT`,
+    `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
+    `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
+  ];
+  migrations.forEach(m => { try { db.exec(m); } catch {} });
 }
 
-// Seed default quick replies
-if (db.prepare('SELECT COUNT(*) as c FROM quick_replies').get().c === 0) {
-  const qr = db.prepare(`INSERT INTO quick_replies (title,content,category) VALUES (?,?,?)`);
-  [
-    ['Greeting', 'Hello! Thank you for reaching out to EduExpress International. How can we help you today? 🎓', 'greetings'],
-    ['China Info', 'We offer MBBS, BSc Engineering, and MBA programs in China. Tuition starts from ৳2.5 lakh. Would you like details?', 'info'],
-    ['Georgia Info', 'Georgia offers EU-recognized medical degrees at very affordable costs. Reply YES for a brochure!', 'info'],
-    ['Office Visit', 'Great! Please visit our office at Dhaka. Our consultants are available Sun–Thu, 11AM–6PM. 📍', 'appointment'],
-    ['Documents', 'Please bring: SSC/HSC certificates, NID/passport copy, 2 photos. Anything else you need?', 'documents'],
-    ['Follow Up', "Hi! This is a follow-up from EduExpress. Have you had a chance to consider our programs? We're here to help! 😊", 'followup'],
-    ['Not Available', 'Sorry, our office is closed right now. We will get back to you during business hours (11AM–6PM). Thank you!', 'auto'],
-  ].forEach(([t, c, cat]) => qr.run(t, c, cat));
+function seedData() {
+  const seedFile = join(__dirname, 'seed_data.json');
+  if (existsSync(seedFile) && db.prepare('SELECT COUNT(*) as c FROM leads').get().c === 0) {
+    const seed = JSON.parse(readFileSync(seedFile, 'utf8'));
+    const insertLead = db.prepare(`INSERT OR IGNORE INTO leads
+      (lead_id,date_added,client_name,phone,email,destination,last_education,gpa,english_score,program,lead_source,lead_status,assigned_consultant,service_fee,paid,balance,payment_status,next_followup,notes)
+      VALUES (@lead_id,@date_added,@client_name,@phone,@email,@destination,@last_education,@gpa,@english_score,@program,@lead_source,@lead_status,@assigned_consultant,@service_fee,@paid,@balance,@payment_status,@next_followup,@notes)`);
+    const txn = db.transaction(leads => leads.forEach(l => {
+      if (l.lead_id) insertLead.run({ ...l, phone: String(l.phone || ''), service_fee: l.service_fee || 0, paid: l.paid || 0, balance: l.balance || 0 });
+    }));
+    txn(seed.leads);
+    const insertEmp = db.prepare(`INSERT INTO employees (emp_id,name,role,email,phone,device_id,salary,active) VALUES (@emp_id,@name,@role,@email,@phone,@device_id,@salary,@active)`);
+    seed.employees.filter(e => e.name).forEach(e => insertEmp.run({ ...e, salary: e.salary || 0, active: e.active || 'Yes' }));
+    const insertAttn = db.prepare(`INSERT INTO attendance (emp_id,name,date,check_in,status,device_id,ssid,source) VALUES (@emp_id,@name,@date,@check_in,@status,@device_id,@ssid,@source)`);
+    seed.attendance.forEach(a => insertAttn.run({ emp_id: a.emp_id, name: a.name, date: a.date?.slice(0,10), check_in: a.time, status: a.status, device_id: a.device_id, ssid: a.ssid, source: 'wifi' }));
+    console.log('✅ Seeded from Excel');
+  }
+  if (db.prepare('SELECT COUNT(*) as c FROM quick_replies').get().c === 0) {
+    const qr = db.prepare(`INSERT INTO quick_replies (title,content,category) VALUES (?,?,?)`);
+    [
+      ['Greeting', 'Hello! Thank you for reaching out to EduExpress International. How can we help you today? 🎓', 'greetings'],
+      ['China Info', 'We offer MBBS, BSc Engineering, and MBA programs in China. Tuition starts from ৳2.5 lakh. Would you like details?', 'info'],
+      ['Georgia Info', 'Georgia offers EU-recognized medical degrees at very affordable costs. Reply YES for a brochure!', 'info'],
+      ['Office Visit', 'Great! Please visit our office at Dhaka. Our consultants are available Sun–Thu, 11AM–6PM. 📍', 'appointment'],
+      ['Documents', 'Please bring: SSC/HSC certificates, NID/passport copy, 2 photos. Anything else you need?', 'documents'],
+      ['Follow Up', "Hi! This is a follow-up from EduExpress. Have you had a chance to consider our programs? We're here to help! 😊", 'followup'],
+      ['Not Available', 'Sorry, our office is closed right now. We will get back to you during business hours (11AM–6PM). Thank you!', 'auto'],
+    ].forEach(([t, c, cat]) => qr.run(t, c, cat));
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -925,5 +955,3 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   });
 }
-
-app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
