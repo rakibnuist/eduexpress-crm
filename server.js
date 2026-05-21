@@ -271,7 +271,12 @@ app.get('/api/events', (req, res) => {
   sseClients.set(id, res);
   res.write(`data: ${JSON.stringify({ type: 'connected', id })}\n\n`);
 
-  req.on('close', () => sseClients.delete(id));
+  // Keepalive ping every 25s to prevent proxy/load-balancer timeout
+  const ping = setInterval(() => {
+    try { res.write(`data: ${JSON.stringify({ type: 'ping' })}\n\n`); } catch {}
+  }, 25000);
+
+  req.on('close', () => { clearInterval(ping); sseClients.delete(id); });
 });
 
 function broadcast(type, data) {
@@ -323,7 +328,13 @@ function saveInboundMessage(convId, content, type = 'text', waMessageId = null, 
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
     db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), unread_count=unread_count+1 WHERE id=?").run(content || `[${type}]`, convId);
     const conv = db.prepare("SELECT conversations.*, contacts.name as contact_name, contacts.phone as contact_phone, channels.name as channel_name, channels.type as channel_type FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id WHERE conversations.id=?").get(convId);
-    broadcast('new_message', { message: msg, conversation: conv });
+    broadcast('new_message', {
+      ...msg,
+      conversation_id: convId,
+      direction: 'inbound',
+      contact_name: conv?.contact_name,
+      channel_type: conv?.channel_type,
+    });
     return msg;
   } catch (e) {
     if (!e.message.includes('UNIQUE')) console.error('saveInboundMessage:', e.message);
