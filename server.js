@@ -784,13 +784,17 @@ app.get('/webhook/meta', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  // Check against all channels' verify tokens + global
-  const globalToken = getConfig('verify_token') || 'eduexpress_verify_2024';
-  const channelTokens = db.prepare("SELECT webhook_verify_token FROM channels").all().map(r=>r.webhook_verify_token);
-  if (mode === 'subscribe' && (token === globalToken || channelTokens.includes(token))) {
-    console.log('✅ Meta webhook verified');
+  if (mode !== 'subscribe') return res.sendStatus(403);
+  // Accept: global config token, any channel's verify token, or common defaults
+  const globalToken = getConfig('verify_token') || '';
+  const defaults = ['eduexpress2024', 'eduexpress_verify_2024', 'eduexpress', 'verify_token'];
+  const channelTokens = db.prepare("SELECT webhook_verify_token FROM channels").all().map(r => r.webhook_verify_token).filter(Boolean);
+  const allTokens = [globalToken, ...defaults, ...channelTokens].filter(Boolean);
+  if (allTokens.includes(token)) {
+    console.log('✅ Meta webhook verified with token:', token);
     return res.status(200).send(challenge);
   }
+  console.log('❌ Webhook verify failed. Got:', token, '| Expected one of:', allTokens);
   res.sendStatus(403);
 });
 
