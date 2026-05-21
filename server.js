@@ -719,36 +719,46 @@ app.get('/api/conversations/:id/messages', (req, res) => {
 
 // Send message
 app.post('/api/conversations/:id/messages', async (req, res) => {
-  const { content, type='text', sent_by='Admin', media_url } = req.body;
-  const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
-  if (!conv) return res.status(404).json({ error:'Conversation not found' });
-
-  // Get full channel (with token)
-  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
-  if (!channel) return res.status(400).json({ error:'Channel not found' });
-
-  let apiResult = null;
   try {
-    if (channel.type === 'whatsapp') {
-      const to = conv.wa_id || conv.contact_phone;
-      apiResult = await sendWhatsApp(channel, to, content);
-    } else if (channel.type === 'messenger') {
-      apiResult = await sendMessenger(channel, conv.messenger_id, content);
-    } else if (channel.type === 'instagram') {
-      // Instagram uses Messenger API
-      apiResult = await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, conv.instagram_id || conv.messenger_id, content);
+    const { content, type='text', sent_by='Admin', media_url } = req.body;
+    if (!content && !media_url) return res.status(400).json({ error: 'content is required' });
+
+    const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
+    if (!conv) return res.status(404).json({ error:'Conversation not found' });
+
+    // Get full channel (with token)
+    const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
+    if (!channel) return res.status(400).json({ error:'Channel not found' });
+
+    let apiResult = null;
+    try {
+      if (channel.type === 'whatsapp') {
+        const to = conv.wa_id || conv.contact_phone;
+        if (!to) throw new Error('No recipient phone number found');
+        apiResult = await sendWhatsApp(channel, to, content);
+      } else if (channel.type === 'messenger') {
+        apiResult = await sendMessenger(channel, conv.messenger_id, content);
+      } else if (channel.type === 'instagram') {
+        apiResult = await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, conv.instagram_id || conv.messenger_id, content);
+      }
+    } catch (e) {
+      console.error('Send API error:', e.message);
+      apiResult = { error: { message: e.message } };
     }
-  } catch (e) { console.error('Send error:', e.message); }
 
-  const waId = apiResult?.messages?.[0]?.id || apiResult?.message_id || null;
-  const status = apiResult?.error ? 'failed' : 'sent';
-  const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,media_url,wa_message_id,status,sent_by) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(req.params.id, 'out', type, content, media_url||null, waId, status, sent_by);
-  const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
+    const waId = apiResult?.messages?.[0]?.id || apiResult?.message_id || null;
+    const status = apiResult?.error ? 'failed' : 'sent';
+    const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,media_url,wa_message_id,status,sent_by) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(req.params.id, 'out', type, content, media_url||null, waId, status, sent_by);
+    const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
 
-  db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), status='open' WHERE id=?").run(content, req.params.id);
-  broadcast('new_message', { message: msg, conversation: conv });
-  res.json({ message: msg, apiResult });
+    db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), status='open' WHERE id=?").run(content, req.params.id);
+    broadcast('new_message', { ...msg, conversation_id: parseInt(req.params.id), direction: 'outbound' });
+    res.json({ message: msg, apiResult });
+  } catch(e) {
+    console.error('sendMessage error:', e.message, e.stack);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────
