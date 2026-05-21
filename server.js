@@ -261,27 +261,44 @@ function seedData() {
 const sseClients = new Map();
 
 app.get('/api/events', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  // Critical for Nginx/Hostinger — disables proxy buffering so events flow instantly
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no');   // ← disables nginx buffering
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.flushHeaders();
 
   const id = Date.now() + Math.random();
   sseClients.set(id, res);
+  // Send connected confirmation
   res.write(`data: ${JSON.stringify({ type: 'connected', id })}\n\n`);
+  // Force flush immediately
+  if (typeof res.flush === 'function') res.flush();
 
-  // Keepalive ping every 25s to prevent proxy/load-balancer timeout
+  // Keepalive ping every 20s (SSE comment, minimal overhead)
   const ping = setInterval(() => {
-    try { res.write(`data: ${JSON.stringify({ type: 'ping' })}\n\n`); } catch {}
-  }, 25000);
+    try {
+      res.write(`: ping\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch { clearInterval(ping); sseClients.delete(id); }
+  }, 20000);
 
   req.on('close', () => { clearInterval(ping); sseClients.delete(id); });
 });
 
 function broadcast(type, data) {
   const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
-  sseClients.forEach(client => { try { client.write(msg); } catch {} });
+  sseClients.forEach((client, id) => {
+    try {
+      client.write(msg);
+      // Force flush past Nginx proxy buffer immediately
+      if (typeof client.flush === 'function') client.flush();
+    } catch {
+      sseClients.delete(id);
+    }
+  });
 }
 
 // ─────────────────────────────────────────────────────────
