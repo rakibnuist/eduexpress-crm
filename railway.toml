@@ -7,6 +7,9 @@ startCommand = "npm run start:production"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
-[environments.production.variables]
+[[envs]]
+name = "production"
+
+[envs.production.variables]
 NODE_ENV = "production"
 DB_PATH = "/data/crm.db"
