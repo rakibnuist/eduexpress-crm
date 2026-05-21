@@ -1,7 +1,7 @@
 import express from 'express';
 import Database from 'better-sqlite3';
 import cors from 'cors';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -19,6 +19,9 @@ if (process.env.NODE_ENV === 'production') {
 
 // DB path: use /data volume on Railway, fallback to local
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
+// Auto-create directory if it doesn't exist (e.g. /data on Railway)
+const DB_DIR = dirname(DB_PATH);
+if (!existsSync(DB_DIR)) mkdirSync(DB_DIR, { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
