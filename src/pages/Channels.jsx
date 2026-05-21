@@ -307,7 +307,7 @@ export default function Channels() {
           <div className="bg-white/70 rounded-xl p-3">
             <p className="font-semibold text-slate-700 mb-1">1. Callback URL</p>
             <code className="text-xs bg-slate-100 px-2 py-1 rounded block break-all text-blue-700">
-              https://your-domain.com/webhook/meta
+              {window.location.origin}/webhook/meta
             </code>
           </div>
           <div className="bg-white/70 rounded-xl p-3">
