@@ -68,6 +68,7 @@ export const api = {
   updateConversation: (id, d) => req(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   createConversation: (d) => req('/conversations', { method: 'POST', body: JSON.stringify(d) }),
   deleteConversation: (id) => req(`/conversations/${id}`, { method: 'DELETE' }),
+  markRead: (id) => req(`/conversations/${id}/read`, { method: 'POST' }),
 
   // Messages
   messages: (convId) => req(`/conversations/${convId}/messages`),

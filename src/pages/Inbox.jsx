@@ -238,12 +238,14 @@ export default function Inbox() {
               return prev;
             });
 
-            // Append to open chat
+            // Append to open chat + mark as read immediately so badge stays 0
             if (curSelected?.id === convId) {
               setMessages(prev => {
                 if (prev.find(m => m.id === data.id)) return prev;
                 return [...prev, data];
               });
+              // Tell server unread=0 so polling doesn't re-add the badge
+              api.markRead(convId).catch(() => {});
             }
 
             // Browser notification for incoming messages
@@ -328,18 +330,20 @@ export default function Inbox() {
         try {
           const msgs = await api.messages(cur.id);
           if (Array.isArray(msgs)) {
+            let hasNew = false;
             setMessages(prev => {
-              // Keep optimistic messages that haven't yet been confirmed by server
               const optimistic = prev.filter(m => String(m.id).startsWith('opt-'));
               const keptOpt = optimistic.filter(o =>
                 !msgs.some(sm => isOutbound(sm) && sm.content === o.content));
               const merged = [...msgs, ...keptOpt];
-              // Skip update if identical
               if (merged.length === prev.length &&
                   merged.every((m, i) => prev[i] && prev[i].id === m.id && prev[i].status === m.status))
                 return prev;
+              hasNew = merged.length > prev.filter(m => !String(m.id).startsWith('opt-')).length;
               return merged;
             });
+            // If new messages arrived while this conv is open, mark as read on server
+            if (hasNew) api.markRead(cur.id).catch(() => {});
           }
         } catch {}
       }
@@ -354,15 +358,17 @@ export default function Inbox() {
     if (!selected) return;
     setMsgLoading(true);
     setMessages([]);
-    api.messages(selected.id)
+    const convId = selected.id;
+    api.messages(convId)
       .then(data => {
         setMessages(Array.isArray(data) ? data : []);
         setMsgLoading(false);
         setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 30);
       })
       .catch(() => setMsgLoading(false));
-    // Mark as read
-    setConvs(prev => prev.map(c => c.id === selected.id ? { ...c, unread_count: 0 } : c));
+    // Mark as read — both local state AND server DB so polling doesn't undo it
+    setConvs(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+    api.markRead(convId).catch(() => {});
   }, [selected?.id]);
 
   /* ─── Scroll to bottom on new messages ─── */
