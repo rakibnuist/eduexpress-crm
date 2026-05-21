@@ -80,7 +80,7 @@ const statusConfig = {
 };
 
 /* ─── Avatar ─── */
-function Avatar({ name = '?', size = 38, online = false }) {
+function Avatar({ name = '?', size = 38, online = false, src = null }) {
   const palettes = [
     ['#667eea', '#764ba2'], ['#f093fb', '#f5576c'], ['#4facfe', '#00f2fe'],
     ['#43e97b', '#38f9d7'], ['#fa709a', '#fee140'], ['#a18cd1', '#fbc2eb'],
@@ -88,12 +88,18 @@ function Avatar({ name = '?', size = 38, online = false }) {
   ];
   const idx = (name.charCodeAt(0) || 0) % palettes.length;
   const [from, to] = palettes[idx];
+  const [imgOk, setImgOk] = useState(true);
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-      <div className="w-full h-full rounded-full flex items-center justify-center text-white font-bold select-none"
-        style={{ background: `linear-gradient(135deg, ${from}, ${to})`, fontSize: size * 0.38 }}>
-        {name.charAt(0).toUpperCase()}
-      </div>
+      {src && imgOk ? (
+        <img src={src} alt={name} onError={() => setImgOk(false)}
+          className="w-full h-full rounded-full object-cover select-none" />
+      ) : (
+        <div className="w-full h-full rounded-full flex items-center justify-center text-white font-bold select-none"
+          style={{ background: `linear-gradient(135deg, ${from}, ${to})`, fontSize: size * 0.38 }}>
+          {name.charAt(0).toUpperCase()}
+        </div>
+      )}
       {online && (
         <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-white rounded-full" />
       )}
@@ -614,7 +620,7 @@ export default function Inbox() {
                   {isActive && <span className="absolute left-0 top-3 bottom-3 w-0.5 bg-blue-600 rounded-r-full" />}
 
                   <div className="relative flex-shrink-0">
-                    <Avatar name={conv.contact_name || conv.contact_phone || '?'} size={44} />
+                    <Avatar name={conv.contact_name || conv.contact_phone || '?'} size={44} src={conv.contact_avatar} />
                     <div className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center ${cs.bg} border-2 border-white`}>
                       <ChannelIcon type={conv.channel_type} size={10} />
                     </div>
@@ -695,7 +701,7 @@ export default function Inbox() {
               </button>
 
               <div className="relative flex-shrink-0">
-                <Avatar name={selected.contact_name || selected.contact_phone || '?'} size={36} />
+                <Avatar name={selected.contact_name || selected.contact_phone || '?'} size={36} src={selected.contact_avatar} />
                 <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border-2 border-white ${channelStyle(selected.channel_type).bg}`}>
                   <ChannelIcon type={selected.channel_type} size={8} />
                 </div>
@@ -776,7 +782,7 @@ export default function Inbox() {
                               {!isOut && (
                                 <div className="w-8 flex-shrink-0 flex items-end mb-1 mr-1.5">
                                   {isLastInGroup && (
-                                    <Avatar name={selected.contact_name || selected.contact_phone || '?'} size={26} />
+                                    <Avatar name={selected.contact_name || selected.contact_phone || '?'} size={26} src={selected.contact_avatar} />
                                   )}
                                 </div>
                               )}

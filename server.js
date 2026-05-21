@@ -330,7 +330,7 @@ function getConfig(key) {
   return db.prepare("SELECT value FROM meta_config WHERE key=?").get(key)?.value || null;
 }
 
-function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email }) {
+function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email, avatar_url }) {
   const existing = wa_id
     ? db.prepare("SELECT * FROM contacts WHERE wa_id=?").get(wa_id)
     : messenger_id
@@ -340,11 +340,15 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email }
     : phone ? db.prepare("SELECT * FROM contacts WHERE phone=?").get(phone) : null;
 
   if (existing) {
-    if (name && !existing.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(name, existing.id);
+    // Fill in a real name / avatar if we now have one and didn't before
+    if (name && (!existing.name || existing.name === 'Unknown' || existing.name.endsWith(' User')))
+      db.prepare("UPDATE contacts SET name=? WHERE id=?").run(name, existing.id);
+    if (avatar_url && !existing.avatar_url)
+      db.prepare("UPDATE contacts SET avatar_url=? WHERE id=?").run(avatar_url, existing.id);
     return existing;
   }
-  const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id) VALUES (?,?,?,?,?,?)`)
-    .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null);
+  const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id,avatar_url) VALUES (?,?,?,?,?,?,?)`)
+    .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null, avatar_url || null);
   return db.prepare("SELECT * FROM contacts WHERE id=?").get(info.lastInsertRowid);
 }
 
@@ -683,7 +687,7 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   const pageId  = channel.page_id;
   const { months = 6 } = req.body || {};
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
-  const MAX_MESSAGES = 2000; // safety cap to prevent OOM
+  const MAX_MESSAGES = 5000; // safety cap (OOM is now prevented by paused autosave)
 
   let imported = 0, skipped = 0, conversations = 0;
 
@@ -752,39 +756,73 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   if (db.pauseSave) db.pauseSave();
   let convCounter = 0;
 
-  try {
-    // ── Step 1: paginate through ALL conversations ────────────────────────────
-    let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
-      + `?fields=participants&limit=100&since=${since}&access_token=${token}`;
+  const cutoffMs = since * 1000;
+  const toSqlTime = (t) => t ? new Date(t).toISOString().replace('T', ' ').slice(0, 19) : null;
 
-    while (convUrl && imported + skipped < MAX_MESSAGES) {
+  try {
+    // ── Step 1: paginate conversations (newest-activity first) ─────────────────
+    // Pull updated_time + a 1-message snippet so we can set the conversation's
+    // recency and preview from FB's authoritative value — even if the very
+    // latest item (e.g. a broadcast) isn't returned by the /messages edge.
+    let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
+      + `?fields=updated_time,participants,snippet`
+      + `&limit=50&access_token=${token}`;
+
+    let stop = false;
+    while (convUrl && !stop && imported + skipped < MAX_MESSAGES) {
       const { items: fbConvs, nextUrl } = await fbGet(convUrl);
       convUrl = nextUrl;
 
       for (const fbConv of fbConvs) {
         if (imported + skipped >= MAX_MESSAGES) break;
+
+        // Conversations come ordered newest-first; once we pass the time window,
+        // everything after is older too — stop paginating.
+        const updatedMs = fbConv.updated_time ? new Date(fbConv.updated_time).getTime() : 0;
+        if (updatedMs && updatedMs < cutoffMs) { stop = true; break; }
+
         conversations++;
         const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
         if (!other) continue;
 
-        const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id });
+        // Fetch the participant's profile picture (best-effort)
+        let avatar = null;
+        try {
+          const pr = await fetch(`https://graph.facebook.com/v19.0/${other.id}?fields=profile_pic,name&access_token=${token}`);
+          const pd = await pr.json();
+          if (!pd.error) avatar = pd.profile_pic || null;
+          if (pd.name) other.name = pd.name;
+        } catch {}
+
+        const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id, avatar_url: avatar });
         const conv    = upsertConversation(contact.id, channel.id, 'messenger');
 
-        // ── Step 2: paginate through messages for this conversation ──────────
+        // Authoritatively set recency + preview from the conversation itself.
+        const convTime = toSqlTime(fbConv.updated_time);
+        if (convTime) {
+          db.prepare(`UPDATE conversations SET last_message=COALESCE(@snip,last_message), last_message_at=@t
+                      WHERE id=@id AND (last_message_at IS NULL OR last_message_at < @t)`)
+            .run({ snip: fbConv.snippet || null, t: convTime, id: conv.id });
+        }
+
+        // ── Step 2: paginate messages for this conversation ──────────────────
         let msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
           + `?fields=message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}`
-          + `&limit=25&since=${since}&access_token=${token}`;
+          + `&limit=25&access_token=${token}`;
+        let convMsgCount = 0;
 
-        while (msgUrl && imported + skipped < MAX_MESSAGES) {
+        while (msgUrl && imported + skipped < MAX_MESSAGES && convMsgCount < 500) {
           const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl);
           msgUrl = nextMsgUrl;
-
           if (msgs.length === 0) break;
 
-          // Insert entire page as one transaction — reduces wasm heap pressure
+          // Stop once this page is entirely older than the window
+          const oldest = msgs[msgs.length - 1]?.created_time;
           const added = insertBatch(msgs, conv);
           imported += added;
           skipped  += msgs.length - added;
+          convMsgCount += msgs.length;
+          if (oldest && new Date(oldest).getTime() < cutoffMs) break;
         }
 
         // Checkpoint to disk every 10 conversations (resume → save → pause again)
@@ -830,6 +868,7 @@ const CONV_SELECT = `
   SELECT conversations.*,
     contacts.name  AS contact_name,
     contacts.phone AS contact_phone,
+    contacts.avatar_url AS contact_avatar,
     contacts.wa_id, contacts.messenger_id, contacts.instagram_id,
     contacts.lead_id AS contact_lead_id,
     channels.name  AS channel_name,
@@ -1106,11 +1145,12 @@ app.post('/webhook/meta', async (req, res) => {
         if (!channel) continue;
 
         const contact = upsertContact({ name: `Messenger User`, messenger_id: senderId });
-        // Fetch name from Messenger API
+        // Fetch name + profile picture from Messenger API
         try {
-          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name&access_token=${channel.access_token}`);
+          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,profile_pic&access_token=${channel.access_token}`);
           const nd = await nr.json();
           if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
+          if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
         } catch {}
 
         const conv = upsertConversation(contact.id, channel.id, 'messenger');
