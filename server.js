@@ -915,8 +915,9 @@ app.get('/api/settings', (req, res) => res.json({
 }));
 
 // Catch-all: serve React app for any non-API route (production)
+// Express v5 requires '/{*path}' instead of '*'
 if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
+  app.get('/{*path}', (req, res) => {
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   });
 }
