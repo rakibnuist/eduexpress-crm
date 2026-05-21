@@ -686,14 +686,19 @@ app.put('/api/conversations/:id', (req, res) => {
 
 // Create outbound conversation manually
 app.post('/api/conversations', (req, res) => {
-  const { channel_id, phone, name } = req.body;
-  if (!channel_id || !phone) return res.status(400).json({ error: 'channel_id and phone required' });
-  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channel_id);
-  if (!channel) return res.status(404).json({ error: 'Channel not found' });
-  const contactId = upsertContact({ name: name || phone, phone, wa_id: channel.type === 'whatsapp' ? phone : null });
-  const convId = upsertConversation(contactId, channel_id, channel.type);
-  const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(convId);
-  res.json(conv);
+  try {
+    const { channel_id, phone, name } = req.body;
+    if (!channel_id || !phone) return res.status(400).json({ error: 'channel_id and phone required' });
+    const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channel_id);
+    if (!channel) return res.status(404).json({ error: 'Channel not found' });
+    const contact = upsertContact({ name: name || phone, phone, wa_id: channel.type === 'whatsapp' ? phone : null });
+    const conversation = upsertConversation(contact.id, channel_id, channel.type);
+    const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conversation.id);
+    res.json(conv);
+  } catch(e) {
+    console.error('createConversation error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Mark conversation read
