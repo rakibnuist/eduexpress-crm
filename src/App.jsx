@@ -9,23 +9,32 @@ import Meta from './pages/Meta';
 import Settings from './pages/Settings';
 import Inbox from './pages/Inbox';
 import Channels from './pages/Channels';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/leads" element={<Leads />} />
-          <Route path="/pipeline" element={<Pipeline />} />
-          <Route path="/finance" element={<Finance />} />
-          <Route path="/hr" element={<HR />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/channels" element={<Channels />} />
-          <Route path="/meta" element={<Meta />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        {/* Public standalone pages — no sidebar */}
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+
+        {/* App pages — wrapped in Layout */}
+        <Route path="/*" element={
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/leads" element={<Leads />} />
+              <Route path="/pipeline" element={<Pipeline />} />
+              <Route path="/finance" element={<Finance />} />
+              <Route path="/hr" element={<HR />} />
+              <Route path="/inbox" element={<Inbox />} />
+              <Route path="/channels" element={<Channels />} />
+              <Route path="/meta" element={<Meta />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </Layout>
+        } />
+      </Routes>
     </BrowserRouter>
   );
 }
