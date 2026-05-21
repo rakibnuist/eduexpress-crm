@@ -43,6 +43,7 @@ export default function Channels() {
   const [expandedId, setExpandedId] = useState(null);
   const [toast, setToast] = useState(null);
   const [syncing, setSyncing] = useState(null); // channel id being synced
+  const [syncOpen, setSyncOpen] = useState(null); // channel id with dropdown open
 
   const load = () => {
     setLoading(true);
@@ -228,24 +229,28 @@ export default function Channels() {
                   <div className="flex items-center gap-2">
                     {/* Sync history — Messenger & Instagram only */}
                     {(ch.type === 'messenger' || ch.type === 'instagram') && (
-                      <div className="relative group">
+                      <div className="relative">
                         <button
                           disabled={syncing === ch.id}
+                          onClick={() => setSyncOpen(syncOpen === ch.id ? null : ch.id)}
                           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border text-indigo-600 border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">
                           <RefreshCw size={13} className={syncing === ch.id ? 'animate-spin' : ''} />
                           {syncing === ch.id ? 'Syncing…' : 'Sync History'}
-                          <ChevronDown size={11} />
+                          <ChevronDown size={11} className={syncOpen === ch.id ? 'rotate-180 transition-transform' : 'transition-transform'} />
                         </button>
-                        {syncing !== ch.id && (
-                          <div className="absolute left-0 top-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl z-20 min-w-[160px] py-1 hidden group-hover:block">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pt-2 pb-1">Import last…</p>
-                            {[1, 3, 6, 12].map(m => (
-                              <button key={m} onClick={() => syncChannel(ch, m)}
-                                className="block w-full text-left text-xs px-3 py-2 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 transition-colors">
-                                {m === 1 ? '1 month' : `${m} months`}
-                              </button>
-                            ))}
-                          </div>
+                        {syncOpen === ch.id && syncing !== ch.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setSyncOpen(null)} />
+                            <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-20 min-w-[160px] py-1">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pt-2 pb-1">Import last…</p>
+                              {[1, 3, 6, 12].map(m => (
+                                <button key={m} onClick={() => { setSyncOpen(null); syncChannel(ch, m); }}
+                                  className="block w-full text-left text-xs px-3 py-2 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 transition-colors">
+                                  {m === 1 ? '1 month' : `${m} months`}
+                                </button>
+                              ))}
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
