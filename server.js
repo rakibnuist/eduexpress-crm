@@ -668,6 +668,7 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   const pageId  = channel.page_id;
   const { months = 6 } = req.body || {};
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
+  const MAX_MESSAGES = 2000; // safety cap to prevent OOM
 
   let imported = 0, skipped = 0, conversations = 0;
 
@@ -719,11 +720,12 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
       + `?fields=participants&limit=100&since=${since}&access_token=${token}`;
 
-    while (convUrl) {
+    while (convUrl && imported + skipped < MAX_MESSAGES) {
       const { items: fbConvs, nextUrl } = await fbGet(convUrl);
       convUrl = nextUrl;
 
       for (const fbConv of fbConvs) {
+        if (imported + skipped >= MAX_MESSAGES) break;
         conversations++;
         const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
         if (!other) continue;
@@ -731,26 +733,30 @@ app.post('/api/channels/:id/sync', async (req, res) => {
         const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id });
         const conv    = upsertConversation(contact.id, channel.id, 'messenger');
 
-        // ── Step 2: paginate through ALL messages for this conversation ───────
+        // ── Step 2: paginate through messages for this conversation ──────────
         let msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
-          + `?fields=message,from,created_time,sticker,attachments&limit=100&since=${since}&access_token=${token}`;
+          + `?fields=message,from,created_time,sticker,attachments&limit=25&since=${since}&access_token=${token}`;
 
-        while (msgUrl) {
+        while (msgUrl && imported + skipped < MAX_MESSAGES) {
           const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl);
           msgUrl = nextMsgUrl;
 
           if (msgs.length === 0) break;
 
-          // Insert entire page as one transaction — drastically reduces wasm heap pressure
+          // Insert entire page as one transaction — reduces wasm heap pressure
           const added = insertBatch(msgs, conv);
           imported += added;
           skipped  += msgs.length - added;
         }
+
+        // Flush to disk after each conversation — saves progress, survives partial OOM
+        db.flush();
       }
     }
 
-    console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped`);
-    res.json({ ok: true, imported, skipped, conversations, channel: channel.name });
+    const capped = (imported + skipped >= MAX_MESSAGES);
+    console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped${capped ? ' (capped)' : ''}`);
+    res.json({ ok: true, imported, skipped, conversations, channel: channel.name, capped });
 
   } catch (e) {
     console.error('[sync] error:', e.message);
