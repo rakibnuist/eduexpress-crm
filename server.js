@@ -1,14 +1,20 @@
 import express from 'express';
-import Database from 'better-sqlite3';
 import cors from 'cors';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { initDatabase } from './sqldb.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const app = express();
 const PORT = process.env.PORT || 3001;
+const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
 
+// ── Bootstrap: init DB then start Express ──────────────────
+const db = await initDatabase(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+const app = express();
 app.use(cors());
 app.use(express.json());
 
@@ -17,14 +23,9 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(join(__dirname, 'dist')));
 }
 
-// DB path: use /data volume on Railway, fallback to local
-const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
-// Auto-create directory if it doesn't exist (e.g. /data on Railway)
-const DB_DIR = dirname(DB_PATH);
-if (!existsSync(DB_DIR)) mkdirSync(DB_DIR, { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Graceful shutdown — flush DB before exit
+process.on('SIGTERM', () => { db.flush(); process.exit(0); });
+process.on('SIGINT',  () => { db.flush(); process.exit(0); });
 
 // ─────────────────────────────────────────────────────────
 // SCHEMA
