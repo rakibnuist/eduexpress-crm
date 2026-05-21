@@ -5,7 +5,7 @@
  */
 
 import { createRequire } from 'module';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -16,25 +16,32 @@ let _SQL = null;
 let _db = null;
 let _dbPath = null;
 let _saveTimer = null;
+let _savePaused = false;   // when true, writes are NOT exported to disk (used during bulk sync)
+let _saveDirty = false;    // tracks whether a write happened while paused
+
+// Atomic save: export to a temp file, then rename. A crash mid-write can never
+// leave a half-written (corrupt) crm.db on disk.
+function doSave() {
+  const data = _db.export();
+  const tmp = _dbPath + '.tmp';
+  writeFileSync(tmp, Buffer.from(data));
+  renameSync(tmp, _dbPath);
+}
 
 // Debounced save — batches rapid writes into one disk write per 200ms
 function scheduleSave() {
+  if (_savePaused) { _saveDirty = true; return; }
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    try {
-      const data = _db.export();
-      writeFileSync(_dbPath, Buffer.from(data));
-    } catch (e) {
-      console.error('[sqldb] save error:', e.message);
-    }
+    try { doSave(); } catch (e) { console.error('[sqldb] save error:', e.message); }
   }, 200);
 }
 
 function immediatelySave() {
+  if (_savePaused) { _saveDirty = true; return; }
   try {
     if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-    const data = _db.export();
-    writeFileSync(_dbPath, Buffer.from(data));
+    doSave();
   } catch (e) {
     console.error('[sqldb] save error:', e.message);
   }
@@ -144,11 +151,22 @@ export async function initDatabase(dbPath) {
   const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-asm.js'));
   _SQL = await initSqlJs();
 
-  // Load existing DB file or create new
+  // Load existing DB file or create new — with corruption recovery
   if (existsSync(dbPath)) {
     const buf = readFileSync(dbPath);
-    _db = new _SQL.Database(buf);
-    console.log(`[sqldb] Loaded existing DB from ${dbPath}`);
+    try {
+      _db = new _SQL.Database(buf);
+      // Integrity probe: a corrupt buffer often loads but fails the first real query.
+      _db.exec("SELECT count(*) FROM sqlite_master");
+      const integrity = _db.exec("PRAGMA integrity_check")?.[0]?.values?.[0]?.[0];
+      if (integrity && integrity !== 'ok') throw new Error(`integrity_check: ${integrity}`);
+      console.log(`[sqldb] Loaded existing DB from ${dbPath}`);
+    } catch (e) {
+      // DB file is corrupt — back it up and start fresh so the app can recover.
+      console.error(`[sqldb] ⚠️  DB corrupt (${e.message}). Backing up and recreating.`);
+      try { renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`); } catch {}
+      _db = new _SQL.Database();
+    }
   } else {
     _db = new _SQL.Database();
     console.log(`[sqldb] Created new DB at ${dbPath}`);
@@ -161,13 +179,19 @@ export async function initDatabase(dbPath) {
     },
 
     exec(sql) {
-      try {
-        _db.run(sql);
-        immediatelySave();
-      } catch (e) {
-        // Ignore "already exists" errors (CREATE TABLE IF NOT EXISTS sometimes still throws)
-        if (!e.message.includes('already exists')) throw e;
+      // Run each statement INDEPENDENTLY so one failure can't block the rest
+      // (e.g. a bad CREATE INDEX must not prevent later CREATE TABLE statements).
+      const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
+      for (const stmt of statements) {
+        try {
+          _db.run(stmt);
+        } catch (e) {
+          if (!e.message.includes('already exists') && !e.message.includes('duplicate column')) {
+            console.error('[sqldb] exec stmt failed:', e.message, '\n  →', stmt.slice(0, 80));
+          }
+        }
       }
+      immediatelySave();
     },
 
     prepare(sql) {
@@ -191,6 +215,24 @@ export async function initDatabase(dbPath) {
 
     // Flush any pending save immediately (call before process exit)
     flush() { immediatelySave(); },
+
+    // Suspend disk writes during bulk work (sync) to avoid export-thrashing OOM.
+    // Writes still happen in-memory; nothing is persisted until resumeSave().
+    pauseSave() { _savePaused = true; _saveDirty = false; },
+
+    // Resume disk writes and persist once if anything changed while paused.
+    resumeSave() {
+      _savePaused = false;
+      if (_saveDirty) { _saveDirty = false; try { doSave(); } catch (e) { console.error('[sqldb] save error:', e.message); } }
+    },
+
+    // List existing table names (used by startup self-heal check)
+    tableNames() {
+      try {
+        const r = _db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+        return r?.[0]?.values?.map(v => v[0]) || [];
+      } catch { return []; }
+    },
 
     close() { immediatelySave(); _db.close(); }
   };

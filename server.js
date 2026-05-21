@@ -45,9 +45,24 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     db.pragma('foreign_keys = ON');
     setupSchema();
     runMigrations();
+
+    // Self-heal: verify every critical table actually exists. If any are missing
+    // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies'];
+    let existing = db.tableNames ? db.tableNames() : [];
+    let missing = REQUIRED.filter(t => !existing.includes(t));
+    if (missing.length) {
+      console.warn('[startup] ⚠️  Missing tables:', missing.join(', '), '— rebuilding schema');
+      setupSchema();
+      runMigrations();
+      existing = db.tableNames ? db.tableNames() : [];
+      missing = REQUIRED.filter(t => !existing.includes(t));
+      if (missing.length) throw new Error(`Schema rebuild failed, still missing: ${missing.join(', ')}`);
+    }
+
     seedData();
     dbReady = true;
-    console.log('[startup] Database ready ✅');
+    console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
   } catch (e) {
     console.error('[startup] DB init failed:', e.message);
     process.exit(1);
@@ -730,6 +745,13 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     return added;
   });
 
+  // Suspend disk writes for the whole sync. Exporting the entire DB to disk on
+  // every insert is what blows the WASM heap (OOM). We checkpoint every few
+  // conversations instead, and the atomic temp+rename save guarantees the
+  // on-disk file is never left half-written even if a checkpoint OOMs.
+  if (db.pauseSave) db.pauseSave();
+  let convCounter = 0;
+
   try {
     // ── Step 1: paginate through ALL conversations ────────────────────────────
     let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
@@ -765,8 +787,11 @@ app.post('/api/channels/:id/sync', async (req, res) => {
           skipped  += msgs.length - added;
         }
 
-        // Flush to disk after each conversation — saves progress, survives partial OOM
-        db.flush();
+        // Checkpoint to disk every 10 conversations (resume → save → pause again)
+        if (++convCounter % 10 === 0 && db.resumeSave && db.pauseSave) {
+          db.resumeSave();
+          db.pauseSave();
+        }
       }
     }
 
@@ -776,7 +801,10 @@ app.post('/api/channels/:id/sync', async (req, res) => {
 
   } catch (e) {
     console.error('[sync] error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message, imported, skipped, conversations });
+  } finally {
+    // Always re-enable disk writes and persist whatever was imported.
+    if (db.resumeSave) db.resumeSave();
   }
 });
 
