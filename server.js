@@ -683,8 +683,8 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   // Pre-prepare statements ONCE — avoids re-compiling SQL in wasm on every row
   const stmtInsertMsg = db.prepare(
     `INSERT OR IGNORE INTO messages
-       (conversation_id, direction, type, content, wa_message_id, status, created_at)
-     VALUES (?, ?, 'text', ?, ?, 'delivered', ?)`
+       (conversation_id, direction, type, content, media_url, wa_message_id, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'delivered', ?)`
   );
   const stmtConvUpdate = db.prepare(
     `UPDATE conversations SET last_message=?, last_message_at=?
@@ -696,16 +696,31 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     let added = 0;
     for (const msg of rows) {
       const fromPage = String(msg.from?.id) === String(pageId);
-      const content  = msg.message
-        || (msg.attachments?.data?.[0] ? '[Attachment]' : null)
-        || (msg.sticker ? '[Sticker]' : null)
-        || '[message]';
+
+      // Extract real content / media instead of dumping everything as "[Attachment]"
+      let content, type = 'text', mediaUrl = null;
+      const att = msg.attachments?.data?.[0];
+      if (msg.message) {
+        content = msg.message;
+      } else if (msg.sticker) {
+        content = '😊 Sticker'; type = 'sticker'; mediaUrl = msg.sticker;
+      } else if (att) {
+        const mime = att.mime_type || '';
+        mediaUrl = att.image_data?.url || att.video_data?.url || att.file_url || null;
+        if (mime.startsWith('image'))      { content = '📷 Photo';      type = 'image'; }
+        else if (mime.startsWith('video')) { content = '🎥 Video';      type = 'video'; }
+        else if (mime.startsWith('audio')) { content = '🎵 Audio';      type = 'audio'; }
+        else                               { content = `📎 ${att.name || 'File'}`; type = 'file'; }
+      } else {
+        content = '[message]';
+      }
+
       const createdAt = msg.created_time
         ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
         : null;
 
       const result = stmtInsertMsg.run(
-        conv.id, fromPage ? 'out' : 'in', content, msg.id, createdAt
+        conv.id, fromPage ? 'out' : 'in', type, content, mediaUrl, msg.id, createdAt
       );
       if (result.changes > 0) {
         added++;
@@ -735,7 +750,8 @@ app.post('/api/channels/:id/sync', async (req, res) => {
 
         // ── Step 2: paginate through messages for this conversation ──────────
         let msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
-          + `?fields=message,from,created_time,sticker,attachments&limit=25&since=${since}&access_token=${token}`;
+          + `?fields=message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}`
+          + `&limit=25&since=${since}&access_token=${token}`;
 
         while (msgUrl && imported + skipped < MAX_MESSAGES) {
           const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl);
@@ -881,9 +897,20 @@ app.delete('/api/messages/:id', (req, res) => {
 // MESSAGES
 // ─────────────────────────────────────────────────────────
 app.get('/api/conversations/:id/messages', (req, res) => {
-  const { before, limit=50 } = req.query;
-  const where = before ? `WHERE conversation_id=? AND id < ${parseInt(before)}` : 'WHERE conversation_id=?';
-  const msgs = db.prepare(`SELECT * FROM messages ${where} ORDER BY id ASC LIMIT ${limit}`).all(req.params.id);
+  const { before, limit=200 } = req.query;
+  const lim = Math.min(parseInt(limit) || 200, 1000);
+  // Order CHRONOLOGICALLY by timestamp (not insert id) — synced messages are
+  // inserted newest-first, so id order ≠ time order. Grab the most-recent N,
+  // then flip to ascending so the chat reads oldest→newest top-to-bottom.
+  const beforeClause = before ? `AND id < ${parseInt(before)}` : '';
+  const msgs = db.prepare(
+    `SELECT * FROM (
+       SELECT * FROM messages
+       WHERE conversation_id=? ${beforeClause}
+       ORDER BY datetime(created_at) DESC, id DESC
+       LIMIT ${lim}
+     ) ORDER BY datetime(created_at) ASC, id ASC`
+  ).all(req.params.id);
   res.json(msgs);
 });
 
@@ -1059,8 +1086,20 @@ app.post('/webhook/meta', async (req, res) => {
         } catch {}
 
         const conv = upsertConversation(contact.id, channel.id, 'messenger');
-        const text = messaging.message.text || (messaging.message.attachments?.[0] ? `[${messaging.message.attachments[0].type}]` : '[message]');
-        saveInboundMessage(conv.id, text, 'text', messaging.message.mid);
+
+        // Extract text or media attachment
+        let text = messaging.message.text, mtype = 'text', murl = null;
+        const att = messaging.message.attachments?.[0];
+        if (!text && att) {
+          murl = att.payload?.url || null;
+          if (att.type === 'image')      { text = '📷 Photo';  mtype = 'image'; }
+          else if (att.type === 'video') { text = '🎥 Video';  mtype = 'video'; }
+          else if (att.type === 'audio') { text = '🎵 Audio';  mtype = 'audio'; }
+          else if (att.type === 'file')  { text = '📎 File';   mtype = 'file'; }
+          else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
+        }
+        if (!text) text = '[message]';
+        saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
     }
