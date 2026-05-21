@@ -6,9 +6,11 @@
 
 import { createRequire } from 'module';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let _SQL = null;
 let _db = null;
@@ -138,8 +140,8 @@ export async function initDatabase(dbPath) {
   const dir = dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  // Load sql.js WASM
-  const initSqlJs = (await import('sql.js')).default;
+  // Use sql-asm.js (pure JavaScript, no WASM file needed — works on any server)
+  const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-asm.js'));
   _SQL = await initSqlJs();
 
   // Load existing DB file or create new
