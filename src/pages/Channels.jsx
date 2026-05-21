@@ -56,13 +56,13 @@ export default function Channels() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const syncChannel = async (ch) => {
+  const syncChannel = async (ch, months = 6) => {
     setSyncing(ch.id);
     try {
-      const result = await api.syncChannel(ch.id);
-      showToast(`✅ Synced! ${result.imported} messages imported, ${result.skipped} already existed.`);
+      const result = await api.syncChannel(ch.id, months);
+      showToast(`✅ ${result.channel}: ${result.imported} new messages from ${result.conversations} conversations imported (${result.skipped} already existed)`);
     } catch (e) {
-      showToast(e.message || 'Sync failed', 'error');
+      showToast(e.message || 'Sync failed — check your access token permissions', 'error');
     }
     setSyncing(null);
   };
@@ -226,16 +226,28 @@ export default function Channels() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Sync history button — Messenger & Instagram only */}
+                    {/* Sync history — Messenger & Instagram only */}
                     {(ch.type === 'messenger' || ch.type === 'instagram') && (
-                      <button
-                        onClick={() => syncChannel(ch)}
-                        disabled={syncing === ch.id}
-                        title="Import historical messages from this page"
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border text-indigo-600 border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <RefreshCw size={13} className={syncing === ch.id ? 'animate-spin' : ''} />
-                        {syncing === ch.id ? 'Syncing…' : 'Sync History'}
-                      </button>
+                      <div className="relative group">
+                        <button
+                          disabled={syncing === ch.id}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border text-indigo-600 border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                          <RefreshCw size={13} className={syncing === ch.id ? 'animate-spin' : ''} />
+                          {syncing === ch.id ? 'Syncing…' : 'Sync History'}
+                          <ChevronDown size={11} />
+                        </button>
+                        {syncing !== ch.id && (
+                          <div className="absolute left-0 top-full mt-1 bg-white border border-slate-100 rounded-xl shadow-xl z-20 min-w-[160px] py-1 hidden group-hover:block">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pt-2 pb-1">Import last…</p>
+                            {[1, 3, 6, 12].map(m => (
+                              <button key={m} onClick={() => syncChannel(ch, m)}
+                                className="block w-full text-left text-xs px-3 py-2 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 transition-colors">
+                                {m === 1 ? '1 month' : `${m} months`}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                     <button onClick={() => toggleActive(ch)}
                       className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border

@@ -665,84 +665,87 @@ app.post('/api/channels/:id/sync', async (req, res) => {
 
   const token = channel.access_token;
   const pageId = channel.page_id;
-  let imported = 0, skipped = 0;
+  let imported = 0, skipped = 0, conversations = 0;
+
+  // 6 months ago as Unix timestamp
+  const { months = 6 } = req.body || {};
+  const since = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
+
+  // Helper: fetch ALL pages of a URL, following next cursors
+  async function fetchAllPages(startUrl, onItem) {
+    let url = startUrl;
+    let pageCount = 0;
+    while (url && pageCount < 200) { // safety cap
+      const res2 = await fetch(url);
+      const data = await res2.json();
+      if (data.error) throw new Error(`FB API: ${data.error.message} (code ${data.error.code})`);
+      for (const item of data.data || []) await onItem(item);
+      url = data.paging?.next || null;
+      pageCount++;
+    }
+  }
+
+  // Helper: save one message to DB
+  function saveMsg(conv, msg, pageId) {
+    if (!msg.message && !msg.sticker && !msg.attachments) return false;
+    const dup = db.prepare("SELECT id FROM messages WHERE wa_message_id=?").get(msg.id);
+    if (dup) { skipped++; return false; }
+
+    const fromPage = String(msg.from?.id) === String(pageId);
+    const content = msg.message
+      || (msg.attachments?.data?.[0] ? `[${msg.attachments.data[0].mime_type || 'Attachment'}]` : null)
+      || (msg.sticker ? '[Sticker]' : '[message]');
+    const createdAt = msg.created_time
+      ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
+      : null;
+
+    try {
+      db.prepare(`INSERT INTO messages
+        (conversation_id, direction, type, content, wa_message_id, status, created_at)
+        VALUES (?, ?, 'text', ?, ?, 'delivered', ?)`)
+        .run(conv.id, fromPage ? 'out' : 'in', content, msg.id, createdAt);
+
+      // Keep conversation last_message up to date with newest message
+      const cur = db.prepare("SELECT last_message_at FROM conversations WHERE id=?").get(conv.id);
+      if (!cur?.last_message_at || (createdAt && createdAt > cur.last_message_at)) {
+        db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
+          .run(content, createdAt, conv.id);
+      }
+      imported++;
+      return true;
+    } catch (e) {
+      if (!e.message.includes('UNIQUE')) console.error('[sync] insert:', e.message);
+      skipped++;
+      return false;
+    }
+  }
 
   try {
-    // Step 1: fetch all conversations on this page
-    let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations?fields=participants,messages{message,from,to,created_time,sticker,attachments}&limit=25&access_token=${token}`;
+    // ── Step 1: get ALL conversations (paginated), filtered since 6 months ago
+    const convListUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
+      + `?fields=participants&limit=100&since=${since}&access_token=${token}`;
 
-    while (convUrl) {
-      const convRes = await fetch(convUrl);
-      const convData = await convRes.json();
-      if (convData.error) {
-        console.error('[sync] FB API error:', convData.error.message);
-        return res.status(400).json({ error: convData.error.message });
-      }
+    await fetchAllPages(convListUrl, async (fbConv) => {
+      conversations++;
 
-      for (const fbConv of convData.data || []) {
-        // Find the participant who is NOT the page
-        const other = (fbConv.participants?.data || []).find(p => p.id !== pageId);
-        if (!other) continue;
+      // Identify the non-page participant
+      const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
+      if (!other) return;
 
-        const senderId = other.id;
-        const senderName = other.name || 'Messenger User';
+      const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id });
+      const conv    = upsertConversation(contact.id, channel.id, 'messenger');
 
-        // Upsert contact
-        const contact = upsertContact({
-          name: senderName,
-          messenger_id: senderId
-        });
+      // ── Step 2: fetch ALL messages in this conversation (separate paginated call)
+      const msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
+        + `?fields=message,from,created_time,sticker,attachments&limit=100&since=${since}&access_token=${token}`;
 
-        // Upsert conversation
-        const conv = upsertConversation(contact.id, channel.id, 'messenger');
+      await fetchAllPages(msgUrl, async (msg) => {
+        saveMsg(conv, msg, pageId);
+      });
+    });
 
-        // Step 2: import each message in this conversation
-        for (const msg of fbConv.messages?.data || []) {
-          if (!msg.message && !msg.sticker) { skipped++; continue; }
-
-          // Check for duplicate by a unique key (FB message ID stored as wa_message_id)
-          const existing = db.prepare("SELECT id FROM messages WHERE wa_message_id=?").get(msg.id);
-          if (existing) { skipped++; continue; }
-
-          const fromPage = msg.from?.id === pageId;
-          const content = msg.message || (msg.sticker ? '[Sticker]' : '[Attachment]');
-          const createdAt = msg.created_time
-            ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
-            : null;
-
-          try {
-            db.prepare(`INSERT INTO messages
-              (conversation_id, direction, type, content, wa_message_id, status, created_at)
-              VALUES (?, ?, 'text', ?, ?, ?, ?)`)
-              .run(
-                conv.id,
-                fromPage ? 'out' : 'in',
-                content,
-                msg.id,
-                fromPage ? 'delivered' : 'delivered',
-                createdAt
-              );
-            imported++;
-
-            // Update conversation last_message if this is newer
-            const existing_conv = db.prepare("SELECT last_message_at FROM conversations WHERE id=?").get(conv.id);
-            if (!existing_conv?.last_message_at || (createdAt && createdAt > existing_conv.last_message_at)) {
-              db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
-                .run(content, createdAt, conv.id);
-            }
-          } catch (e) {
-            if (!e.message.includes('UNIQUE')) console.error('[sync] msg insert:', e.message);
-            skipped++;
-          }
-        }
-      }
-
-      // Follow pagination cursor
-      convUrl = convData.paging?.next || null;
-    }
-
-    console.log(`[sync] Channel ${channel.name}: imported ${imported}, skipped ${skipped}`);
-    res.json({ ok: true, imported, skipped, channel: channel.name });
+    console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped`);
+    res.json({ ok: true, imported, skipped, conversations, channel: channel.name });
 
   } catch (e) {
     console.error('[sync] error:', e.message);
