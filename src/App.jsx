@@ -15,6 +15,9 @@ import Settings from './pages/Settings';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Login from './pages/Login';
 import StudentPortal from './pages/StudentPortal';
+import CommandPalette from './components/CommandPalette';
+import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './components/Confirm';
 import { api } from './api';
 
 export default function App() {
@@ -27,42 +30,52 @@ export default function App() {
   if (user === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-slate-400 text-sm">Loading…</div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-400 text-sm">Loading EduExpress CRM…</p>
+        </div>
       </div>
     );
   }
 
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Public pages */}
-        <Route path="/privacy" element={<PrivacyPolicy />} />
-        <Route path="/s/:token" element={<StudentPortal />} />
-        <Route path="/login" element={
-          user ? <Navigate to="/" replace /> : <Login onSuccess={setUser} />
-        } />
+      <ToastProvider>
+        <ConfirmProvider>
+          <Routes>
+            {/* Public pages */}
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/s/:token" element={<StudentPortal />} />
+            <Route path="/login" element={
+              user ? <Navigate to="/" replace /> : <Login onSuccess={setUser} />
+            } />
 
-        {/* Protected app */}
-        <Route path="/*" element={
-          !user ? <Navigate to="/login" replace /> :
-          <Layout user={user} onLogout={() => setUser(null)}>
-            <Routes>
-              <Route path="/" element={<Dashboard user={user} />} />
-              {(user.role === 'admin' || user.role === 'manager') && <Route path="/cockpit" element={<Cockpit />} />}
-              {(user.role === 'admin' || user.role === 'manager') && <Route path="/reports" element={<Reports />} />}
-              <Route path="/leads" element={<Leads user={user} />} />
-              <Route path="/leads/:id" element={<LeadDetail user={user} />} />
-              <Route path="/my-day" element={<MyDay user={user} />} />
-              <Route path="/pipeline" element={<Pipeline user={user} />} />
-              <Route path="/applications" element={<Applications user={user} />} />
-              {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
-              {user.role === 'admin' && <Route path="/hr" element={<HR />} />}
-              {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Layout>
-        } />
-      </Routes>
+            {/* Protected app */}
+            <Route path="/*" element={
+              !user ? <Navigate to="/login" replace /> :
+              <>
+                <CommandPalette user={user} />
+                <Layout user={user} onLogout={() => setUser(null)}>
+                  <Routes>
+                    <Route path="/" element={<Dashboard user={user} />} />
+                    {(user.role === 'admin' || user.role === 'manager') && <Route path="/cockpit" element={<Cockpit />} />}
+                    {(user.role === 'admin' || user.role === 'manager') && <Route path="/reports" element={<Reports />} />}
+                    <Route path="/leads" element={<Leads user={user} />} />
+                    <Route path="/leads/:id" element={<LeadDetail user={user} />} />
+                    <Route path="/my-day" element={<MyDay user={user} />} />
+                    <Route path="/pipeline" element={<Pipeline user={user} />} />
+                    <Route path="/applications" element={<Applications user={user} />} />
+                    {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
+                    {user.role === 'admin' && <Route path="/hr" element={<HR />} />}
+                    {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </Layout>
+              </>
+            } />
+          </Routes>
+        </ConfirmProvider>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

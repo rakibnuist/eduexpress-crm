@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Kanban, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart,
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
@@ -103,8 +103,20 @@ export default function Layout({ children, user, onLogout }) {
             onClick={() => setOpen(o => !o)}>
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
-          <h1 className="text-sm font-semibold text-slate-700 flex-1">{pageTitle}</h1>
+          <h1 className="text-sm font-semibold text-slate-700 flex-1 truncate">{pageTitle}</h1>
           <div className="flex items-center gap-2.5">
+            {/* Quick search — opens the command palette */}
+            <button
+              onClick={() => {
+                const isMac = navigator.platform.includes('Mac');
+                window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: isMac, ctrlKey: !isMac, bubbles: true }));
+              }}
+              title="Search (⌘K)"
+              className="hidden sm:flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50">
+              <Search size={13} />
+              <span className="hidden lg:inline">Search</span>
+              <kbd className="hidden lg:inline text-[10px] font-mono bg-slate-100 text-slate-500 px-1 rounded">⌘K</kbd>
+            </button>
             <NotificationBell user={user} />
             <div className="text-right hidden sm:block">
               <p className="text-xs font-medium text-slate-700">{user?.name || 'User'}</p>

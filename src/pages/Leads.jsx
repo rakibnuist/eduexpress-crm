@@ -5,6 +5,7 @@ import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
 import { Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, SlidersHorizontal, X } from 'lucide-react';
+import { useToast } from '../components/Toast';
 
 export default function Leads() {
   const [searchParams] = useSearchParams();
@@ -41,10 +42,14 @@ export default function Leads() {
 
   const activeFilters = [filters.status, filters.consultant, filters.destination].filter(Boolean).length;
 
+  const toast = useToast();
   async function handleDelete(id) {
-    await api.deleteLead(id);
-    setDeleting(null);
-    load();
+    try {
+      await api.deleteLead(id);
+      setDeleting(null);
+      load();
+      toast.success('Lead deleted');
+    } catch (e) { toast.error(e.message || 'Could not delete'); }
   }
 
   function exportCSV() {

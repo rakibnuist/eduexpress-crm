@@ -9,6 +9,8 @@
 */
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { api } from '../api';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 import {
   GraduationCap, RefreshCw, X, CheckCircle2, AlertTriangle, ExternalLink,
   CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
@@ -327,6 +329,8 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
   const [unis, setUnis]     = useState([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm]     = useState({});
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     const [l, d, u] = await Promise.all([
@@ -363,8 +367,8 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
 
   const saveAll = async () => {
     setSaving(true);
-    try { await api.updateStage(leadId, form); await load(); onChanged?.(); }
-    catch (e) { alert(e.message); }
+    try { await api.updateStage(leadId, form); await load(); onChanged?.(); toast.success('Saved'); }
+    catch (e) { toast.error(e.message || 'Could not save'); }
     setSaving(false);
   };
 
@@ -373,40 +377,45 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
     if (idx === -1 || idx >= stages.length - 1) return;
     const next = stages[idx + 1].key;
     setSaving(true);
-    try { await api.updateStage(leadId, { stage: next }); await load(); onChanged?.(); }
-    catch (e) { alert(e.message); }
+    try { await api.updateStage(leadId, { stage: next }); await load(); onChanged?.();
+          toast.success(`Advanced to ${stages[idx + 1].label}`); }
+    catch (e) { toast.error(e.message || 'Could not advance'); }
     setSaving(false);
   };
 
   const setDocStatus = async (doc, status) => {
     setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, status } : d));
-    try { await api.updateDocument(doc.id, { status }); } catch (e) { alert(e.message); load(); }
+    try { await api.updateDocument(doc.id, { status }); }
+    catch (e) { toast.error(e.message || 'Failed'); load(); }
   };
   const addDoc = async () => {
     const name = prompt('Document name?');
     if (!name?.trim()) return;
-    await api.addDocument(leadId, { doc_type: name.trim() }); load();
+    try { await api.addDocument(leadId, { doc_type: name.trim() }); load(); toast.success(`Added ${name.trim()}`); }
+    catch (e) { toast.error(e.message); }
   };
   const removeDoc = async (doc) => {
-    if (!confirm(`Remove "${doc.doc_type}"?`)) return;
-    await api.deleteDocument(doc.id); load();
+    if (!await confirm({ title: `Remove "${doc.doc_type}"?`, tone: 'danger', confirmLabel: 'Remove' })) return;
+    try { await api.deleteDocument(doc.id); load(); toast.info('Document removed'); }
+    catch (e) { toast.error(e.message); }
   };
 
   const addUni = async () => {
     const name = prompt('University name? (e.g. NJTech)');
     if (!name?.trim()) return;
-    await api.addUniversityApp(leadId, { university: name.trim(), status: 'documents' });
-    load();
+    try { await api.addUniversityApp(leadId, { university: name.trim(), status: 'documents' });
+          load(); toast.success(`Added ${name.trim()}`); }
+    catch (e) { toast.error(e.message); }
   };
   const setUniStatus = async (uni, status) => {
     setUnis(prev => prev.map(u => u.id === uni.id ? { ...u, status } : u));
-    try { await api.updateUniversityApp(uni.id, { status }); }
-    catch (e) { alert(e.message); load(); }
-    onChanged?.();
+    try { await api.updateUniversityApp(uni.id, { status }); onChanged?.(); }
+    catch (e) { toast.error(e.message || 'Failed'); load(); }
   };
   const removeUni = async (uni) => {
-    if (!confirm(`Remove ${uni.university}?`)) return;
-    await api.deleteUniversityApp(uni.id); load();
+    if (!await confirm({ title: `Remove ${uni.university}?`, tone: 'danger', confirmLabel: 'Remove' })) return;
+    try { await api.deleteUniversityApp(uni.id); load(); toast.info('Removed'); }
+    catch (e) { toast.error(e.message); }
   };
 
   if (!lead) {

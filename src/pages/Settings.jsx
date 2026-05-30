@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Upload, Megaphone, StickyNote } from 'lucide-react';
 import ExcelImport from '../components/ExcelImport';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
@@ -143,14 +145,22 @@ function UserManagement({ consultants }) {
   };
   useEffect(() => { load(); }, []);
 
+  const toast = useToast();
+  const confirm = useConfirm();
   const remove = async (u) => {
-    if (!confirm(`Delete user "${u.name || u.email}"? They will lose access immediately.`)) return;
-    try { await api.deleteUser(u.id); load(); }
-    catch (e) { alert(e.message); }
+    const ok = await confirm({
+      title: `Delete user "${u.name || u.email}"?`,
+      body: 'They will lose access immediately. This cannot be undone.',
+      tone: 'danger', confirmLabel: 'Delete user',
+    });
+    if (!ok) return;
+    try { await api.deleteUser(u.id); load(); toast.success('User deleted'); }
+    catch (e) { toast.error(e.message); }
   };
   const toggleActive = async (u) => {
-    try { await api.updateUser(u.id, { active: u.active ? 0 : 1 }); load(); }
-    catch (e) { alert(e.message); }
+    try { await api.updateUser(u.id, { active: u.active ? 0 : 1 }); load();
+          toast.success(u.active ? `${u.name || u.email} disabled` : `${u.name || u.email} enabled`); }
+    catch (e) { toast.error(e.message); }
   };
 
   return (
@@ -472,6 +482,8 @@ function BroadcastManager() {
   const [text, setText]   = useState('');
   const [color, setColor] = useState('amber');
   const [posting, setPosting] = useState(false);
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = () => api.broadcasts().then(setItems).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -480,14 +492,16 @@ function BroadcastManager() {
     e.preventDefault();
     if (!text.trim()) return;
     setPosting(true);
-    try { await api.createBroadcast({ message: text.trim(), color, pinned: 1 }); setText(''); load(); }
-    catch (err) { alert(err.message); }
+    try { await api.createBroadcast({ message: text.trim(), color, pinned: 1 });
+          setText(''); load(); toast.success('Broadcast posted to the whole team'); }
+    catch (err) { toast.error(err.message); }
     setPosting(false);
   };
 
   const remove = async (id) => {
-    if (!confirm('Delete this broadcast?')) return;
-    try { await api.deleteBroadcast(id); load(); } catch (e) { alert(e.message); }
+    if (!await confirm({ title: 'Delete this broadcast?', tone: 'danger', confirmLabel: 'Delete' })) return;
+    try { await api.deleteBroadcast(id); load(); toast.info('Broadcast removed'); }
+    catch (e) { toast.error(e.message); }
   };
 
   const colors = [

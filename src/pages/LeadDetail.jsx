@@ -8,6 +8,7 @@ import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
+import { useToast } from '../components/Toast';
 import {
   ArrowLeft, Pencil, Trash2, Phone, Mail, MapPin, Calendar, User, Hash,
   GraduationCap, Building2, FileText, DollarSign, Activity, Send, AlertCircle,
@@ -90,9 +91,11 @@ export default function LeadDetail({ user }) {
     return () => { try { es.close(); } catch {} };
   }, [lead?.id]);
 
+  const toast = useToast();
+
   const handleDelete = async () => {
-    try { await api.deleteLead(lead.id); navigate('/leads'); }
-    catch (e) { alert(e.message); }
+    try { await api.deleteLead(lead.id); toast.success(`${lead.client_name} deleted`); navigate('/leads'); }
+    catch (e) { toast.error(e.message || 'Could not delete'); }
   };
 
   if (loading && !lead) {
@@ -371,17 +374,23 @@ function Timeline({ leadId, timeline, onPosted }) {
   const [posting, setPosting] = useState(false);
   const [mode, setMode] = useState('note'); // 'note' (internal) | 'reply' (to student)
   const inputRef = useRef(null);
+  const toast = useToast();
 
   const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
     setPosting(true);
     try {
-      if (mode === 'reply') await api.replyToStudent(leadId, text.trim());
-      else                  await api.addNote(leadId, text.trim());
+      if (mode === 'reply') {
+        await api.replyToStudent(leadId, text.trim());
+        toast.success('Reply sent — the student will see it on their portal');
+      } else {
+        await api.addNote(leadId, text.trim());
+        toast.success('Note saved');
+      }
       setText(''); onPosted?.();
     }
-    catch (err) { alert(err.message); }
+    catch (err) { toast.error(err.message || 'Could not save'); }
     setPosting(false);
   };
 
