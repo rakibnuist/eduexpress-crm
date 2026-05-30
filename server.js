@@ -2226,6 +2226,159 @@ app.get('/api/employee-kpi', (req, res, next) => requireManagerOrAdmin(req, res,
   res.json({ month, workingDays, effWorking, employees: rows });
 }));
 
+// ─── REPORTS — weekly / monthly performance digest ─────────────────────────
+// Comprehensive aggregation across all subsystems in one JSON response so
+// the Dashboard can render the whole digest with one fetch.
+function dayRangeFor(period, anchorIso) {
+  const anchor = new Date(anchorIso + 'T00:00:00Z');
+  const day = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  if (period === 'week') {
+    // ISO-ish week, but office-friendly: Sun → Sat for Bangladesh weeks.
+    const dow = anchor.getUTCDay(); // 0 = Sunday
+    const start = day(new Date(anchor.getTime() - dow * 86400000));
+    const end   = day(new Date(start.getTime() + 6 * 86400000));
+    const prevStart = day(new Date(start.getTime() - 7 * 86400000));
+    const prevEnd   = day(new Date(end.getTime()   - 7 * 86400000));
+    return { start, end, prevStart, prevEnd, label: `${start.toISOString().slice(5,10)}–${end.toISOString().slice(5,10)}`, prevLabel: `${prevStart.toISOString().slice(5,10)}–${prevEnd.toISOString().slice(5,10)}` };
+  }
+  // month
+  const start = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+  const end   = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 0));
+  const prevStart = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - 1, 1));
+  const prevEnd   = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 0));
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return { start, end, prevStart, prevEnd,
+    label: `${monthNames[anchor.getUTCMonth()]} ${anchor.getUTCFullYear()}`,
+    prevLabel: `${monthNames[prevStart.getUTCMonth()]} ${prevStart.getUTCFullYear()}`,
+  };
+}
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+  const period = req.query.period === 'week' ? 'week' : 'month';
+  const anchor = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const range = dayRangeFor(period, anchor);
+  const startStr = isoDate(range.start), endStr = isoDate(range.end);
+  const prevStartStr = isoDate(range.prevStart), prevEndStr = isoDate(range.prevEnd);
+
+  // ── Leads ──────────────────────────────────────────────────────────────
+  const newLeadsRow = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)`).get(startStr, endStr, startStr, endStr);
+  const newLeadsPrev = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)`).get(prevStartStr, prevEndStr, prevStartStr, prevEndStr);
+  const leadsBySource = db.prepare(`SELECT COALESCE(source,'Unknown') AS k, COUNT(*) AS n FROM leads
+    WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?) GROUP BY source`).all(startStr, endStr, startStr, endStr);
+  const leadsByDest = db.prepare(`SELECT COALESCE(destination,'Unknown') AS k, COUNT(*) AS n FROM leads
+    WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?) GROUP BY destination`).all(startStr, endStr, startStr, endStr);
+  const enrolled = db.prepare(`SELECT COUNT(*) AS n FROM activity_log
+    WHERE type='lead_status_changed' AND to_value='Enrolled' AND substr(created_at,1,10) BETWEEN ? AND ?`).get(startStr, endStr).n;
+  const enrolledPrev = db.prepare(`SELECT COUNT(*) AS n FROM activity_log
+    WHERE type='lead_status_changed' AND to_value='Enrolled' AND substr(created_at,1,10) BETWEEN ? AND ?`).get(prevStartStr, prevEndStr).n;
+
+  // ── Applications ───────────────────────────────────────────────────────
+  const stagesAdvanced = db.prepare(`SELECT to_value AS stage, COUNT(*) AS n FROM activity_log
+    WHERE type='application_stage_changed' AND substr(created_at,1,10) BETWEEN ? AND ? GROUP BY to_value`).all(startStr, endStr);
+  const uniMoves = db.prepare(`SELECT to_value AS status, COUNT(*) AS n FROM activity_log
+    WHERE type='uni_app_status' AND substr(created_at,1,10) BETWEEN ? AND ? GROUP BY to_value`).all(startStr, endStr);
+
+  // ── Cashflow ───────────────────────────────────────────────────────────
+  const cashIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM income   WHERE date BETWEEN ? AND ?`).get(startStr, endStr);
+  const cashOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM expenses WHERE date BETWEEN ? AND ?`).get(startStr, endStr);
+  const prevIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date BETWEEN ? AND ?`).get(prevStartStr, prevEndStr).s;
+  const prevOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date BETWEEN ? AND ?`).get(prevStartStr, prevEndStr).s;
+  const incomeCat  = db.prepare(`SELECT COALESCE(category,'Uncategorised') AS k, SUM(amount) AS v FROM income   WHERE date BETWEEN ? AND ? GROUP BY category ORDER BY v DESC`).all(startStr, endStr);
+  const expenseCat = db.prepare(`SELECT COALESCE(category,'Uncategorised') AS k, SUM(amount) AS v FROM expenses WHERE date BETWEEN ? AND ? GROUP BY category ORDER BY v DESC`).all(startStr, endStr);
+  const topClients = db.prepare(`SELECT client_name AS k, SUM(amount) AS v FROM income WHERE date BETWEEN ? AND ? AND client_name IS NOT NULL GROUP BY client_name ORDER BY v DESC LIMIT 5`).all(startStr, endStr);
+  // Cash position at end of period
+  const initial = parseFloat(getConfig('cash_initial')) || 0;
+  const priorIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date < ?`).get(startStr).s;
+  const priorOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date < ?`).get(startStr).s;
+  const opening = initial + priorIn - priorOut;
+  const closing = opening + cashIn.s - cashOut.s;
+
+  // ── Attendance summary ─────────────────────────────────────────────────
+  const activeEmps = db.prepare("SELECT COUNT(*) AS n FROM employees WHERE active='Yes'").get().n;
+  const attRows = db.prepare(`SELECT emp_id, status FROM attendance WHERE date BETWEEN ? AND ?`).all(startStr, endStr);
+  const presentCount = attRows.filter(r => r.status === 'Present' || r.status === 'Late').length;
+  const lateCount    = attRows.filter(r => r.status === 'Late').length;
+  // Working-day count in the range (Sun-Thu)
+  let workingDays = 0;
+  for (let d = new Date(range.start); d <= range.end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dow = d.getUTCDay(); if (dow !== 5 && dow !== 6) workingDays++;
+  }
+  const attendancePct = (activeEmps * workingDays) > 0
+    ? Math.round((presentCount / (activeEmps * workingDays)) * 100) : 0;
+  const dailyLogsSubmitted = db.prepare(`SELECT COUNT(*) AS n FROM daily_logs WHERE date BETWEEN ? AND ?`).get(startStr, endStr).n;
+
+  // ── Top Performers (this period) ───────────────────────────────────────
+  // Use activity-points to rank consultants by ACTOR_NAME
+  const ACT_WEIGHTS = { lead_created:3, lead_status_changed:2, lead_assigned:1, lead_payment:4, payment_recorded:2, application_stage_changed:3, uni_app_status:3, reply_to_student:2, note:1 };
+  const actorRows = db.prepare(`SELECT actor_name, type, COUNT(*) AS n FROM activity_log
+    WHERE substr(created_at,1,10) BETWEEN ? AND ? AND actor_name IS NOT NULL AND actor_name != 'System'
+    GROUP BY actor_name, type`).all(startStr, endStr);
+  const byActor = {};
+  actorRows.forEach(r => {
+    if (!byActor[r.actor_name]) byActor[r.actor_name] = { name: r.actor_name, points: 0, events: 0, by_type: {} };
+    byActor[r.actor_name].events += r.n;
+    byActor[r.actor_name].points += (ACT_WEIGHTS[r.type] || 0) * r.n;
+    byActor[r.actor_name].by_type[r.type] = r.n;
+  });
+  const topPerformers = Object.values(byActor).sort((a, b) => b.points - a.points).slice(0, 5);
+
+  // ── Highlights — notable single events ─────────────────────────────────
+  const highlights = [];
+  const enrollEvents = db.prepare(`SELECT lead_name, actor_name, created_at FROM activity_log
+    WHERE type='lead_status_changed' AND to_value='Enrolled' AND substr(created_at,1,10) BETWEEN ? AND ?
+    ORDER BY id DESC LIMIT 3`).all(startStr, endStr);
+  enrollEvents.forEach(e => highlights.push({ icon: '🎓', text: `${e.lead_name} enrolled (by ${e.actor_name})` }));
+
+  const bigPays = db.prepare(`SELECT amount, lead_name, actor_name FROM activity_log
+    WHERE type IN ('lead_payment','payment_recorded') AND substr(created_at,1,10) BETWEEN ? AND ? AND amount IS NOT NULL
+    ORDER BY amount DESC LIMIT 3`).all(startStr, endStr);
+  bigPays.forEach(p => highlights.push({ icon: '💰', text: `৳${Number(p.amount).toLocaleString()} payment${p.lead_name ? ` for ${p.lead_name}` : ''}${p.actor_name ? ` (by ${p.actor_name})` : ''}` }));
+
+  const visaApprovals = db.prepare(`SELECT lead_name, actor_name FROM activity_log
+    WHERE type='application_stage_changed' AND to_value='visa_approved' AND substr(created_at,1,10) BETWEEN ? AND ?
+    ORDER BY id DESC LIMIT 3`).all(startStr, endStr);
+  visaApprovals.forEach(v => highlights.push({ icon: '🛂', text: `${v.lead_name} visa approved (by ${v.actor_name})` }));
+
+  // ── Daily trend within the period (for sparklines) ─────────────────────
+  const trend = [];
+  for (let d = new Date(range.start); d <= range.end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const day = isoDate(d);
+    trend.push({
+      date: day,
+      newLeads: db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?`).get(day, day).n,
+      revenue:  db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income WHERE date=?`).get(day).s,
+      spend:    db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date=?`).get(day).s,
+    });
+  }
+
+  const delta = (cur, prev) => prev === 0 ? (cur > 0 ? 100 : 0) : Math.round(((cur - prev) / prev) * 100);
+
+  res.json({
+    period: { type: period, start: startStr, end: endStr, label: range.label,
+              previousStart: prevStartStr, previousEnd: prevEndStr, previousLabel: range.prevLabel },
+    headline: {
+      new_leads:    { current: newLeadsRow.n, previous: newLeadsPrev.n, delta: delta(newLeadsRow.n, newLeadsPrev.n) },
+      enrolments:   { current: enrolled, previous: enrolledPrev, delta: delta(enrolled, enrolledPrev) },
+      revenue:      { current: cashIn.s,  previous: prevIn,  delta: delta(cashIn.s, prevIn) },
+      net_cash:     { current: cashIn.s - cashOut.s, previous: prevIn - prevOut, delta: delta(cashIn.s - cashOut.s, prevIn - prevOut) },
+      attendance:   { current: attendancePct },
+    },
+    leads:         { new: newLeadsRow.n, by_source: leadsBySource, by_destination: leadsByDest, enrolled, conversion_rate: newLeadsRow.n ? Math.round((enrolled / newLeadsRow.n) * 100) : 0 },
+    applications:  { stages_advanced: stagesAdvanced, university_moves: uniMoves },
+    cashflow:      { opening, in: cashIn.s, out: cashOut.s, net: cashIn.s - cashOut.s, closing,
+                     income_by_category: incomeCat, expense_by_category: expenseCat, top_clients: topClients,
+                     income_entries: cashIn.c, expense_entries: cashOut.c },
+    attendance:    { active_employees: activeEmps, working_days: workingDays, attendance_pct: attendancePct,
+                     late_count: lateCount, total_logs: dailyLogsSubmitted },
+    top_performers: topPerformers,
+    highlights,
+    trend,
+  });
+}));
+
 // Per-employee drilldown — full activity feed + daily logs for one person
 app.get('/api/employee-kpi/:emp_id', (req, res, next) => requireManagerOrAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);

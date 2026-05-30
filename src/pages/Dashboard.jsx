@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X, Sun } from 'lucide-react';
+import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X, Sun, FileBarChart } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -148,9 +148,14 @@ export default function Dashboard() {
           <h2 className="text-2xl font-bold text-slate-800">Live Dashboard</h2>
           <p className="text-sm text-slate-500 mt-0.5">EduExpress International CRM · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
-        <Link to="/leads" className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium">
-          View all leads <ArrowRight size={15} />
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link to="/reports" className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-blue-50">
+            <FileBarChart size={13} /> Generate report
+          </Link>
+          <Link to="/leads" className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium">
+            View all leads <ArrowRight size={15} />
+          </Link>
+        </div>
       </div>
 
       {/* KPI Cards */}

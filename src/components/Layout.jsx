@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Kanban, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun,
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
@@ -10,6 +10,7 @@ import NotificationBell from './NotificationBell';
 const baseNav = [
   { to: '/',             icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     staffOnly: true },
+  { to: '/reports',      icon: FileBarChart,    label: 'Reports',     staffOnly: true },
   { to: '/my-day',       icon: Sun,             label: 'My Day' },
   { to: '/leads',        icon: Users,           label: 'All Leads' },
   { to: '/pipeline',     icon: Kanban,          label: 'Sales Pipeline' },

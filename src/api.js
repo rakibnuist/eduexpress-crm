@@ -132,6 +132,9 @@ export const api = {
   updatePayroll:  (id, d) => req(`/payroll/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   markPayrollPaid:(id)    => req(`/payroll/${id}/mark-paid`, { method: 'POST' }),
 
+  // Reports (weekly/monthly digest)
+  report:         (period, date) => req('/reports?' + new URLSearchParams({ period, date })),
+
   // Employee performance
   employeeKpi:    (month) => req('/employee-kpi?' + new URLSearchParams({ month })),
   employeeKpiOne: (emp_id, month) => req(`/employee-kpi/${emp_id}?` + new URLSearchParams({ month })),
