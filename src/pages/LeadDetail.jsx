@@ -369,13 +369,18 @@ const UNI_STATUS_CLS = {
 function Timeline({ leadId, timeline, onPosted }) {
   const [text, setText] = useState('');
   const [posting, setPosting] = useState(false);
+  const [mode, setMode] = useState('note'); // 'note' (internal) | 'reply' (to student)
   const inputRef = useRef(null);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
     setPosting(true);
-    try { await api.addNote(leadId, text.trim()); setText(''); onPosted?.(); }
+    try {
+      if (mode === 'reply') await api.replyToStudent(leadId, text.trim());
+      else                  await api.addNote(leadId, text.trim());
+      setText(''); onPosted?.();
+    }
     catch (err) { alert(err.message); }
     setPosting(false);
   };
@@ -398,15 +403,28 @@ function Timeline({ leadId, timeline, onPosted }) {
           </div>
           <div className="flex-1">
             <textarea ref={inputRef} value={text} onChange={e => setText(e.target.value)}
-              placeholder="Add a note — what happened, what's next, what the next person should know…"
+              placeholder={mode === 'reply'
+                ? 'Reply to the student — they will see this on their portal'
+                : 'Add a note — what happened, what’s next, what the next person should know…'}
               rows={2}
               onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e); }}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" />
+              className={`w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 resize-none
+                ${mode === 'reply' ? 'border-emerald-200 bg-emerald-50/30 focus:ring-emerald-400' : 'border-slate-200 focus:ring-blue-500'}`} />
             <div className="flex items-center justify-between mt-1.5">
-              <p className="text-[11px] text-slate-400">⌘ + Enter to post</p>
+              <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg">
+                <button type="button" onClick={() => setMode('note')}
+                  className={`text-[11px] font-medium px-2 py-1 rounded ${mode === 'note' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-500'}`}>
+                  Internal note
+                </button>
+                <button type="button" onClick={() => setMode('reply')}
+                  className={`text-[11px] font-medium px-2 py-1 rounded ${mode === 'reply' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500'}`}>
+                  Reply to student
+                </button>
+              </div>
               <button type="submit" disabled={posting || !text.trim()}
-                className="flex items-center gap-1.5 text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                <Send size={12} /> {posting ? 'Posting…' : 'Post note'}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg disabled:opacity-50 text-white
+                  ${mode === 'reply' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                <Send size={12} /> {posting ? 'Sending…' : (mode === 'reply' ? 'Send to student' : 'Post note')}
               </button>
             </div>
           </div>
@@ -445,6 +463,11 @@ function TimelineItem({ a }) {
         </p>
         {a.type === 'note' && (
           <div className="mt-1 p-3 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-900 whitespace-pre-wrap">
+            {typeof details === 'string' ? details : a.details}
+          </div>
+        )}
+        {a.type === 'reply_to_student' && (
+          <div className="mt-1 p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-sm text-emerald-900 whitespace-pre-wrap">
             {typeof details === 'string' ? details : a.details}
           </div>
         )}
@@ -488,6 +511,12 @@ function describe(a) {
     case 'note':
       return { icon: <MessageSquare size={14}/>, bg: 'bg-amber-50 text-amber-600',
                text: <>added a note</> };
+    case 'reply_to_student':
+      return { icon: <Send size={14}/>, bg: 'bg-emerald-50 text-emerald-600',
+               text: <>replied to the student</> };
+    case 'student_doc_upload':
+      return { icon: <Receipt size={14}/>, bg: 'bg-violet-50 text-violet-600',
+               text: <>uploaded a document via the portal</> };
     default:
       return { icon: <Activity size={14}/>, bg: 'bg-slate-100 text-slate-500',
                text: <>{a.type.replace(/_/g, ' ')}</> };

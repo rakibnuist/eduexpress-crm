@@ -39,12 +39,19 @@ const DOC_STATUS_LABEL = {
 export default function StudentPortal() {
   const { token } = useParams();
   const [data, setData]       = useState(null);
+  const [thread, setThread]   = useState([]);
   const [error, setError]     = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = async (silent = false) => {
     if (!silent) setRefreshing(true);
-    try { setData(await api.studentPortal(token)); setError(null); }
+    try {
+      const [d, t] = await Promise.all([
+        api.studentPortal(token),
+        api.studentThread(token).catch(() => []),
+      ]);
+      setData(d); setThread(t || []); setError(null);
+    }
     catch (e) { setError(e.message || 'This portal link is no longer active.'); }
     if (!silent) setRefreshing(false);
   };
@@ -235,8 +242,8 @@ export default function StudentPortal() {
           </section>
         )}
 
-        {/* Send message to consultant */}
-        <MessageBox token={token} consultant={student.assigned_consultant} />
+        {/* Conversation thread with staff */}
+        <ConversationThread token={token} consultant={student.assigned_consultant} studentName={student.name} thread={thread} onSent={() => load(true)} />
 
         <p className="text-center text-xs text-slate-400 pb-6">
           Updates live · Last refreshed {new Date(data.updated_at).toLocaleTimeString()} ·
@@ -288,40 +295,72 @@ function RequestedDoc({ doc, token, onUpdated }) {
   );
 }
 
-function MessageBox({ token, consultant }) {
+function ConversationThread({ token, consultant, studentName, thread, onSent }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
     setSending(true);
-    try { await api.studentMessage(token, text.trim()); setText(''); setSent(true); setTimeout(() => setSent(false), 3000); }
+    try { await api.studentMessage(token, text.trim()); setText(''); onSent?.(); }
     catch (err) { alert(err.message); }
     setSending(false);
   };
 
+  // Only show real conversation entries (notes + replies). Skip auto doc-upload
+  // logs which already appear in the documents section.
+  const messages = thread.filter(m => m.type === 'note' || m.type === 'reply_to_student');
+
   return (
     <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
       <h2 className="font-semibold text-slate-800 flex items-center gap-2 mb-1">
-        <Send size={16} /> Send a quick message
+        <Send size={16} /> Conversation
       </h2>
-      <p className="text-xs text-slate-500 mb-3">
-        Your message will be delivered to {consultant ? <strong>{consultant}</strong> : 'your consultant'}.
+      <p className="text-xs text-slate-500 mb-4">
+        Messages with {consultant ? <strong>{consultant}</strong> : 'your EduExpress team'}.
       </p>
-      <form onSubmit={submit} className="space-y-2">
-        <textarea rows={3} value={text} onChange={e => setText(e.target.value)}
-          placeholder="Any question or update for us…"
+
+      {messages.length === 0 ? (
+        <p className="text-sm text-slate-400 italic text-center py-4">No messages yet — start the conversation below.</p>
+      ) : (
+        <div className="space-y-2.5 mb-4 max-h-[400px] overflow-y-auto">
+          {messages.map(m => {
+            const fromStudent = m.type === 'note' && m.actor_name?.includes('(Student)');
+            const detail = parseDetail(m.details);
+            const cleaned = fromStudent && typeof detail === 'string'
+              ? detail.replace(/^\[via student portal\]\s*/, '')
+              : detail;
+            return (
+              <div key={m.id} className={`flex ${fromStudent ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-sm whitespace-pre-wrap
+                  ${fromStudent ? 'bg-blue-500 text-white rounded-br-md' : 'bg-slate-100 text-slate-800 rounded-bl-md'}`}>
+                  {!fromStudent && <p className="text-[10px] font-bold opacity-70 mb-0.5">{m.actor_name || 'EduExpress'}</p>}
+                  <p>{typeof cleaned === 'string' ? cleaned : JSON.stringify(cleaned)}</p>
+                  <p className={`text-[10px] mt-1 ${fromStudent ? 'text-blue-100' : 'text-slate-400'}`}>{new Date(m.created_at.endsWith('Z') ? m.created_at : m.created_at.replace(' ', 'T') + 'Z').toLocaleString()}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <form onSubmit={submit} className="space-y-2 border-t border-slate-100 pt-4">
+        <textarea rows={2} value={text} onChange={e => setText(e.target.value)}
+          placeholder="Type a message…"
           className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <div className="flex items-center justify-between">
-          {sent && <span className="text-xs text-emerald-600">✓ Sent</span>}
+        <div className="flex justify-end">
           <button type="submit" disabled={sending || !text.trim()}
-            className="text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 ml-auto">
-            {sending ? 'Sending…' : 'Send'}
+            className="text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+            <Send size={11} /> {sending ? 'Sending…' : 'Send'}
           </button>
         </div>
       </form>
     </section>
   );
+}
+
+function parseDetail(d) {
+  if (!d) return '';
+  try { return JSON.parse(d); } catch { return d; }
 }

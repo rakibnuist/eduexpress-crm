@@ -94,6 +94,20 @@ export const api = {
   cashflowInvestors:  ()       => req('/cashflow/investors'),
   setInitialCash:     (amount) => req('/cashflow/initial', { method: 'PUT', body: JSON.stringify({ amount }) }),
 
+  // Broadcasts (owner sticky notes)
+  broadcasts:        ()        => req('/broadcasts'),
+  createBroadcast:   (d)       => req('/broadcasts', { method: 'POST', body: JSON.stringify(d) }),
+  deleteBroadcast:   (id)      => req(`/broadcasts/${id}`, { method: 'DELETE' }),
+  dismissBroadcast:  (id)      => req(`/broadcasts/${id}/dismiss`, { method: 'POST' }),
+
+  // Excel import (rows are pre-parsed in the browser)
+  importCashflow:    (rows)    => req('/import/cashflow', { method: 'POST', body: JSON.stringify({ rows }) }),
+  importApplications:(rows)    => req('/import/applications', { method: 'POST', body: JSON.stringify({ rows }) }),
+
+  // Staff↔student thread
+  replyToStudent:    (id, t)   => req(`/leads/${id}/reply-to-student`, { method: 'POST', body: JSON.stringify({ text: t }) }),
+  studentThread:     (token)   => fetch(`/api/public/student/${token}/thread`).then(r => r.ok ? r.json() : Promise.reject(new Error(r.statusText))),
+
   // Employees
   employees:      ()      => req('/employees'),
   createEmployee: (d)     => req('/employees',       { method: 'POST', body: JSON.stringify(d) }),

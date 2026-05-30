@@ -606,7 +606,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications','broadcasts','broadcast_dismissals'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -714,6 +714,23 @@ function setupSchema() { db.exec(`
     active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT NOT NULL,
+    author_id INTEGER,
+    author_name TEXT,
+    color TEXT DEFAULT 'amber',
+    pinned INTEGER DEFAULT 1,
+    expires_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS broadcast_dismissals (
+    broadcast_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    dismissed_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (broadcast_id, user_id)
   );
 
   CREATE TABLE IF NOT EXISTS lead_university_applications (
@@ -1364,6 +1381,203 @@ app.post('/api/leads/:id/notes', (req, res) => {
   if (!text || !text.trim()) return res.status(400).json({ error: 'text is required' });
   logActivity({ type: 'note', actor: req.user, lead, details: text.trim() });
   res.json({ ok: true });
+});
+
+// ─── BROADCASTS — owner's sticky-note for the whole team ───────────────────
+app.get('/api/broadcasts', (req, res) => {
+  const userId = req.user?.id;
+  const rows = db.prepare(`SELECT b.*,
+      EXISTS(SELECT 1 FROM broadcast_dismissals d WHERE d.broadcast_id=b.id AND d.user_id=?) AS dismissed
+    FROM broadcasts b
+    WHERE b.expires_at IS NULL OR b.expires_at > datetime('now')
+    ORDER BY b.pinned DESC, b.id DESC`).all(userId || 0);
+  res.json(rows);
+});
+
+app.post('/api/broadcasts', (req, res, next) => requireAdmin(req, res, () => {
+  const { message, color = 'amber', pinned = 1, expires_at = null } = req.body || {};
+  if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+  const info = db.prepare(`INSERT INTO broadcasts (message, author_id, author_name, color, pinned, expires_at)
+    VALUES (?,?,?,?,?,?)`).run(message.trim(), req.user.id, req.user.name || req.user.email, color, pinned ? 1 : 0, expires_at);
+  broadcast('broadcast_new', { broadcast: db.prepare("SELECT * FROM broadcasts WHERE id=?").get(info.lastInsertRowid) });
+  logActivity({ type: 'broadcast_posted', actor: req.user, details: message.trim().slice(0, 200) });
+  res.json(db.prepare("SELECT * FROM broadcasts WHERE id=?").get(info.lastInsertRowid));
+}));
+
+app.delete('/api/broadcasts/:id', (req, res, next) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM broadcast_dismissals WHERE broadcast_id=?").run(req.params.id);
+  db.prepare("DELETE FROM broadcasts WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/broadcasts/:id/dismiss', (req, res) => {
+  if (!req.user?.id) return res.status(401).json({ error: 'auth required' });
+  db.prepare(`INSERT OR IGNORE INTO broadcast_dismissals (broadcast_id, user_id) VALUES (?,?)`)
+    .run(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+// ─── DATA IMPORT — parsed rows come from the browser (SheetJS); the server
+// just inserts what's already mapped, with idempotency by content key. ─────
+function importCashflowRows(rows, actor) {
+  let inserted = 0, skipped = 0;
+  const insIn  = db.prepare(`INSERT INTO income   (date, month, category, client_name, reference, amount, notes) VALUES (?,?,?,?,?,?,?)`);
+  const insOut = db.prepare(`INSERT INTO expenses (date, month, category, paid_to,    reference, amount, notes) VALUES (?,?,?,?,?,?,?)`);
+  // Dedupe by (kind, month, category, client_name, amount)
+  const existingIn  = new Set(db.prepare("SELECT date||'|'||COALESCE(category,'')||'|'||COALESCE(client_name,'')||'|'||amount AS k FROM income").all().map(r => r.k));
+  const existingOut = new Set(db.prepare("SELECT date||'|'||COALESCE(category,'')||'|'||COALESCE(paid_to,'')||'|'||amount AS k FROM expenses").all().map(r => r.k));
+
+  const txn = db.transaction(() => {
+    for (const r of rows) {
+      if (!r || typeof r !== 'object') continue;
+      const amount = Number(r.amount) || 0;
+      if (amount === 0 && !r.client_name && !r.category) { skipped++; continue; }
+      const date = r.date || (r.month ? `${r.month}-01` : new Date().toISOString().slice(0,10));
+      const month = r.month || date.slice(0,7);
+      const key = `${date}|${r.category||''}|${r.client_name||''}|${amount}`;
+      if (r.kind === 'in') {
+        if (existingIn.has(key)) { skipped++; continue; }
+        insIn.run(date, month, r.category||null, r.client_name||null, r.reference||null, amount, r.notes||null);
+        existingIn.add(key); inserted++;
+      } else {
+        if (existingOut.has(key)) { skipped++; continue; }
+        insOut.run(date, month, r.category||null, r.client_name||null, r.reference||null, amount, r.notes||null);
+        existingOut.add(key); inserted++;
+      }
+    }
+  });
+  txn();
+  logActivity({ type: 'import_cashflow', actor, details: { inserted, skipped, total: rows.length } });
+  return { inserted, skipped };
+}
+
+function importApplicationRows(rows, actor) {
+  let inserted = 0, updated = 0, skipped = 0;
+  const newLeadId = () => {
+    const last = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE 'LEAD-%' ORDER BY id DESC LIMIT 1").get();
+    const n = last ? parseInt(last.lead_id.split('-')[1]) + 1 : 1;
+    return `LEAD-${String(n).padStart(4, '0')}`;
+  };
+  const ins = db.prepare(`INSERT INTO leads
+    (lead_id, date_added, client_name, phone, email, destination, last_education, gpa, english_score,
+     program, lead_source, lead_status, assigned_consultant, service_fee, paid, balance,
+     source, referrer, nationality, passport, degree, major, intake_term, university,
+     drive_link, deposit)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const upd = db.prepare(`UPDATE leads SET
+     source=COALESCE(?, source), referrer=COALESCE(?, referrer),
+     nationality=COALESCE(?, nationality), passport=COALESCE(?, passport),
+     degree=COALESCE(?, degree), major=COALESCE(?, major),
+     intake_term=COALESCE(?, intake_term), university=COALESCE(?, university),
+     drive_link=COALESCE(?, drive_link), destination=COALESCE(?, destination),
+     application_stage=COALESCE(?, application_stage)
+   WHERE id=?`);
+  const insUniApp = db.prepare(`INSERT INTO lead_university_applications (lead_id, university, status) VALUES (?,?,?)`);
+
+  // Pre-load passport map and name map for dedupe.
+  const byPassport = new Map(db.prepare("SELECT id, passport FROM leads WHERE passport IS NOT NULL").all().map(r => [String(r.passport).toUpperCase(), r.id]));
+  const byName = new Map(db.prepare("SELECT id, client_name FROM leads").all().map(r => [String(r.client_name || '').toLowerCase().trim(), r.id]));
+
+  const STATUS_MAP = {
+    documents: 'documents', ready: 'ready', submitted: 'submitted',
+    admitted: 'admitted', return: 'submitted', returned: 'submitted',
+    reject: 'documents', rejected: 'documents',
+  };
+  const APP_STAGE_FROM_STATUS = {
+    documents: 'documents', ready: 'ready', submitted: 'submitted',
+    admitted: 'admitted', return: 'submitted', returned: 'submitted',
+    reject: 'documents', rejected: 'documents',
+  };
+
+  const txn = db.transaction(() => {
+    for (const r of rows) {
+      if (!r || !r.client_name?.trim()) { skipped++; continue; }
+      const name = r.client_name.trim();
+      const passportKey = r.passport ? String(r.passport).toUpperCase().trim() : null;
+      let existingId = null;
+      if (passportKey && byPassport.has(passportKey)) existingId = byPassport.get(passportKey);
+      else if (byName.has(name.toLowerCase())) existingId = byName.get(name.toLowerCase());
+
+      const statusKey = (r.status || '').toLowerCase().trim();
+      const appStage = APP_STAGE_FROM_STATUS[statusKey] || null;
+
+      if (existingId) {
+        upd.run(
+          r.source || null, r.referrer || null, r.nationality || null, r.passport || null,
+          r.degree || null, r.major || null, r.intake_term || null, r.primary_university || null,
+          r.drive_link || null, r.destination || null, appStage, existingId);
+        updated++;
+      } else {
+        const lead_id = newLeadId();
+        const info = ins.run(
+          lead_id, r.date_added || new Date().toISOString().slice(0, 10),
+          name, r.phone || null, r.email || null, r.destination || null,
+          r.last_education || null, r.gpa || null, r.english_score || null,
+          r.program || r.major || null, r.lead_source || 'Excel import',
+          appStage ? 'File Opened' : 'New Lead',
+          r.assigned_consultant || null, r.service_fee || 0, r.paid || 0, (r.service_fee || 0) - (r.paid || 0),
+          r.source || null, r.referrer || null, r.nationality || null, r.passport || null,
+          r.degree || null, r.major || null, r.intake_term || null, r.primary_university || null,
+          r.drive_link || null, r.deposit || 0);
+        existingId = info.lastInsertRowid;
+        if (passportKey) byPassport.set(passportKey, existingId);
+        byName.set(name.toLowerCase(), existingId);
+        inserted++;
+      }
+
+      // Per-university applications from the comma-separated 'universities' field
+      if (r.universities && existingId) {
+        const list = String(r.universities).split(/[,/;]/).map(s => s.trim()).filter(Boolean);
+        const have = new Set(db.prepare("SELECT university FROM lead_university_applications WHERE lead_id=?").all(existingId).map(x => x.university.toLowerCase()));
+        const uStatus = STATUS_MAP[statusKey] || 'documents';
+        for (const u of list) {
+          if (have.has(u.toLowerCase())) continue;
+          insUniApp.run(existingId, u, uStatus);
+        }
+      }
+    }
+  });
+  txn();
+  logActivity({ type: 'import_applications', actor, details: { inserted, updated, skipped, total: rows.length } });
+  return { inserted, updated, skipped };
+}
+
+app.post('/api/import/cashflow', (req, res, next) => requireAdmin(req, res, () => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (rows.length === 0) return res.status(400).json({ error: 'No rows to import' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'Too many rows in one batch (max 5000)' });
+  try { res.json(importCashflowRows(rows, req.user)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+app.post('/api/import/applications', (req, res, next) => requireAdmin(req, res, () => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (rows.length === 0) return res.status(400).json({ error: 'No rows to import' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'Too many rows in one batch (max 5000)' });
+  try { res.json(importApplicationRows(rows, req.user)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+// ─── STAFF REPLY to a student through the portal thread ───────────────────
+app.post('/api/leads/:id/reply-to-student', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const { text } = req.body || {};
+  if (!text?.trim()) return res.status(400).json({ error: 'text required' });
+  logActivity({ type: 'reply_to_student', actor: req.user, lead, details: text.trim() });
+  res.json({ ok: true });
+});
+
+// Public — student fetches the conversation thread (their messages + staff replies)
+app.get('/api/public/student/:token/thread', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
+  if (!lead) return res.status(404).json({ error: 'Portal link not active.' });
+  const rows = db.prepare(`SELECT id, type, actor_name, details, created_at
+    FROM activity_log
+    WHERE lead_id=? AND type IN ('note','reply_to_student','student_doc_upload')
+    ORDER BY id ASC`).all(lead.id);
+  res.json(rows);
 });
 
 // ─── STUDENT PORTAL (public link) ──────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save } from 'lucide-react';
+import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Upload, Megaphone, StickyNote } from 'lucide-react';
+import ExcelImport from '../components/ExcelImport';
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
@@ -21,6 +22,20 @@ export default function Settings() {
 
       {/* Office settings — drives auto check-in / check-out + geofence */}
       <OfficeSettings />
+
+      {/* Owner Broadcasts — sticky notes for the whole team */}
+      <BroadcastManager />
+
+      {/* Excel importer */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-blue-50 text-blue-700">
+          <Upload size={18} />
+          <span className="font-semibold text-sm">Import from Excel</span>
+        </div>
+        <div className="p-5">
+          <ExcelImport />
+        </div>
+      </div>
 
       {/* Office Info */}
       <Card icon={<Info size={18} />} title="Office Info" color="blue">
@@ -447,6 +462,86 @@ function OfficeSettings() {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/* ─────────────────────────── BROADCAST MANAGER ─────────────────────────── */
+function BroadcastManager() {
+  const [items, setItems] = useState([]);
+  const [text, setText]   = useState('');
+  const [color, setColor] = useState('amber');
+  const [posting, setPosting] = useState(false);
+
+  const load = () => api.broadcasts().then(setItems).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const post = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setPosting(true);
+    try { await api.createBroadcast({ message: text.trim(), color, pinned: 1 }); setText(''); load(); }
+    catch (err) { alert(err.message); }
+    setPosting(false);
+  };
+
+  const remove = async (id) => {
+    if (!confirm('Delete this broadcast?')) return;
+    try { await api.deleteBroadcast(id); load(); } catch (e) { alert(e.message); }
+  };
+
+  const colors = [
+    { key: 'amber',   cls: 'bg-amber-50 border-amber-200 text-amber-900' },
+    { key: 'blue',    cls: 'bg-blue-50 border-blue-200 text-blue-900' },
+    { key: 'rose',    cls: 'bg-rose-50 border-rose-200 text-rose-900' },
+    { key: 'emerald', cls: 'bg-emerald-50 border-emerald-200 text-emerald-900' },
+  ];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-amber-50 text-amber-800">
+        <Megaphone size={18} />
+        <span className="font-semibold text-sm">Owner Broadcast</span>
+        <span className="text-xs text-amber-600 ml-2">Visible to everyone on the dashboard</span>
+      </div>
+      <div className="p-5 space-y-3">
+        <form onSubmit={post} className="space-y-2">
+          <textarea rows={2} value={text} onChange={e => setText(e.target.value)}
+            placeholder="e.g. Friday focus: China-Tier-1 visa interviews — clear all blockers."
+            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <div className="flex items-center justify-between">
+            <div className="flex gap-1.5">
+              {colors.map(c => (
+                <button key={c.key} type="button" onClick={() => setColor(c.key)}
+                  className={`w-7 h-7 rounded-lg border-2 ${c.cls} ${color === c.key ? 'ring-2 ring-offset-1 ring-slate-400' : ''}`}
+                  aria-label={c.key} />
+              ))}
+            </div>
+            <button type="submit" disabled={posting || !text.trim()}
+              className="text-sm font-medium bg-amber-600 text-white px-4 py-2 rounded-xl hover:bg-amber-700 disabled:opacity-60 flex items-center gap-2">
+              <StickyNote size={14} /> {posting ? 'Posting…' : 'Post'}
+            </button>
+          </div>
+        </form>
+
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-400 italic text-center py-4">No active broadcasts</p>
+        ) : (
+          <div className="space-y-2">
+            {items.map(b => {
+              const c = colors.find(x => x.key === b.color) || colors[0];
+              return (
+                <div key={b.id} className={`relative p-4 rounded-xl border ${c.cls}`}>
+                  <p className="text-sm whitespace-pre-wrap pr-7">{b.message}</p>
+                  <p className="text-[11px] mt-2 opacity-70">— {b.author_name} · {b.created_at}</p>
+                  <button onClick={() => remove(b.id)}
+                    className="absolute top-2 right-2 p-1 opacity-50 hover:opacity-100"><Trash2 size={14}/></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

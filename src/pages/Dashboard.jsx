@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award } from 'lucide-react';
+import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -22,7 +22,25 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [extraStats, setExtraStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [broadcasts, setBroadcasts] = useState([]);
   const month = new Date().toISOString().slice(0, 7);
+
+  // Owner broadcasts — pinned sticky notes
+  useEffect(() => {
+    const load = () => api.broadcasts().then(setBroadcasts).catch(() => {});
+    load();
+    // Refresh broadcasts when a new one arrives via SSE
+    const es = new EventSource('/api/events');
+    es.onmessage = (e) => {
+      try { const d = JSON.parse(e.data); if (d.type === 'broadcast_new') load(); } catch {}
+    };
+    return () => { try { es.close(); } catch {} };
+  }, []);
+
+  const dismissBroadcast = async (b) => {
+    try { await api.dismissBroadcast(b.id); setBroadcasts(prev => prev.map(x => x.id === b.id ? { ...x, dismissed: 1 } : x)); }
+    catch {}
+  };
 
   useEffect(() => {
     api.dashboard().then(setData);
@@ -72,8 +90,36 @@ export default function Dashboard() {
   const fileOpened = pipeline.find(p => p.lead_status === 'File Opened')?.count || 0;
   const convRate = total > 0 ? ((enrolled / total) * 100).toFixed(1) : 0;
 
+  const activeBroadcasts = broadcasts.filter(b => !b.dismissed);
+
   return (
     <div className="space-y-6">
+      {/* Owner broadcasts — sticky notes that travel to everyone */}
+      {activeBroadcasts.length > 0 && (
+        <div className="space-y-2">
+          {activeBroadcasts.map(b => {
+            const cls = {
+              amber:   'bg-amber-50 border-amber-200 text-amber-900',
+              blue:    'bg-blue-50 border-blue-200 text-blue-900',
+              rose:    'bg-rose-50 border-rose-200 text-rose-900',
+              emerald: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+            }[b.color] || 'bg-amber-50 border-amber-200 text-amber-900';
+            return (
+              <div key={b.id} className={`relative border rounded-2xl p-4 pr-10 flex items-start gap-3 ${cls}`}>
+                <Megaphone size={18} className="mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm whitespace-pre-wrap font-medium">{b.message}</p>
+                  <p className="text-[11px] opacity-70 mt-1">— {b.author_name}</p>
+                </div>
+                <button onClick={() => dismissBroadcast(b)} className="absolute top-2 right-2 p-1 opacity-50 hover:opacity-100" title="Dismiss">
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
