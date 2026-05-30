@@ -50,11 +50,13 @@ export const api = {
   settings:  () => req('/settings'),
 
   // Leads
-  leads:       (p = {}) => req('/leads?' + new URLSearchParams(p)),
-  getLead:     (id)     => req(`/leads/${id}`),
-  createLead:  (d)      => req('/leads',       { method: 'POST', body: JSON.stringify(d) }),
-  updateLead:  (id, d)  => req(`/leads/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
-  deleteLead:  (id)     => req(`/leads/${id}`, { method: 'DELETE' }),
+  leads:        (p = {}) => req('/leads?' + new URLSearchParams(p)),
+  getLead:      (id)     => req(`/leads/${id}`),
+  createLead:   (d)      => req('/leads',       { method: 'POST', body: JSON.stringify(d) }),
+  updateLead:   (id, d)  => req(`/leads/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
+  deleteLead:   (id)     => req(`/leads/${id}`, { method: 'DELETE' }),
+  leadTimeline: (id)     => req(`/leads/${id}/timeline`),
+  addNote:      (id, t)  => req(`/leads/${id}/notes`, { method: 'POST', body: JSON.stringify({ text: t }) }),
 
   // Finance
   income:        (p = {}) => req('/income?' + new URLSearchParams(p)),

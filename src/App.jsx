@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Cockpit from './pages/Cockpit';
 import Applications from './pages/Applications';
 import Leads from './pages/Leads';
+import LeadDetail from './pages/LeadDetail';
 import Pipeline from './pages/Pipeline';
 import Finance from './pages/Finance';
 import HR from './pages/HR';
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/" element={<Dashboard user={user} />} />
               {user.role === 'admin' && <Route path="/cockpit" element={<Cockpit />} />}
               <Route path="/leads" element={<Leads user={user} />} />
+              <Route path="/leads/:id" element={<LeadDetail user={user} />} />
               <Route path="/pipeline" element={<Pipeline user={user} />} />
               <Route path="/applications" element={<Applications user={user} />} />
               {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}

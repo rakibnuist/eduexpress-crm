@@ -1275,6 +1275,58 @@ app.put('/api/leads/:id', async (req, res) => {
 });
 app.delete('/api/leads/:id', (req, res) => { db.prepare("DELETE FROM leads WHERE id=?").run(req.params.id); res.json({ ok: true }); });
 
+// ─── LEAD TIMELINE — full chronological story of one lead ──────────────────
+// Merges activity_log entries for this lead with related income rows so the
+// owner sees one single feed: created, status changes, reassignments, every
+// payment (whether logged inline or as a separate income row), notes,
+// university-application status flips, etc.
+app.get('/api/leads/:id/timeline', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+
+  // 1) Activity log entries tied to this lead (numeric id link)
+  const activities = db.prepare("SELECT * FROM activity_log WHERE lead_id=? ORDER BY id DESC LIMIT 500").all(lead.id);
+
+  // 2) Income rows that reference the human lead_id — useful for older entries
+  //    that were recorded before the activity log existed.
+  const incomes = lead.lead_id
+    ? db.prepare("SELECT id, date, amount, category, reference, notes FROM income WHERE lead_id=? ORDER BY id DESC").all(lead.lead_id)
+    : [];
+
+  // De-dupe: if we already logged a payment_recorded for the same amount on
+  // the same date, skip the income row (it'd be a duplicate event).
+  const seen = new Set(activities
+    .filter(a => a.type === 'payment_recorded' && a.amount)
+    .map(a => `${a.amount}|${(a.created_at || '').slice(0, 10)}`));
+  const extraIncome = incomes
+    .filter(i => !seen.has(`${i.amount}|${i.date}`))
+    .map(i => ({
+      id: 'inc-' + i.id,
+      type: 'payment_recorded',
+      actor_name: null,
+      amount: i.amount,
+      details: JSON.stringify({ category: i.category, reference: i.reference, notes: i.notes }),
+      created_at: i.date + ' 12:00:00',
+    }));
+
+  const merged = [...activities, ...extraIncome]
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+  res.json({ lead, timeline: merged });
+});
+
+// Add a note to a lead — appears in the timeline.
+app.post('/api/leads/:id/notes', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const { text } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text is required' });
+  logActivity({ type: 'note', actor: req.user, lead, details: text.trim() });
+  res.json({ ok: true });
+});
+
 // ─────────────────────────────────────────────────────────
 // FINANCE
 // ─────────────────────────────────────────────────────────
@@ -1290,7 +1342,9 @@ app.post('/api/income', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes)`).run({ ...d, month, amount: d.amount||0 });
   const row = db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid);
-  logActivity({ type: 'payment_recorded', actor: req.user, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference } });
+  // Try to attach to a real lead so this payment shows on the lead's timeline.
+  const lead = row.lead_id ? db.prepare("SELECT * FROM leads WHERE lead_id=?").get(row.lead_id) : null;
+  logActivity({ type: 'payment_recorded', actor: req.user, lead, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference } });
   res.json(row);
 });
 app.put('/api/income/:id', (req, res) => {

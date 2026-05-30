@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -126,9 +126,15 @@ export default function Leads() {
             <tbody className="divide-y divide-slate-50">
               {data.leads.map(l => (
                 <tr key={l.id} className="hover:bg-blue-50/30 transition-colors group">
-                  <td className="py-2.5 px-3 font-mono text-xs text-blue-600 font-semibold">{l.lead_id}</td>
+                  <td className="py-2.5 px-3 font-mono text-xs">
+                    <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-semibold">
+                      {l.lead_id}
+                    </Link>
+                  </td>
                   <td className="py-2.5 px-3">
-                    <div className="font-medium text-slate-800 truncate max-w-[130px]">{l.client_name}</div>
+                    <Link to={`/leads/${l.id}`} className="font-medium text-slate-800 hover:text-blue-600 truncate max-w-[130px] block">
+                      {l.client_name}
+                    </Link>
                     {l.notes && <div className="text-xs text-slate-400 truncate max-w-[130px]" title={l.notes}>{l.notes}</div>}
                   </td>
                   <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap text-xs">{l.phone}</td>
