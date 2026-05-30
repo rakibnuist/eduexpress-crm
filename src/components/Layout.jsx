@@ -1,17 +1,18 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Kanban, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut,
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
 
 const baseNav = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/cockpit',  icon: Eye,             label: 'Cockpit',  adminOnly: true },
   { to: '/leads',    icon: Users,           label: 'All Leads' },
   { to: '/pipeline', icon: Kanban,          label: 'Pipeline' },
-  { to: '/finance',  icon: DollarSign,      label: 'Finance', adminOnly: true },
-  { to: '/hr',       icon: UserCheck,       label: 'HR',      adminOnly: true },
+  { to: '/finance',  icon: DollarSign,      label: 'Finance',  adminOnly: true },
+  { to: '/hr',       icon: UserCheck,       label: 'HR',       adminOnly: true },
   { to: '/settings', icon: Settings,        label: 'Settings', adminOnly: true },
 ];
 

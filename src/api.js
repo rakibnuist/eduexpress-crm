@@ -26,6 +26,10 @@ export const api = {
   officeConfig:     ()  => req('/office-config'),
   saveOfficeConfig: (d) => req('/office-config', { method: 'POST', body: JSON.stringify(d) }),
 
+  // Owner's Cockpit
+  cockpit:  ()       => req('/cockpit'),
+  activity: (p = {}) => req('/activity?' + new URLSearchParams(p)),
+
   // Dashboard / settings
   dashboard: () => req('/dashboard'),
   settings:  () => req('/settings'),

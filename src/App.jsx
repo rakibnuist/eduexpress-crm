@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
+import Cockpit from './pages/Cockpit';
 import Leads from './pages/Leads';
 import Pipeline from './pages/Pipeline';
 import Finance from './pages/Finance';
@@ -41,6 +42,7 @@ export default function App() {
           <Layout user={user} onLogout={() => setUser(null)}>
             <Routes>
               <Route path="/" element={<Dashboard user={user} />} />
+              {user.role === 'admin' && <Route path="/cockpit" element={<Cockpit />} />}
               <Route path="/leads" element={<Leads user={user} />} />
               <Route path="/pipeline" element={<Pipeline user={user} />} />
               {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}

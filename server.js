@@ -149,7 +149,9 @@ app.post('/api/users', (req, res, next) => requireAdmin(req, res, () => {
   try {
     const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
       .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), role === 'admin' ? 'admin' : 'consultant', consultant_name, emp_id);
-    res.json(db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(info.lastInsertRowid));
+    const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(info.lastInsertRowid);
+    logActivity({ type: 'user_created', actor: req.user, to: u.email, details: { role: u.role, consultant_name: u.consultant_name } });
+    res.json(u);
   } catch (e) {
     res.status(400).json({ error: e.message.includes('UNIQUE') ? 'That email is already in use' : e.message });
   }
@@ -180,6 +182,116 @@ app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => 
   res.json(Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)])));
 }));
 
+// ─── OWNER'S COCKPIT ────────────────────────────────────────────────────────
+// Build a daily summary block for a given YYYY-MM-DD date.
+function buildDaySummary(date) {
+  const activeEmployees = db.prepare("SELECT emp_id, name FROM employees WHERE active='Yes'").all();
+  const attendance = db.prepare("SELECT emp_id, name, check_in, check_out, status, hours_worked, source FROM attendance WHERE date=?").all(date);
+  const present = attendance.map(a => a.emp_id);
+  const missing = activeEmployees.filter(e => !present.includes(e.emp_id));
+
+  const newLeads     = db.prepare("SELECT COUNT(*) as n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?").get(date, date).n;
+  const conversions  = db.prepare("SELECT COUNT(*) as n FROM activity_log WHERE type='lead_status_changed' AND to_value='Enrolled' AND substr(created_at,1,10)=?").get(date).n;
+  const paymentsRow  = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(amount),0) as s FROM income WHERE date=?").get(date);
+  const expensesRow  = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(amount),0) as s FROM expenses WHERE date=?").get(date);
+
+  return {
+    date,
+    attendance: { checkedIn: attendance, missing, totalActive: activeEmployees.length },
+    stats: {
+      newLeads,
+      conversions,
+      paymentsCount: paymentsRow.n,
+      paymentsAmount: paymentsRow.s,
+      expensesCount: expensesRow.n,
+      expensesAmount: expensesRow.s,
+      netCash: (paymentsRow.s || 0) - (expensesRow.s || 0),
+    },
+  };
+}
+
+// Find leads that need attention — what a remote owner cares about.
+function buildAlerts() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const fiveDaysAgo = new Date(now.getTime() - 5 * 86400000).toISOString().slice(0, 10);
+  const thirtyDaysAhead = new Date(now.getTime() + 30 * 86400000).toISOString().slice(0, 10);
+
+  // Open, not-terminal-status leads with no activity in the last 5 days
+  const idleLeads = db.prepare(`
+    SELECT l.id, l.lead_id, l.client_name, l.phone, l.destination, l.lead_status, l.assigned_consultant,
+           COALESCE(l.date_added, substr(l.created_at,1,10)) as last_touch
+    FROM leads l
+    WHERE l.lead_status NOT IN ('Enrolled','Not Interested')
+      AND COALESCE(l.date_added, substr(l.created_at,1,10)) <= ?
+      AND NOT EXISTS (SELECT 1 FROM activity_log a WHERE a.lead_id = l.id AND a.created_at >= ?)
+    ORDER BY last_touch ASC
+    LIMIT 50`).all(fiveDaysAgo, fiveDaysAgo);
+
+  // No consultant assigned
+  const unassigned = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, lead_status, date_added
+    FROM leads
+    WHERE (assigned_consultant IS NULL OR assigned_consultant = '')
+      AND lead_status NOT IN ('Enrolled','Not Interested')
+    ORDER BY id DESC LIMIT 50`).all();
+
+  // Follow-up date is past
+  const overdueFollowups = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, lead_status, assigned_consultant, next_followup
+    FROM leads
+    WHERE next_followup IS NOT NULL AND next_followup != ''
+      AND next_followup < ?
+      AND lead_status NOT IN ('Enrolled','Not Interested')
+    ORDER BY next_followup ASC LIMIT 50`).all(today);
+
+  // Outstanding balance (paid less than fee, lead at later stages)
+  const outstandingBalance = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, lead_status, assigned_consultant,
+           service_fee, paid, balance
+    FROM leads
+    WHERE balance > 0 AND lead_status IN ('File Opened','Office Visited','Positive','Enrolled')
+    ORDER BY balance DESC LIMIT 50`).all();
+
+  return { idleLeads, unassigned, overdueFollowups, outstandingBalance };
+}
+
+app.get('/api/cockpit', (req, res, next) => requireAdmin(req, res, () => {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const today = buildDaySummary(todayStr);
+  const yesterday = buildDaySummary(yStr);
+  const alerts = buildAlerts();
+
+  const feed = db.prepare(`SELECT * FROM activity_log ORDER BY id DESC LIMIT 100`).all();
+
+  // Weekly trend: new leads + revenue per day for the last 7 days
+  const trend = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    trend.push({
+      date: d,
+      newLeads: db.prepare("SELECT COUNT(*) as n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?").get(d, d).n,
+      revenue:  db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM income WHERE date=?").get(d).s,
+    });
+  }
+
+  res.json({ today, yesterday, alerts, feed, trend });
+}));
+
+app.get('/api/activity', (req, res, next) => requireAdmin(req, res, () => {
+  const { type, actor, lead_id, since, before, limit = 100 } = req.query;
+  const where = []; const params = [];
+  if (type)    { where.push("type=?");          params.push(type); }
+  if (actor)   { where.push("actor_user_id=?"); params.push(actor); }
+  if (lead_id) { where.push("lead_id=?");       params.push(lead_id); }
+  if (since)   { where.push("created_at >= ?"); params.push(since); }
+  if (before)  { where.push("id < ?");          params.push(parseInt(before)); }
+  const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const rows = db.prepare(`SELECT * FROM activity_log ${ws} ORDER BY id DESC LIMIT ${Math.min(parseInt(limit) || 100, 500)}`).all(...params);
+  res.json(rows);
+}));
+
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
@@ -195,7 +307,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -304,6 +416,24 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    actor_user_id INTEGER,
+    actor_name TEXT,
+    lead_id INTEGER,
+    lead_name TEXT,
+    amount REAL,
+    from_value TEXT,
+    to_value TEXT,
+    details TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
+  CREATE INDEX IF NOT EXISTS idx_activity_lead    ON activity_log(lead_id);
+  CREATE INDEX IF NOT EXISTS idx_activity_actor   ON activity_log(actor_user_id);
 
   CREATE TABLE IF NOT EXISTS payroll (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -516,6 +646,29 @@ function nextLeadId() {
 function getConfig(key) {
   return db.prepare("SELECT value FROM meta_config WHERE key=?").get(key)?.value || null;
 }
+
+/* Activity log — concise audit trail of the changes an owner actually cares
+   about. Never throws (logging is best-effort), always returns synchronously.
+   Types: lead_created, lead_status_changed, lead_assigned, lead_payment,
+          payment_recorded, expense_recorded, user_created, attendance_in. */
+function logActivity({ type, actor, lead, amount, from, to, details }) {
+  try {
+    db.prepare(`INSERT INTO activity_log
+        (type, actor_user_id, actor_name, lead_id, lead_name, amount, from_value, to_value, details)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      type,
+      actor?.id || null,
+      actor?.name || actor?.email || 'System',
+      lead?.id || null,
+      lead?.client_name || lead?.lead_id || null,
+      amount ?? null,
+      from == null ? null : String(from),
+      to   == null ? null : String(to),
+      details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null,
+    );
+  } catch (e) { console.error('[activity]', e.message); }
+}
+
 function setConfig(key, value) {
   db.prepare(`INSERT INTO meta_config (key,value) VALUES (?,?)
               ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
@@ -593,6 +746,7 @@ function autoCheckIn(user, opts = {}) {
 
   const info = db.prepare("INSERT INTO attendance (emp_id, name, date, check_in, status, source) VALUES (?,?,?,?,?,'auto-login')")
     .run(emp.emp_id, emp.name, today, time, status);
+  logActivity({ type: 'attendance_in', actor: { id: user.id, name: user.name || emp.name }, to: time, details: { emp_id: emp.emp_id, status } });
   return { ok: true, created: info.lastInsertRowid, status, time };
 }
 
@@ -751,17 +905,30 @@ app.post('/api/leads', async (req, res) => {
     .run({ lead_id, date_added: d.date_added||new Date().toISOString().slice(0,10), client_name: d.client_name, phone: d.phone, email: d.email, destination: d.destination, last_education: d.last_education, gpa: d.gpa, english_score: d.english_score, program: d.program, lead_source: d.lead_source||'Manual', lead_status: d.lead_status||'New Lead', assigned_consultant: d.assigned_consultant, service_fee: d.service_fee||0, paid: d.paid||0, balance, payment_status: d.payment_status, next_followup: d.next_followup, notes: d.notes, meta_lead_id: d.meta_lead_id||null, meta_form_id: d.meta_form_id||null, meta_ad_id: d.meta_ad_id||null, meta_campaign: d.meta_campaign||null });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
   sendCAPIEvent('Lead', lead);
+  logActivity({ type: 'lead_created', actor: req.user, lead, details: { source: lead.lead_source, destination: lead.destination, assigned_consultant: lead.assigned_consultant } });
+  if (lead.assigned_consultant)
+    logActivity({ type: 'lead_assigned', actor: req.user, lead, to: lead.assigned_consultant });
   res.json(lead);
 });
 app.put('/api/leads/:id', async (req, res) => {
   const d = req.body;
-  const old = db.prepare("SELECT lead_status FROM leads WHERE id=?").get(req.params.id);
+  const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   db.prepare(`UPDATE leads SET client_name=@client_name,phone=@phone,email=@email,destination=@destination,last_education=@last_education,gpa=@gpa,english_score=@english_score,program=@program,lead_source=@lead_source,lead_status=@lead_status,assigned_consultant=@assigned_consultant,service_fee=@service_fee,paid=@paid,balance=@balance,payment_status=@payment_status,next_followup=@next_followup,notes=@notes WHERE id=@id`).run({ ...d, id: req.params.id, balance });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
-  if (old?.lead_status !== d.lead_status) {
+
+  // Audit the changes that matter to an owner.
+  if (oldLead?.lead_status !== lead.lead_status) {
+    logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
     const evtMap = { 'Enrolled':'Purchase','File Opened':'InitiateCheckout','Office Visited':'Schedule','Positive':'Lead' };
-    if (evtMap[d.lead_status]) sendCAPIEvent(evtMap[d.lead_status], lead);
+    if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead);
+  }
+  if ((oldLead?.assigned_consultant || '') !== (lead.assigned_consultant || '')) {
+    logActivity({ type: 'lead_assigned', actor: req.user, lead, from: oldLead?.assigned_consultant, to: lead.assigned_consultant });
+  }
+  if ((parseFloat(oldLead?.paid) || 0) !== (parseFloat(lead.paid) || 0)) {
+    const delta = (parseFloat(lead.paid) || 0) - (parseFloat(oldLead?.paid) || 0);
+    if (delta !== 0) logActivity({ type: 'lead_payment', actor: req.user, lead, amount: delta, from: oldLead.paid, to: lead.paid });
   }
   res.json(lead);
 });
@@ -781,7 +948,9 @@ app.get('/api/income', (req, res) => {
 app.post('/api/income', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes)`).run({ ...d, month, amount: d.amount||0 });
-  res.json(db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid));
+  const row = db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid);
+  logActivity({ type: 'payment_recorded', actor: req.user, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference } });
+  res.json(row);
 });
 app.put('/api/income/:id', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
@@ -801,7 +970,9 @@ app.get('/api/expenses', (req, res) => {
 app.post('/api/expenses', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes)`).run({ ...d, month, amount: d.amount||0 });
-  res.json(db.prepare("SELECT * FROM expenses WHERE id=?").get(info.lastInsertRowid));
+  const row = db.prepare("SELECT * FROM expenses WHERE id=?").get(info.lastInsertRowid);
+  logActivity({ type: 'expense_recorded', actor: req.user, amount: row.amount, details: { paid_to: row.paid_to, category: row.category, reference: row.reference } });
+  res.json(row);
 });
 app.put('/api/expenses/:id', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
