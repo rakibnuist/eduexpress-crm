@@ -182,6 +182,175 @@ app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => 
   res.json(Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)])));
 }));
 
+// ─── APPLICATION PIPELINE ──────────────────────────────────────────────────
+// 9 stages — sales funnel ends at 'Enrolled', application pipeline takes over.
+const APPLICATION_STAGES = [
+  { key: 'inquiry',       label: 'Inquiry',          order: 0 },
+  { key: 'counselling',   label: 'Counselling',      order: 1 },
+  { key: 'documents',     label: 'Documents',        order: 2 },
+  { key: 'application',   label: 'Application Sent', order: 3 },
+  { key: 'offer',         label: 'Offer Letter',     order: 4 },
+  { key: 'visa_applied',  label: 'Visa Applied',     order: 5 },
+  { key: 'visa_approved', label: 'Visa Approved',    order: 6 },
+  { key: 'departed',      label: 'Departed',         order: 7 },
+  { key: 'arrived',       label: 'Arrived',          order: 8 },
+];
+
+// Default document checklists per destination. Used when an application opens.
+// Each entry has a `required` array of doc types. Easy to edit later.
+const DOC_TEMPLATES = {
+  China:   ['Passport', 'SSC Certificate', 'HSC Certificate', 'SSC Marksheet', 'HSC Marksheet',
+            'Passport-size Photo', 'NID/Birth Certificate', 'English Medium Certificate (MOI)',
+            'CV', 'Statement of Purpose', 'Police Clearance', 'Medical Check-up', 'Bank Statement'],
+  Malta:   ['Passport', 'SSC Certificate', 'HSC Certificate', 'Marksheets', 'IELTS Score',
+            'Passport-size Photo', 'CV', 'Statement of Purpose', 'Bank Statement',
+            'Accommodation Proof', 'Sponsorship Letter'],
+  Hungary: ['Passport', 'SSC Certificate', 'HSC Certificate', 'Marksheets', 'IELTS Score',
+            'Passport-size Photo', 'CV', 'Statement of Purpose', 'Recommendation Letters',
+            'Bank Statement', 'Health Insurance'],
+  Greece:  ['Passport', 'SSC Certificate', 'HSC Certificate', 'Marksheets', 'IELTS Score',
+            'Passport-size Photo', 'CV', 'Statement of Purpose', 'Bank Statement'],
+  Estonia: ['Passport', 'SSC Certificate', 'HSC Certificate', 'Marksheets', 'IELTS Score',
+            'Passport-size Photo', 'CV', 'Statement of Purpose', 'Bank Statement',
+            'Motivation Letter'],
+};
+const DEFAULT_DOCS = ['Passport', 'SSC Certificate', 'HSC Certificate', 'Marksheets',
+                      'Passport-size Photo', 'CV', 'Statement of Purpose', 'Bank Statement'];
+
+function templateFor(destination) {
+  return DOC_TEMPLATES[destination] || DEFAULT_DOCS;
+}
+
+// Consultant-scope helper used by every application endpoint.
+function leadIsVisibleTo(lead, user) {
+  if (user?.role === 'admin') return true;
+  const me = user?.consultant_name || user?.name;
+  return !!me && lead.assigned_consultant === me;
+}
+
+// Reference: list of stages + doc templates (for the UI).
+app.get('/api/application/meta', (req, res) => {
+  res.json({ stages: APPLICATION_STAGES, docTemplates: DOC_TEMPLATES, defaultDocs: DEFAULT_DOCS });
+});
+
+// All leads currently in the application pipeline (i.e. that have a stage set,
+// or are 'Enrolled'/'File Opened'). Returns one card-friendly row each.
+app.get('/api/applications', (req, res) => {
+  const where = [
+    "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
+  ];
+  const params = {};
+  if (req.user?.role === 'consultant') {
+    where.push("l.assigned_consultant = @me");
+    params.me = req.user.consultant_name || req.user.name || '';
+  }
+  if (req.query.destination) { where.push("l.destination = @destination"); params.destination = req.query.destination; }
+  if (req.query.consultant)  { where.push("l.assigned_consultant = @consultant"); params.consultant = req.query.consultant; }
+  const ws = 'WHERE ' + where.join(' AND ');
+
+  const rows = db.prepare(`
+    SELECT l.id, l.lead_id, l.client_name, l.phone, l.destination, l.university,
+           l.lead_status, l.application_stage, l.visa_deadline, l.departure_date,
+           l.intake_term, l.assigned_consultant, l.service_fee, l.paid, l.balance,
+           (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id) AS docs_total,
+           (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id AND d.status IN ('received','verified')) AS docs_received
+    FROM leads l
+    ${ws}
+    ORDER BY
+      CASE l.application_stage
+        WHEN 'inquiry' THEN 0 WHEN 'counselling' THEN 1 WHEN 'documents' THEN 2
+        WHEN 'application' THEN 3 WHEN 'offer' THEN 4 WHEN 'visa_applied' THEN 5
+        WHEN 'visa_approved' THEN 6 WHEN 'departed' THEN 7 WHEN 'arrived' THEN 8
+        ELSE 0 END,
+      l.id DESC`).all(params);
+
+  res.json({ stages: APPLICATION_STAGES, rows });
+});
+
+// Move a lead to a different application stage.
+app.put('/api/leads/:id/stage', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+
+  const { stage, visa_deadline, departure_date, university, intake_term, application_notes } = req.body || {};
+  if (stage && !APPLICATION_STAGES.some(s => s.key === stage)) {
+    return res.status(400).json({ error: 'Unknown stage' });
+  }
+  const oldStage = lead.application_stage;
+  db.prepare(`UPDATE leads SET
+    application_stage = COALESCE(?, application_stage),
+    visa_deadline     = COALESCE(?, visa_deadline),
+    departure_date    = COALESCE(?, departure_date),
+    university        = COALESCE(?, university),
+    intake_term       = COALESCE(?, intake_term),
+    application_notes = COALESCE(?, application_notes)
+    WHERE id=?`).run(stage ?? null, visa_deadline ?? null, departure_date ?? null,
+                     university ?? null, intake_term ?? null, application_notes ?? null, req.params.id);
+  const fresh = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (stage && oldStage !== stage) {
+    logActivity({ type: 'application_stage_changed', actor: req.user, lead: fresh, from: oldStage, to: stage });
+  }
+  res.json(fresh);
+});
+
+// Documents for one lead — list + ensure-template helpers.
+app.get('/api/leads/:id/documents', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+
+  // If no docs yet and this lead has a destination, seed from template once.
+  const count = db.prepare("SELECT COUNT(*) as c FROM lead_documents WHERE lead_id=?").get(lead.id).c;
+  if (count === 0 && lead.destination) {
+    const seed = db.prepare("INSERT INTO lead_documents (lead_id, doc_type, status) VALUES (?,?,?)");
+    db.transaction(() => {
+      for (const docType of templateFor(lead.destination)) seed.run(lead.id, docType, 'pending');
+    })();
+  }
+  const docs = db.prepare("SELECT * FROM lead_documents WHERE lead_id=? ORDER BY id").all(lead.id);
+  res.json(docs);
+});
+
+app.post('/api/leads/:id/documents', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+
+  const { doc_type, status = 'pending', notes = null, file_url = null } = req.body || {};
+  if (!doc_type) return res.status(400).json({ error: 'doc_type is required' });
+  const info = db.prepare(`INSERT INTO lead_documents (lead_id, doc_type, status, notes, file_url, updated_by)
+    VALUES (?,?,?,?,?,?)`).run(lead.id, doc_type, status, notes, file_url, req.user?.name || req.user?.email || null);
+  res.json(db.prepare("SELECT * FROM lead_documents WHERE id=?").get(info.lastInsertRowid));
+});
+
+app.put('/api/documents/:id', (req, res) => {
+  const doc = db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Not found' });
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+
+  const { status, notes, file_url, received_on } = req.body || {};
+  const finalReceived = status && ['received', 'verified'].includes(status) && !doc.received_on
+    ? (received_on || new Date().toISOString().slice(0, 10))
+    : (received_on ?? doc.received_on);
+  db.prepare(`UPDATE lead_documents SET status=COALESCE(?,status), notes=COALESCE(?,notes),
+              file_url=COALESCE(?,file_url), received_on=?, updated_by=?, updated_at=datetime('now')
+              WHERE id=?`)
+    .run(status ?? null, notes ?? null, file_url ?? null, finalReceived,
+         req.user?.name || req.user?.email || null, req.params.id);
+  res.json(db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id));
+});
+
+app.delete('/api/documents/:id', (req, res) => {
+  const doc = db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Not found' });
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  db.prepare("DELETE FROM lead_documents WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ─── OWNER'S COCKPIT ────────────────────────────────────────────────────────
 // Build a daily summary block for a given YYYY-MM-DD date.
 function buildDaySummary(date) {
@@ -253,7 +422,17 @@ function buildAlerts() {
     WHERE balance > 0 AND lead_status IN ('File Opened','Office Visited','Positive','Enrolled')
     ORDER BY balance DESC LIMIT 50`).all();
 
-  return { idleLeads, unassigned, overdueFollowups, outstandingBalance };
+  // Visa deadlines within the next 30 days
+  const visaDeadlines = db.prepare(`
+    SELECT id, lead_id, client_name, destination, university, application_stage,
+           assigned_consultant, visa_deadline
+    FROM leads
+    WHERE visa_deadline IS NOT NULL AND visa_deadline != ''
+      AND visa_deadline <= ?
+      AND (application_stage IS NULL OR application_stage NOT IN ('visa_approved','departed','arrived'))
+    ORDER BY visa_deadline ASC LIMIT 50`).all(thirtyDaysAhead);
+
+  return { idleLeads, unassigned, overdueFollowups, outstandingBalance, visaDeadlines };
 }
 
 app.get('/api/cockpit', (req, res, next) => requireAdmin(req, res, () => {
@@ -307,7 +486,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -416,6 +595,20 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS lead_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    doc_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | received | verified | rejected | not_required
+    notes TEXT,
+    file_url TEXT,
+    received_on TEXT,
+    updated_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_docs_lead ON lead_documents(lead_id);
 
   CREATE TABLE IF NOT EXISTS activity_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -544,6 +737,12 @@ function runMigrations() {
     `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
     `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
     `ALTER TABLE users      ADD COLUMN emp_id TEXT`,
+    `ALTER TABLE leads      ADD COLUMN application_stage TEXT`,
+    `ALTER TABLE leads      ADD COLUMN visa_deadline TEXT`,
+    `ALTER TABLE leads      ADD COLUMN departure_date TEXT`,
+    `ALTER TABLE leads      ADD COLUMN intake_term TEXT`,
+    `ALTER TABLE leads      ADD COLUMN university TEXT`,
+    `ALTER TABLE leads      ADD COLUMN application_notes TEXT`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });

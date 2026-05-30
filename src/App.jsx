@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Cockpit from './pages/Cockpit';
+import Applications from './pages/Applications';
 import Leads from './pages/Leads';
 import Pipeline from './pages/Pipeline';
 import Finance from './pages/Finance';
@@ -45,6 +46,7 @@ export default function App() {
               {user.role === 'admin' && <Route path="/cockpit" element={<Cockpit />} />}
               <Route path="/leads" element={<Leads user={user} />} />
               <Route path="/pipeline" element={<Pipeline user={user} />} />
+              <Route path="/applications" element={<Applications user={user} />} />
               {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
               {user.role === 'admin' && <Route path="/hr" element={<HR />} />}
               {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}

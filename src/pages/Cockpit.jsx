@@ -62,7 +62,8 @@ export default function Cockpit() {
   );
 
   const { today, yesterday, alerts, feed, trend } = data;
-  const totalAlerts = alerts.idleLeads.length + alerts.unassigned.length + alerts.overdueFollowups.length + alerts.outstandingBalance.length;
+  const visaDeadlines = alerts.visaDeadlines || [];
+  const totalAlerts = alerts.idleLeads.length + alerts.unassigned.length + alerts.overdueFollowups.length + alerts.outstandingBalance.length + visaDeadlines.length;
   const totalOutstanding = alerts.outstandingBalance.reduce((s, l) => s + (l.balance || 0), 0);
 
   return (
@@ -163,7 +164,7 @@ export default function Cockpit() {
       )}
 
       {tab === 'attendance' && <AttendanceTab today={today} yesterday={yesterday} />}
-      {tab === 'alerts'     && <AlertsTab alerts={alerts} totalOutstanding={totalOutstanding} />}
+      {tab === 'alerts'     && <AlertsTab alerts={alerts} visaDeadlines={visaDeadlines} totalOutstanding={totalOutstanding} />}
       {tab === 'feed'       && <FeedTab feed={feed} />}
     </div>
   );
@@ -262,9 +263,14 @@ function AttendanceCard({ title, data }) {
   );
 }
 
-function AlertsTab({ alerts, totalOutstanding }) {
+function AlertsTab({ alerts, visaDeadlines = [], totalOutstanding }) {
   return (
     <div className="space-y-4">
+      <AlertLane title="Visa deadlines (next 30 days)" icon={<CalendarClock size={16} />} color="rose"
+        subtitle="Students whose visa application deadline is approaching"
+        rows={visaDeadlines}
+        renderMeta={l => <span className="text-xs font-semibold text-rose-700">{l.visa_deadline}</span>}
+      />
       <AlertLane title="Idle leads" icon={<Clock size={16} />} color="amber"
         subtitle="No activity in the last 5 days — possibly falling through the cracks"
         rows={alerts.idleLeads}

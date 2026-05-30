@@ -30,6 +30,15 @@ export const api = {
   cockpit:  ()       => req('/cockpit'),
   activity: (p = {}) => req('/activity?' + new URLSearchParams(p)),
 
+  // Application pipeline
+  applicationMeta: ()        => req('/application/meta'),
+  applications:    (p = {})  => req('/applications?' + new URLSearchParams(p)),
+  updateStage:     (id, d)   => req(`/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify(d) }),
+  documents:       (leadId)  => req(`/leads/${leadId}/documents`),
+  addDocument:     (leadId, d) => req(`/leads/${leadId}/documents`, { method: 'POST', body: JSON.stringify(d) }),
+  updateDocument:  (id, d)   => req(`/documents/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteDocument:  (id)      => req(`/documents/${id}`, { method: 'DELETE' }),
+
   // Dashboard / settings
   dashboard: () => req('/dashboard'),
   settings:  () => req('/settings'),
