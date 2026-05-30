@@ -63,6 +63,11 @@ export const api = {
   kpi:           (month) => req(`/kpi/${month}`),
   setKpiTargets: (d)     => req('/kpi/targets', { method: 'PUT', body: JSON.stringify(d) }),
 
+  // Payroll
+  payroll:        (month) => req('/payroll?' + new URLSearchParams({ month })),
+  updatePayroll:  (id, d) => req(`/payroll/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  markPayrollPaid:(id)    => req(`/payroll/${id}/mark-paid`, { method: 'POST' }),
+
   // Users (admin)
   users:      ()       => req('/users'),
   createUser: (d)      => req('/users',       { method: 'POST', body: JSON.stringify(d) }),

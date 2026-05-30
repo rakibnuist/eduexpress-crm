@@ -170,7 +170,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -278,6 +278,24 @@ function setupSchema() { db.exec(`
     active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS payroll (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month TEXT NOT NULL,                  -- YYYY-MM
+    emp_id TEXT NOT NULL,
+    name TEXT,
+    base_salary REAL DEFAULT 0,
+    days_worked INTEGER DEFAULT 0,
+    working_days INTEGER DEFAULT 0,
+    bonus REAL DEFAULT 0,
+    deductions REAL DEFAULT 0,
+    net_pay REAL DEFAULT 0,
+    paid_on TEXT,
+    status TEXT DEFAULT 'pending',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(month, emp_id)
   );
 
   -- ── MESSAGING ──────────────────────────────────────────
@@ -797,6 +815,69 @@ app.put('/api/kpi/targets', (req, res) => {
   db.prepare(`INSERT INTO kpi_targets (consultant,month,target_leads,target_enrolled,target_revenue) VALUES (?,?,?,?,?) ON CONFLICT(consultant,month) DO UPDATE SET target_leads=excluded.target_leads,target_enrolled=excluded.target_enrolled,target_revenue=excluded.target_revenue`).run(consultant,month,target_leads||0,target_enrolled||0,target_revenue||0);
   res.json({ ok:true });
 });
+
+// ─────────────────────────────────────────────────────────
+// PAYROLL
+// ─────────────────────────────────────────────────────────
+function workingDaysInMonth(month) {
+  const [y, m] = month.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  let wd = 0;
+  for (let d = 1; d <= days; d++) { const dow = new Date(y, m - 1, d).getDay(); if (dow !== 5 && dow !== 6) wd++; }
+  return wd;
+}
+
+// List payroll entries for a month (auto-creates rows for active employees if missing)
+app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const wd = workingDaysInMonth(month);
+  const employees = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  const ensure = db.prepare(`INSERT OR IGNORE INTO payroll
+    (month, emp_id, name, base_salary, working_days, days_worked, net_pay)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const recalc = db.prepare("UPDATE payroll SET days_worked=?, working_days=? WHERE month=? AND emp_id=?");
+
+  for (const emp of employees) {
+    const present = db.prepare("SELECT COUNT(*) as n FROM attendance WHERE emp_id=? AND date LIKE ? AND (status='Present' OR status='Late')")
+      .get(emp.emp_id, `${month}%`).n;
+    ensure.run(month, emp.emp_id, emp.name, emp.salary || 0, wd, present, emp.salary || 0);
+    recalc.run(present, wd, month, emp.emp_id);
+  }
+
+  const rows = db.prepare("SELECT * FROM payroll WHERE month=? ORDER BY name").all(month);
+  const totals = rows.reduce((a, r) => ({
+    base: a.base + (r.base_salary || 0),
+    bonus: a.bonus + (r.bonus || 0),
+    deductions: a.deductions + (r.deductions || 0),
+    net: a.net + (r.net_pay || 0),
+    paid: a.paid + (r.status === 'paid' ? (r.net_pay || 0) : 0),
+    pending: a.pending + (r.status !== 'paid' ? (r.net_pay || 0) : 0),
+  }), { base: 0, bonus: 0, deductions: 0, net: 0, paid: 0, pending: 0 });
+
+  res.json({ month, workingDays: wd, rows, totals });
+}));
+
+// Adjust a single payroll line (bonus, deductions, status, paid_on, notes)
+app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
+  const cur = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  const { bonus, deductions, status, paid_on, notes, base_salary } = req.body || {};
+  const base = (base_salary !== undefined ? Number(base_salary) : cur.base_salary) || 0;
+  const b = (bonus      !== undefined ? Number(bonus)      : cur.bonus)      || 0;
+  const d = (deductions !== undefined ? Number(deductions) : cur.deductions) || 0;
+  const net = base + b - d;
+  const stat = status || cur.status;
+  const paidOn = (stat === 'paid') ? (paid_on || cur.paid_on || new Date().toISOString().slice(0, 10)) : null;
+  db.prepare(`UPDATE payroll SET base_salary=?, bonus=?, deductions=?, net_pay=?, status=?, paid_on=?, notes=? WHERE id=?`)
+    .run(base, b, d, net, stat, paidOn, notes ?? cur.notes ?? null, req.params.id);
+  res.json(db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id));
+}));
+
+app.post('/api/payroll/:id/mark-paid', (req, res, next) => requireAdmin(req, res, () => {
+  db.prepare("UPDATE payroll SET status='paid', paid_on=COALESCE(paid_on, ?) WHERE id=?")
+    .run(new Date().toISOString().slice(0, 10), req.params.id);
+  res.json(db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id));
+}));
 
 // ─────────────────────────────────────────────────────────
 // CHANNELS (WhatsApp accounts, Pages, IG accounts)

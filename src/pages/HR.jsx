@@ -3,7 +3,8 @@ import { api } from '../api';
 import Modal from '../components/Modal';
 import {
   Users, Clock, BarChart2, Plus, Pencil, Trash2, CheckCircle,
-  LogIn, LogOut, Target, TrendingUp, Award, AlertCircle, Calendar
+  LogIn, LogOut, Target, TrendingUp, Award, AlertCircle, Calendar,
+  DollarSign, Printer, CircleCheck, CircleDot
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -72,6 +73,7 @@ export default function HR() {
   const tabs = [
     { id: 'employees', label: 'Employees', icon: Users },
     { id: 'attendance', label: 'Attendance', icon: Clock },
+    { id: 'payroll', label: 'Payroll', icon: DollarSign },
     { id: 'kpi', label: 'KPI Tracker', icon: BarChart2 },
   ];
 
@@ -289,6 +291,11 @@ export default function HR() {
             <AttendanceCalendar emp={selectedEmp} month={month} logs={empLogs} onRefresh={load} />
           )}
         </div>
+      )}
+
+      {/* ── PAYROLL TAB ── */}
+      {tab === 'payroll' && (
+        <Payroll month={month} />
       )}
 
       {/* ── KPI TRACKER TAB ── */}
@@ -694,5 +701,199 @@ function TargetForm({ kpi, month, onSave }) {
         </button>
       </div>
     </form>
+  );
+}
+
+/* ───────────────────────────── PAYROLL ───────────────────────────── */
+function Payroll({ month }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [edits, setEdits] = useState({}); // { id: { bonus, deductions, ... } }
+  const [saving, setSaving] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.payroll(month)
+      .then(d => { setData(d); setEdits({}); })
+      .finally(() => setLoading(false));
+  }, [month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
+
+  const editVal = (row, field) => edits[row.id]?.[field] ?? row[field] ?? 0;
+  const setVal  = (id, field, value) =>
+    setEdits(e => ({ ...e, [id]: { ...(e[id] || {}), [field]: value } }));
+
+  const saveRow = async (row) => {
+    const patch = edits[row.id];
+    if (!patch) return;
+    setSaving(row.id);
+    try { await api.updatePayroll(row.id, patch); await load(); }
+    catch (e) { alert(e.message); }
+    setSaving(null);
+  };
+
+  const markPaid = async (row) => {
+    if (!confirm(`Mark ${row.name}'s ${month} payroll as paid?`)) return;
+    setSaving(row.id);
+    try { await api.markPayrollPaid(row.id); await load(); }
+    catch (e) { alert(e.message); }
+    setSaving(null);
+  };
+
+  const printPayslip = (row) => {
+    const w = window.open('', '_blank');
+    if (!w) return;
+    const html = `<!DOCTYPE html><html><head><title>Payslip — ${row.name} — ${month}</title>
+      <style>
+        body{font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:32px auto;padding:0 24px}
+        h1{margin:0 0 4px}.muted{color:#64748b;font-size:13px}
+        table{width:100%;border-collapse:collapse;margin:24px 0}
+        td,th{padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:14px}
+        th{background:#f8fafc;color:#475569;font-weight:600}
+        .right{text-align:right}.total{font-weight:700;background:#f1f5f9}
+        .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+        .paid{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
+        .actions{margin-top:24px;text-align:center}.actions button{padding:8px 20px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;cursor:pointer}
+        @media print{.actions{display:none}}
+      </style></head><body>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h1>EduExpress International</h1>
+          <p class="muted">Student Consultancy · Dhaka, Bangladesh</p>
+        </div>
+        <div style="text-align:right">
+          <strong>Payslip</strong><br>
+          <span class="muted">Month: ${month}</span>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0">
+      <table>
+        <tr><th style="width:40%">Employee</th><td>${row.name || ''}</td></tr>
+        <tr><th>Employee ID</th><td>${row.emp_id || ''}</td></tr>
+        <tr><th>Period</th><td>${month}</td></tr>
+        <tr><th>Working Days</th><td>${row.working_days} (worked ${row.days_worked})</td></tr>
+        <tr><th>Status</th><td><span class="badge ${row.status === 'paid' ? 'paid' : 'pending'}">${row.status}</span>${row.paid_on ? ` on ${row.paid_on}` : ''}</td></tr>
+      </table>
+      <table>
+        <tr><th>Description</th><th class="right">Amount (BDT)</th></tr>
+        <tr><td>Base Salary</td><td class="right">${fmt(row.base_salary)}</td></tr>
+        <tr><td>Bonus</td><td class="right">+ ${fmt(row.bonus)}</td></tr>
+        <tr><td>Deductions</td><td class="right">− ${fmt(row.deductions)}</td></tr>
+        <tr class="total"><td>Net Pay</td><td class="right">${fmt(row.net_pay)}</td></tr>
+      </table>
+      ${row.notes ? `<p class="muted"><strong>Notes:</strong> ${row.notes}</p>` : ''}
+      <p class="muted" style="margin-top:32px">This is a system-generated payslip and does not require a signature.</p>
+      <div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div>
+      </body></html>`;
+    w.document.write(html); w.document.close();
+  };
+
+  if (loading) return <div className="text-slate-400 text-center py-16">Loading payroll…</div>;
+  if (!data) return null;
+
+  const T = data.totals;
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Total Payroll" value={fmt(T.net)} icon={<DollarSign size={18} />} color="emerald" />
+        <StatCard label="Paid" value={fmt(T.paid)} icon={<CircleCheck size={18} />} color="blue" />
+        <StatCard label="Pending" value={fmt(T.pending)} icon={<CircleDot size={18} />} color="amber" />
+        <StatCard label="Bonuses" value={fmt(T.bonus)} sub={`Deductions ${fmt(T.deductions)}`} icon={<Award size={18} />} color="violet" />
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div>
+            <h3 className="font-semibold text-slate-800 text-sm">Payroll for {month}</h3>
+            <p className="text-xs text-slate-500">{data.rows.length} employees · {data.workingDays} working days</p>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50/60 text-xs uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="text-left px-5 py-3 font-semibold">Employee</th>
+                <th className="text-right px-3 py-3 font-semibold">Days</th>
+                <th className="text-right px-3 py-3 font-semibold">Base</th>
+                <th className="text-right px-3 py-3 font-semibold">Bonus</th>
+                <th className="text-right px-3 py-3 font-semibold">Deductions</th>
+                <th className="text-right px-3 py-3 font-semibold">Net Pay</th>
+                <th className="text-center px-3 py-3 font-semibold">Status</th>
+                <th className="text-right px-5 py-3 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.rows.length === 0 && (
+                <tr><td colSpan="8" className="text-center text-slate-400 py-10">No active employees this month</td></tr>
+              )}
+              {data.rows.map(row => {
+                const isPaid = row.status === 'paid';
+                const dirty  = !!edits[row.id];
+                return (
+                  <tr key={row.id} className="hover:bg-slate-50/60">
+                    <td className="px-5 py-3">
+                      <div className="font-medium text-slate-800">{row.name}</div>
+                      <div className="text-xs text-slate-400">{row.emp_id}</div>
+                    </td>
+                    <td className="text-right px-3 py-3 text-slate-700">{row.days_worked}/{row.working_days}</td>
+                    <td className="text-right px-3 py-3">
+                      <input type="number" disabled={isPaid}
+                        value={editVal(row, 'base_salary')}
+                        onChange={e => setVal(row.id, 'base_salary', e.target.value)}
+                        className="w-28 text-right border border-slate-200 rounded px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                    </td>
+                    <td className="text-right px-3 py-3">
+                      <input type="number" disabled={isPaid}
+                        value={editVal(row, 'bonus')}
+                        onChange={e => setVal(row.id, 'bonus', e.target.value)}
+                        className="w-24 text-right border border-slate-200 rounded px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                    </td>
+                    <td className="text-right px-3 py-3">
+                      <input type="number" disabled={isPaid}
+                        value={editVal(row, 'deductions')}
+                        onChange={e => setVal(row.id, 'deductions', e.target.value)}
+                        className="w-24 text-right border border-slate-200 rounded px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                    </td>
+                    <td className="text-right px-3 py-3 font-semibold text-slate-800">
+                      {fmt((Number(editVal(row, 'base_salary')) || 0) + (Number(editVal(row, 'bonus')) || 0) - (Number(editVal(row, 'deductions')) || 0))}
+                    </td>
+                    <td className="text-center px-3 py-3">
+                      {isPaid
+                        ? <span className="inline-flex items-center gap-1 text-xs font-semibold bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full"><CircleCheck size={12}/> Paid</span>
+                        : <span className="inline-flex items-center gap-1 text-xs font-semibold bg-amber-50 text-amber-700 px-2 py-1 rounded-full"><CircleDot size={12}/> Pending</span>}
+                    </td>
+                    <td className="text-right px-5 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {dirty && !isPaid && (
+                          <button onClick={() => saveRow(row)} disabled={saving === row.id}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60">
+                            {saving === row.id ? 'Saving…' : 'Save'}
+                          </button>
+                        )}
+                        {!isPaid && !dirty && (
+                          <button onClick={() => markPaid(row)} disabled={saving === row.id}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                            Mark Paid
+                          </button>
+                        )}
+                        <button onClick={() => printPayslip(row)} title="Print payslip"
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
+                          <Printer size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard } from 'lucide-react';
+import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2 } from 'lucide-react';
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
@@ -13,8 +13,11 @@ export default function Settings() {
     <div className="space-y-5 max-w-3xl">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500">Reference lists used across the CRM</p>
+        <p className="text-sm text-slate-500">Users, access, and reference lists</p>
       </div>
+
+      {/* User Management */}
+      <UserManagement consultants={settings.consultants || []} />
 
       {/* Office Info */}
       <Card icon={<Info size={18} />} title="Office Info" color="blue">
@@ -106,6 +109,194 @@ function TagList({ items, color }) {
           {item}
         </span>
       ))}
+    </div>
+  );
+}
+
+/* ─────────────────────────── USER MANAGEMENT ─────────────────────────── */
+function UserManagement({ consultants }) {
+  const [users, setUsers]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal]   = useState(null); // null | { mode:'add' } | { mode:'edit', user }
+
+  const load = () => {
+    setLoading(true);
+    api.users().then(setUsers).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const remove = async (u) => {
+    if (!confirm(`Delete user "${u.name || u.email}"? They will lose access immediately.`)) return;
+    try { await api.deleteUser(u.id); load(); }
+    catch (e) { alert(e.message); }
+  };
+  const toggleActive = async (u) => {
+    try { await api.updateUser(u.id, { active: u.active ? 0 : 1 }); load(); }
+    catch (e) { alert(e.message); }
+  };
+
+  return (
+    <>
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-indigo-50 text-indigo-600 border-indigo-100">
+          <Shield size={18} />
+          <span className="font-semibold text-sm flex-1">Users & Access</span>
+          <button onClick={() => setModal({ mode: 'add' })}
+            className="flex items-center gap-1.5 text-xs font-medium bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+            <Plus size={13} /> Add User
+          </button>
+        </div>
+        <div className="p-5">
+          {loading ? (
+            <div className="text-slate-400 text-sm py-6 text-center">Loading users…</div>
+          ) : users.length === 0 ? (
+            <div className="text-slate-400 text-sm py-6 text-center">No users yet</div>
+          ) : (
+            <div className="space-y-2">
+              {users.map(u => (
+                <div key={u.id} className={`flex items-center gap-3 p-3 rounded-xl border ${u.active ? 'border-slate-100 hover:border-slate-200' : 'border-slate-100 bg-slate-50 opacity-60'}`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0
+                    ${u.role === 'admin' ? 'bg-gradient-to-br from-indigo-500 to-purple-600' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}`}>
+                    {(u.name || u.email).split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-slate-800 text-sm truncate">{u.name || u.email}</p>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase
+                        ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                        {u.role}
+                      </span>
+                      {!u.active && <span className="text-[10px] font-bold bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full uppercase">Disabled</span>}
+                    </div>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <Mail size={11} /> {u.email}
+                      {u.consultant_name && <span className="ml-1">· Maps to <strong>{u.consultant_name}</strong></span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => toggleActive(u)} title={u.active ? 'Disable' : 'Enable'}
+                      className={`text-xs px-2.5 py-1.5 rounded-lg font-medium border ${u.active ? 'text-slate-500 border-slate-200 hover:bg-slate-50' : 'text-emerald-600 border-emerald-200 hover:bg-emerald-50'}`}>
+                      {u.active ? 'Disable' : 'Enable'}
+                    </button>
+                    <button onClick={() => setModal({ mode: 'edit', user: u })}
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                    <button onClick={() => remove(u)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-3">
+            💡 The <strong>Consultant Name</strong> on a user must match the <em>Assigned Consultant</em> field on a lead for it to appear in their inbox.
+          </p>
+        </div>
+      </div>
+
+      {modal && (
+        <UserModal modal={modal} consultants={consultants}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); load(); }} />
+      )}
+    </>
+  );
+}
+
+function UserModal({ modal, consultants, onClose, onSaved }) {
+  const editing = modal.mode === 'edit';
+  const u = modal.user || {};
+  const [form, setForm] = useState({
+    email: u.email || '',
+    name: u.name || '',
+    role: u.role || 'consultant',
+    consultant_name: u.consultant_name || '',
+    password: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError(''); setSaving(true);
+    try {
+      if (editing) {
+        const patch = { name: form.name, role: form.role, consultant_name: form.role === 'consultant' ? form.consultant_name : null };
+        if (form.password) patch.password = form.password;
+        await api.updateUser(u.id, patch);
+      } else {
+        await api.createUser({
+          email: form.email, name: form.name, password: form.password, role: form.role,
+          consultant_name: form.role === 'consultant' ? form.consultant_name : null,
+        });
+      }
+      onSaved();
+    } catch (err) {
+      setError(err.message || 'Save failed');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800">{editing ? 'Edit user' : 'Add user'}</h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={18} /></button>
+        </div>
+        <form onSubmit={save} className="p-5 space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Email</label>
+            <input type="email" required disabled={editing}
+              value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Full name</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Role</label>
+            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+              <option value="consultant">Consultant — sees only their assigned leads</option>
+              <option value="admin">Admin — full access</option>
+            </select>
+          </div>
+          {form.role === 'consultant' && (
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant name (must match leads' assigned consultant)</label>
+              <input list="consultants-list" value={form.consultant_name}
+                onChange={e => setForm(f => ({ ...f, consultant_name: e.target.value }))}
+                placeholder="e.g. Shazid Hasan"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              <datalist id="consultants-list">
+                {consultants.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </div>
+          )}
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">
+              {editing ? 'New password (leave blank to keep current)' : 'Password'}
+            </label>
+            <input type="password" required={!editing} minLength={6}
+              value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+              placeholder={editing ? '••••••••' : 'At least 6 characters'}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+
+          {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving}
+              className="text-sm px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2">
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {saving ? 'Saving…' : editing ? 'Save changes' : 'Create user'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
