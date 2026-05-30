@@ -12,7 +12,8 @@ import {
   ArrowLeft, Pencil, Trash2, Phone, Mail, MapPin, Calendar, User, Hash,
   GraduationCap, Building2, FileText, DollarSign, Activity, Send, AlertCircle,
   ChevronRight, ExternalLink, Globe, CreditCard, CheckCircle2, Clock,
-  Tag, UserPlus, Receipt, Sticker, Plane, BookOpen, MessageSquare, Loader2,
+  Tag, UserPlus, Receipt, Plane, BookOpen, MessageSquare, Loader2,
+  Share2, Copy, QrCode, RotateCw, Heart,
 } from 'lucide-react';
 
 const fmt = (n) => {
@@ -251,6 +252,21 @@ export default function LeadDetail({ user }) {
             </Card>
           )}
 
+          {/* Medical info — relevant for visas (China MBBS etc.) */}
+          {(lead.blood_group || lead.date_of_birth || lead.medical_notes || lead.emergency_contact) && (
+            <Card title="Medical & Emergency" icon={<Heart size={14}/>}>
+              <Row label="Blood group">{lead.blood_group || '—'}</Row>
+              <Row label="Date of birth">{lead.date_of_birth || '—'}</Row>
+              <Row label="Emergency contact">{lead.emergency_contact || '—'}</Row>
+              {lead.medical_notes && (
+                <div className="mt-2 text-xs text-slate-600 whitespace-pre-wrap bg-slate-50 rounded-lg p-2">{lead.medical_notes}</div>
+              )}
+            </Card>
+          )}
+
+          {/* Share with student portal */}
+          <ShareCard lead={lead} onChanged={load} />
+
           {lead.notes && (
             <Card title="Lead notes" icon={<MessageSquare size={14}/>}>
               <p className="text-xs text-slate-600 whitespace-pre-wrap">{lead.notes}</p>
@@ -476,4 +492,93 @@ function describe(a) {
       return { icon: <Activity size={14}/>, bg: 'bg-slate-100 text-slate-500',
                text: <>{a.type.replace(/_/g, ' ')}</> };
   }
+}
+
+/* ─── Share-with-student card ─── */
+function ShareCard({ lead, onChanged }) {
+  const [token, setToken] = useState(lead.public_token);
+  const [enabled, setEnabled] = useState(!!lead.public_enabled);
+  const [showQR, setShowQR] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
+
+  const url = token ? `${window.location.origin}/s/${token}` : null;
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const r = await api.regenerateToken(lead.id);
+      setToken(r.public_token); setEnabled(true);
+      onChanged?.();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  const toggle = async () => {
+    setBusy(true);
+    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.(); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+
+  const copy = async () => {
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+
+  return (
+    <Card title="Student portal" icon={<Share2 size={14}/>}>
+      {!token ? (
+        <div className="text-center py-2">
+          <p className="text-xs text-slate-500 mb-2">No share link yet. Generate one to give the student access to their progress.</p>
+          <button onClick={generate} disabled={busy}
+            className="text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5">
+            <Share2 size={12} /> {busy ? 'Generating…' : 'Generate share link'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+              {enabled ? 'Active' : 'Disabled'}
+            </span>
+            <button onClick={toggle} disabled={busy}
+              className="text-[11px] text-slate-500 hover:text-slate-700 underline">
+              {enabled ? 'Disable link' : 'Enable link'}
+            </button>
+          </div>
+          <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 flex items-center gap-2">
+            <code className="text-[11px] flex-1 truncate text-slate-700">{url}</code>
+            <button onClick={copy} title="Copy"
+              className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+              {copied ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
+            </button>
+          </div>
+          <div className="flex gap-1.5">
+            <a href={url} target="_blank" rel="noreferrer"
+              className="flex-1 text-[11px] font-medium text-center text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1.5 rounded-lg flex items-center justify-center gap-1">
+              <ExternalLink size={11} /> Open
+            </a>
+            <button onClick={() => setShowQR(s => !s)}
+              className="flex-1 text-[11px] font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 px-2 py-1.5 rounded-lg flex items-center justify-center gap-1">
+              <QrCode size={11} /> {showQR ? 'Hide QR' : 'Show QR'}
+            </button>
+            <button onClick={generate} disabled={busy} title="Regenerate (invalidates old link)"
+              className="text-[11px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-1.5 rounded-lg flex items-center justify-center gap-1">
+              <RotateCw size={11} />
+            </button>
+          </div>
+          {showQR && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center mt-2">
+              <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={240} height={240}
+                className="rounded" loading="lazy" />
+              <p className="text-[11px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
 }

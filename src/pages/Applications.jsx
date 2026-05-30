@@ -350,6 +350,10 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
       visa_deadline:     l.visa_deadline || '',
       departure_date:    l.departure_date || '',
       application_notes: l.application_notes || '',
+      blood_group:       l.blood_group || '',
+      date_of_birth:     l.date_of_birth || '',
+      medical_notes:     l.medical_notes || '',
+      emergency_contact: l.emergency_contact || '',
     });
   }, [leadId]);
 
@@ -497,6 +501,32 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
               placeholder="Anything the next person should know…"
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
           </div>
+
+          {/* Medical + emergency — needed for some destinations (China MBBS etc.) */}
+          <details className="mt-1 group">
+            <summary className="text-xs font-semibold text-slate-600 cursor-pointer hover:text-slate-800 list-none flex items-center gap-1">
+              <span className="group-open:rotate-90 transition-transform inline-block">▸</span>
+              Medical & Emergency contact
+            </summary>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Blood group" type="select" value={form.blood_group} onChange={v => updateField('blood_group', v)}
+                options={['', 'A+','A-','B+','B-','AB+','AB-','O+','O-']} />
+              <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => updateField('date_of_birth', v)} />
+              <div className="col-span-2">
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Emergency contact</label>
+                <input value={form.emergency_contact} onChange={e => updateField('emergency_contact', e.target.value)}
+                  placeholder="Name + phone, e.g. Father · +880 1XXX-XXXXXX"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Medical notes</label>
+                <textarea rows={2} value={form.medical_notes} onChange={e => updateField('medical_notes', e.target.value)}
+                  placeholder="Allergies, conditions, medications…"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+            </div>
+          </details>
+
           <div className="flex justify-end">
             <button onClick={saveAll} disabled={saving}
               className="text-sm bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
@@ -607,21 +637,53 @@ function DocRow({ doc, onStatus, onRemove }) {
 }
 
 function UniRow({ uni, onStatus, onRemove }) {
+  const [editing, setEditing] = useState(false);
+  const [program, setProgram] = useState(uni.program || '');
+  const [appId, setAppId]     = useState(uni.application_id || '');
+  const [notes, setNotes]     = useState(uni.notes || '');
+
+  const save = async () => {
+    try { await api.updateUniversityApp(uni.id, { program, application_id: appId, notes }); setEditing(false); }
+    catch (e) { alert(e.message); }
+  };
+
   return (
-    <div className="flex items-center gap-3 p-2.5 rounded-lg border border-slate-100 hover:border-slate-200 bg-white">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-slate-700 truncate font-medium">{uni.university}</p>
-        {uni.program && <p className="text-[11px] text-slate-400 truncate">{uni.program}</p>}
-        {(uni.submitted_on || uni.decision_on) && (
-          <p className="text-[10px] text-slate-400 mt-0.5">
-            {uni.submitted_on && <>submitted {uni.submitted_on}</>}
-            {uni.submitted_on && uni.decision_on && ' · '}
-            {uni.decision_on && <>decided {uni.decision_on}</>}
-          </p>
-        )}
+    <div className="rounded-lg border border-slate-100 hover:border-slate-200 bg-white">
+      <div className="flex items-center gap-3 p-2.5">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-slate-700 truncate font-medium">{uni.university}</p>
+          {uni.program && <p className="text-[11px] text-slate-400 truncate">{uni.program}</p>}
+          {uni.application_id && (
+            <p className="text-[11px] text-slate-500"><span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded">App ID: {uni.application_id}</span></p>
+          )}
+          {(uni.submitted_on || uni.decision_on) && (
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {uni.submitted_on && <>submitted {uni.submitted_on}</>}
+              {uni.submitted_on && uni.decision_on && ' · '}
+              {uni.decision_on && <>decided {uni.decision_on}</>}
+            </p>
+          )}
+        </div>
+        <StatusDropdown statuses={UNI_STATUSES} current={uni.status} onPick={s => onStatus(uni, s)} />
+        <button onClick={() => setEditing(e => !e)} title="Edit details"
+          className="p-1 text-slate-300 hover:text-blue-500 rounded text-[11px] font-medium">
+          {editing ? '×' : 'edit'}
+        </button>
+        <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 rounded"><Trash2 size={13} /></button>
       </div>
-      <StatusDropdown statuses={UNI_STATUSES} current={uni.status} onPick={s => onStatus(uni, s)} />
-      <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 rounded"><Trash2 size={13} /></button>
+      {editing && (
+        <div className="px-2.5 pb-2.5 border-t border-slate-100 pt-2 space-y-1.5">
+          <input value={program} onChange={e => setProgram(e.target.value)} placeholder="Program (e.g. MBBS)"
+            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs" />
+          <input value={appId} onChange={e => setAppId(e.target.value)} placeholder="University application ID / file number"
+            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono" />
+          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional)"
+            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs" />
+          <div className="flex justify-end">
+            <button onClick={save} className="text-[11px] font-medium bg-blue-600 text-white px-2.5 py-1 rounded-lg hover:bg-blue-700">Save</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import NotificationBell from './NotificationBell';
 
 const baseNav = [
   { to: '/',             icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     adminOnly: true },
+  { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     staffOnly: true },
   { to: '/leads',        icon: Users,           label: 'All Leads' },
   { to: '/pipeline',     icon: Kanban,          label: 'Sales Pipeline' },
   { to: '/applications', icon: Plane,           label: 'Applications' },
@@ -23,7 +23,8 @@ export default function Layout({ children, user, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
-  const nav = baseNav.filter(n => !n.adminOnly || isAdmin);
+  const isStaff = user?.role === 'admin' || user?.role === 'manager';
+  const nav = baseNav.filter(n => (!n.adminOnly || isAdmin) && (!n.staffOnly || isStaff));
   const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'CRM';
 
   const logout = async () => {

@@ -123,9 +123,11 @@ app.get('/api/auth/me', (req, res) => {
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
 const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events'];
+const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
   if (AUTH_FREE.includes(req.path)) return next();
+  if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
   const payload = verifyToken(getCookie(req, AUTH_COOKIE));
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
   req.user = payload;
@@ -138,6 +140,19 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Manager-or-admin guard — Application Managers can edit application data.
+function requireManagerOrAdmin(req, res, next) {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
+    return res.status(403).json({ error: 'Manager or admin only' });
+  }
+  next();
+}
+
+// Random URL-safe token for the student portal share link.
+function generatePublicToken() {
+  return crypto.randomBytes(9).toString('base64url'); // 12 char URL-safe
+}
+
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
 app.get('/api/users', (req, res, next) => requireAdmin(req, res, () => {
   const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login FROM users ORDER BY id").all();
@@ -147,8 +162,9 @@ app.post('/api/users', (req, res, next) => requireAdmin(req, res, () => {
   const { email, name, password, role = 'consultant', consultant_name = null, emp_id = null } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
+    const safeRole = ['admin', 'manager', 'consultant'].includes(role) ? role : 'consultant';
     const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
-      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), role === 'admin' ? 'admin' : 'consultant', consultant_name, emp_id);
+      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id);
     const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(info.lastInsertRowid);
     logActivity({ type: 'user_created', actor: req.user, to: u.email, details: { role: u.role, consultant_name: u.consultant_name } });
     res.json(u);
@@ -226,8 +242,9 @@ function templateFor(destination) {
 }
 
 // Consultant-scope helper used by every application endpoint.
+// Admins + Application Managers see everything; consultants only their own leads.
 function leadIsVisibleTo(lead, user) {
-  if (user?.role === 'admin') return true;
+  if (user?.role === 'admin' || user?.role === 'manager') return true;
   const me = user?.consultant_name || user?.name;
   return !!me && lead.assigned_consultant === me;
 }
@@ -244,7 +261,7 @@ app.get('/api/applications', (req, res) => {
     "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
   ];
   const params = {};
-  if (req.user?.role === 'consultant') {
+  if (req.user?.role === 'consultant') { // admins + managers see all
     where.push("l.assigned_consultant = @me");
     params.me = req.user.consultant_name || req.user.name || '';
   }
@@ -286,6 +303,7 @@ app.put('/api/leads/:id/stage', (req, res) => {
   const {
     stage, visa_deadline, departure_date, university, intake_term, application_notes,
     source, referrer, nationality, passport, degree, major, drive_link, deposit,
+    blood_group, date_of_birth, medical_notes, emergency_contact,
   } = req.body || {};
   if (stage && !APPLICATION_STAGES.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
@@ -305,13 +323,18 @@ app.put('/api/leads/:id/stage', (req, res) => {
     degree            = COALESCE(?, degree),
     major             = COALESCE(?, major),
     drive_link        = COALESCE(?, drive_link),
-    deposit           = COALESCE(?, deposit)
+    deposit           = COALESCE(?, deposit),
+    blood_group       = COALESCE(?, blood_group),
+    date_of_birth     = COALESCE(?, date_of_birth),
+    medical_notes     = COALESCE(?, medical_notes),
+    emergency_contact = COALESCE(?, emergency_contact)
     WHERE id=?`).run(
       stage ?? null, visa_deadline ?? null, departure_date ?? null,
       university ?? null, intake_term ?? null, application_notes ?? null,
       source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
       degree ?? null, major ?? null, drive_link ?? null,
       (deposit === '' || deposit == null) ? null : Number(deposit),
+      blood_group ?? null, date_of_birth ?? null, medical_notes ?? null, emergency_contact ?? null,
       req.params.id);
   const fresh = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (stage && oldStage !== stage) {
@@ -424,14 +447,17 @@ app.put('/api/documents/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
-  const { status, notes, file_url, received_on } = req.body || {};
+  const { status, notes, file_url, received_on, requested_by_student } = req.body || {};
   const finalReceived = status && ['received', 'verified'].includes(status) && !doc.received_on
     ? (received_on || new Date().toISOString().slice(0, 10))
     : (received_on ?? doc.received_on);
   db.prepare(`UPDATE lead_documents SET status=COALESCE(?,status), notes=COALESCE(?,notes),
-              file_url=COALESCE(?,file_url), received_on=?, updated_by=?, updated_at=datetime('now')
+              file_url=COALESCE(?,file_url), received_on=?,
+              requested_by_student=COALESCE(?,requested_by_student),
+              updated_by=?, updated_at=datetime('now')
               WHERE id=?`)
     .run(status ?? null, notes ?? null, file_url ?? null, finalReceived,
+         requested_by_student == null ? null : (requested_by_student ? 1 : 0),
          req.user?.name || req.user?.email || null, req.params.id);
   res.json(db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id));
 });
@@ -529,7 +555,7 @@ function buildAlerts() {
   return { idleLeads, unassigned, overdueFollowups, outstandingBalance, visaDeadlines };
 }
 
-app.get('/api/cockpit', (req, res, next) => requireAdmin(req, res, () => {
+app.get('/api/cockpit', (req, res, next) => requireManagerOrAdmin(req, res, () => {
   const todayStr = new Date().toISOString().slice(0, 10);
   const yStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   const today = buildDaySummary(todayStr);
@@ -552,7 +578,7 @@ app.get('/api/cockpit', (req, res, next) => requireAdmin(req, res, () => {
   res.json({ today, yesterday, alerts, feed, trend });
 }));
 
-app.get('/api/activity', (req, res, next) => requireAdmin(req, res, () => {
+app.get('/api/activity', (req, res, next) => requireManagerOrAdmin(req, res, () => {
   const { type, actor, lead_id, since, before, limit = 100 } = req.query;
   const where = []; const params = [];
   if (type)    { where.push("type=?");          params.push(type); }
@@ -862,6 +888,18 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN major TEXT`,
     `ALTER TABLE leads      ADD COLUMN drive_link TEXT`,
     `ALTER TABLE leads      ADD COLUMN deposit REAL DEFAULT 0`,
+    // Student portal + medical
+    `ALTER TABLE leads      ADD COLUMN public_token TEXT`,
+    `ALTER TABLE leads      ADD COLUMN public_enabled INTEGER DEFAULT 1`,
+    `ALTER TABLE leads      ADD COLUMN blood_group TEXT`,
+    `ALTER TABLE leads      ADD COLUMN date_of_birth TEXT`,
+    `ALTER TABLE leads      ADD COLUMN medical_notes TEXT`,
+    `ALTER TABLE leads      ADD COLUMN emergency_contact TEXT`,
+    // Student-facing document requests
+    `ALTER TABLE lead_documents ADD COLUMN requested_by_student INTEGER DEFAULT 0`,
+    `ALTER TABLE lead_documents ADD COLUMN student_uploaded_url TEXT`,
+    `ALTER TABLE lead_documents ADD COLUMN student_uploaded_at TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
@@ -1219,6 +1257,7 @@ app.get('/api/leads', (req, res) => {
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
   if (source === 'meta') where.push("meta_lead_id IS NOT NULL");
   // Consultants are scoped to their own assigned leads — enforced server-side.
+  // Admins and Application Managers see everything.
   if (req.user?.role === 'consultant') {
     where.push("assigned_consultant=@me");
     params.me = req.user.consultant_name || req.user.name || '';
@@ -1324,6 +1363,129 @@ app.post('/api/leads/:id/notes', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text is required' });
   logActivity({ type: 'note', actor: req.user, lead, details: text.trim() });
+  res.json({ ok: true });
+});
+
+// ─── STUDENT PORTAL (public link) ──────────────────────────────────────────
+// Returns the public share URL for a lead, regenerating the token on demand.
+app.post('/api/leads/:id/regenerate-token', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const token = generatePublicToken();
+  db.prepare("UPDATE leads SET public_token=?, public_enabled=1 WHERE id=?").run(token, lead.id);
+  res.json({ public_token: token });
+});
+
+// Enable/disable the public link without forgetting the token.
+app.put('/api/leads/:id/public', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const { enabled } = req.body || {};
+  db.prepare("UPDATE leads SET public_enabled=? WHERE id=?").run(enabled ? 1 : 0, lead.id);
+  res.json({ ok: true });
+});
+
+// QR code as a PNG image, generated via a public QR endpoint. We proxy it so
+// the front-end can embed without exposing the URL builder logic.
+app.get('/api/leads/:id/qr', async (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).end();
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).end();
+  if (!lead.public_token) {
+    const token = generatePublicToken();
+    db.prepare("UPDATE leads SET public_token=?, public_enabled=1 WHERE id=?").run(token, lead.id);
+    lead.public_token = token;
+  }
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  const url = `${proto}://${host}/s/${lead.public_token}`;
+  const size = Math.min(parseInt(req.query.size) || 240, 600);
+  try {
+    const r = await fetch(`https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(url)}&margin=0`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch (e) {
+    res.status(500).end();
+  }
+});
+
+// PUBLIC — what the student sees at /s/:token. No auth. Sanitised payload.
+app.get('/api/public/student/:token', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
+  if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
+
+  const uniApps = db.prepare("SELECT id, university, program, status, application_id, submitted_on, decision_on, notes FROM lead_university_applications WHERE lead_id=? ORDER BY id").all(lead.id);
+  const docs = db.prepare(`SELECT id, doc_type, status, notes, file_url, student_uploaded_url, student_uploaded_at, requested_by_student, received_on
+                           FROM lead_documents
+                           WHERE lead_id=?
+                           ORDER BY requested_by_student DESC, id ASC`).all(lead.id);
+
+  res.json({
+    student: {
+      ref_id: lead.lead_id,
+      name: lead.client_name,
+      nationality: lead.nationality,
+      destination: lead.destination,
+      university: lead.university,
+      degree: lead.degree,
+      major: lead.major,
+      intake_term: lead.intake_term,
+      application_stage: lead.application_stage,
+      visa_deadline: lead.visa_deadline,
+      departure_date: lead.departure_date,
+      assigned_consultant: lead.assigned_consultant,
+      drive_link: lead.drive_link,
+      blood_group: lead.blood_group,
+    },
+    stages: APPLICATION_STAGES,
+    universities: uniApps,
+    documents: docs.map(d => ({
+      id: d.id,
+      doc_type: d.doc_type,
+      status: d.status,
+      requested_by_student: !!d.requested_by_student,
+      notes: d.notes,
+      file_url: d.file_url,
+      student_uploaded_url: d.student_uploaded_url,
+      student_uploaded_at: d.student_uploaded_at,
+      received_on: d.received_on,
+    })),
+    updated_at: new Date().toISOString(),
+  });
+});
+
+// PUBLIC — student attaches a Drive (or any URL) link for a requested doc.
+app.post('/api/public/student/:token/documents/:docId', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
+  if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
+  const doc = db.prepare("SELECT * FROM lead_documents WHERE id=? AND lead_id=?").get(req.params.docId, lead.id);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const { url, notes } = req.body || {};
+  if (!url || !/^https?:\/\//i.test(String(url))) {
+    return res.status(400).json({ error: 'A valid http(s) URL is required (e.g. a Google Drive share link).' });
+  }
+  db.prepare(`UPDATE lead_documents SET
+      student_uploaded_url=?, student_uploaded_at=datetime('now'),
+      status=CASE WHEN status='pending' THEN 'received' ELSE status END,
+      received_on=COALESCE(received_on, date('now')),
+      notes=COALESCE(?, notes),
+      updated_at=datetime('now')
+    WHERE id=?`).run(String(url).trim(), notes ?? null, doc.id);
+  logActivity({ type: 'student_doc_upload', actor: { name: lead.client_name }, lead, details: { doc_type: doc.doc_type, url } });
+  res.json({ ok: true });
+});
+
+// PUBLIC — student sends a short message. Becomes a 'note' in the timeline.
+app.post('/api/public/student/:token/message', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
+  if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
+  const { text } = req.body || {};
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'text is required' });
+  logActivity({ type: 'note', actor: { name: `${lead.client_name} (Student)` }, lead, details: `[via student portal] ${String(text).trim()}` });
   res.json({ ok: true });
 });
 

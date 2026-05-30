@@ -58,6 +58,24 @@ export const api = {
   leadTimeline: (id)     => req(`/leads/${id}/timeline`),
   addNote:      (id, t)  => req(`/leads/${id}/notes`, { method: 'POST', body: JSON.stringify({ text: t }) }),
 
+  // Student portal (admin/manager side)
+  regenerateToken: (id)  => req(`/leads/${id}/regenerate-token`, { method: 'POST' }),
+  setPublic:    (id, on) => req(`/leads/${id}/public`, { method: 'PUT', body: JSON.stringify({ enabled: on }) }),
+  qrUrl:        (id)     => `/api/leads/${id}/qr?size=240`,
+
+  // Student portal (public — no auth, never goes through req())
+  studentPortal:        (token)        => fetch(`/api/public/student/${token}`).then(r => r.ok ? r.json() : Promise.reject(new Error(r.statusText))),
+  studentUploadDoc:     (token, docId, url, notes) =>
+    fetch(`/api/public/student/${token}/documents/${docId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, notes }),
+    }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t)))),
+  studentMessage:       (token, text)  =>
+    fetch(`/api/public/student/${token}/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t)))),
+
   // Finance
   income:        (p = {}) => req('/income?' + new URLSearchParams(p)),
   createIncome:  (d)      => req('/income',       { method: 'POST', body: JSON.stringify(d) }),

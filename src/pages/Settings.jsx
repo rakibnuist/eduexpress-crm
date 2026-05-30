@@ -269,6 +269,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
             <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
               <option value="consultant">Consultant — sees only their assigned leads</option>
+              <option value="manager">Application Manager — manages all applications & docs (no Finance/HR/Settings)</option>
               <option value="admin">Admin — full access</option>
             </select>
           </div>

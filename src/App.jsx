@@ -12,6 +12,7 @@ import HR from './pages/HR';
 import Settings from './pages/Settings';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Login from './pages/Login';
+import StudentPortal from './pages/StudentPortal';
 import { api } from './api';
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
       <Routes>
         {/* Public pages */}
         <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/s/:token" element={<StudentPortal />} />
         <Route path="/login" element={
           user ? <Navigate to="/" replace /> : <Login onSuccess={setUser} />
         } />
@@ -44,7 +46,7 @@ export default function App() {
           <Layout user={user} onLogout={() => setUser(null)}>
             <Routes>
               <Route path="/" element={<Dashboard user={user} />} />
-              {user.role === 'admin' && <Route path="/cockpit" element={<Cockpit />} />}
+              {(user.role === 'admin' || user.role === 'manager') && <Route path="/cockpit" element={<Cockpit />} />}
               <Route path="/leads" element={<Leads user={user} />} />
               <Route path="/leads/:id" element={<LeadDetail user={user} />} />
               <Route path="/pipeline" element={<Pipeline user={user} />} />
