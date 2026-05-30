@@ -132,6 +132,13 @@ export const api = {
   updatePayroll:  (id, d) => req(`/payroll/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   markPayrollPaid:(id)    => req(`/payroll/${id}/mark-paid`, { method: 'POST' }),
 
+  // Employee performance
+  employeeKpi:    (month) => req('/employee-kpi?' + new URLSearchParams({ month })),
+  employeeKpiOne: (emp_id, month) => req(`/employee-kpi/${emp_id}?` + new URLSearchParams({ month })),
+  dailyLogs:      (params = {}) => req('/daily-logs?' + new URLSearchParams(params)),
+  dailyLogsToday: ()         => req('/daily-logs/me/today'),
+  submitDailyLog: (d)        => req('/daily-logs', { method: 'POST', body: JSON.stringify(d) }),
+
   // Users (admin)
   users:      ()       => req('/users'),
   createUser: (d)      => req('/users',       { method: 'POST', body: JSON.stringify(d) }),

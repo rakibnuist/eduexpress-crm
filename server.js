@@ -606,7 +606,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications','broadcasts','broadcast_dismissals'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications','broadcasts','broadcast_dismissals','daily_logs'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -715,6 +715,21 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS daily_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    emp_id TEXT NOT NULL,
+    user_id INTEGER,
+    date TEXT NOT NULL,
+    accomplishments TEXT,
+    challenges TEXT,
+    tomorrow_plan TEXT,
+    metrics_json TEXT,
+    submitted_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(emp_id, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_daily_logs_emp_date ON daily_logs(emp_id, date);
 
   CREATE TABLE IF NOT EXISTS broadcasts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2037,6 +2052,196 @@ app.post('/api/payroll/:id/mark-paid', (req, res, next) => requireAdmin(req, res
   db.prepare("UPDATE payroll SET status='paid', paid_on=COALESCE(paid_on, ?) WHERE id=?")
     .run(new Date().toISOString().slice(0, 10), req.params.id);
   res.json(db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id));
+}));
+
+// ─────────────────────────────────────────────────────────
+// EMPLOYEE PERFORMANCE — Attendance + Daily Logs + Activity
+// ─────────────────────────────────────────────────────────
+
+// Daily log — what an employee writes before they leave for the day.
+app.get('/api/daily-logs', (req, res) => {
+  const { emp_id, from, to, date } = req.query;
+  const where = []; const params = [];
+  if (emp_id)         { where.push('emp_id=?'); params.push(emp_id); }
+  if (from)           { where.push('date >= ?'); params.push(from); }
+  if (to)             { where.push('date <= ?'); params.push(to); }
+  if (date)           { where.push('date = ?'); params.push(date); }
+
+  // Consultants only see their own logs (scoped by their linked emp_id or name match)
+  if (req.user?.role === 'consultant') {
+    const emp = findEmployeeForUser(req.user);
+    if (!emp) return res.json([]);
+    where.push('emp_id=?'); params.push(emp.emp_id);
+  }
+  const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const rows = db.prepare(`SELECT * FROM daily_logs ${ws} ORDER BY date DESC, id DESC LIMIT 365`).all(...params);
+  res.json(rows);
+});
+
+// Submit (or upsert) today's log for the current user
+app.post('/api/daily-logs', (req, res) => {
+  const emp = findEmployeeForUser(req.user);
+  if (!emp) return res.status(400).json({ error: 'Your user account is not linked to an HR employee — ask the admin to link it in Settings → Users.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const date  = (req.body?.date || today).slice(0, 10);
+  if (date > today) return res.status(400).json({ error: "Can't log for a future date" });
+
+  const { accomplishments, challenges, tomorrow_plan, metrics } = req.body || {};
+  if (!accomplishments?.trim()) return res.status(400).json({ error: 'Accomplishments is required' });
+  const metrics_json = metrics ? JSON.stringify(metrics) : null;
+
+  const existing = db.prepare("SELECT id FROM daily_logs WHERE emp_id=? AND date=?").get(emp.emp_id, date);
+  if (existing) {
+    db.prepare(`UPDATE daily_logs SET accomplishments=?, challenges=?, tomorrow_plan=?, metrics_json=?, updated_at=datetime('now') WHERE id=?`)
+      .run(accomplishments.trim(), challenges?.trim() || null, tomorrow_plan?.trim() || null, metrics_json, existing.id);
+    logActivity({ type: 'daily_log_updated', actor: req.user, details: { date, emp_id: emp.emp_id } });
+  } else {
+    db.prepare(`INSERT INTO daily_logs (emp_id, user_id, date, accomplishments, challenges, tomorrow_plan, metrics_json) VALUES (?,?,?,?,?,?,?)`)
+      .run(emp.emp_id, req.user.id || null, date, accomplishments.trim(), challenges?.trim() || null, tomorrow_plan?.trim() || null, metrics_json);
+    logActivity({ type: 'daily_log_submitted', actor: req.user, details: { date, emp_id: emp.emp_id } });
+  }
+  res.json(db.prepare("SELECT * FROM daily_logs WHERE emp_id=? AND date=?").get(emp.emp_id, date));
+});
+
+// "Did I submit today's log?" — used by the dashboard banner
+app.get('/api/daily-logs/me/today', (req, res) => {
+  const emp = findEmployeeForUser(req.user);
+  if (!emp) return res.json({ linked: false });
+  const today = new Date().toISOString().slice(0, 10);
+  const row = db.prepare("SELECT * FROM daily_logs WHERE emp_id=? AND date=?").get(emp.emp_id, today);
+  res.json({ linked: true, emp_id: emp.emp_id, emp_name: emp.name, today, log: row || null });
+});
+
+// Employee KPI dashboard — Attendance + Office Work + Activity per employee.
+app.get('/api/employee-kpi', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const start = `${month}-01`;
+  const endDate = new Date(y, m, 0);
+  const end = endDate.toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Working days in the month (Sun-Thu = working in Bangladesh, per existing logic)
+  const daysInMonth = endDate.getDate();
+  let workingDays = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(y, m - 1, d).getDay();
+    if (dow !== 5 && dow !== 6) workingDays++;
+  }
+  // Effective working days so far (don't penalise for days that haven't happened yet)
+  let effWorking = 0;
+  const todayInMonth = today >= start && today <= end;
+  const cutoff = todayInMonth ? today : end;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2, '0')}`;
+    if (date > cutoff) break;
+    const dow = new Date(y, m - 1, d).getDay();
+    if (dow !== 5 && dow !== 6) effWorking++;
+  }
+
+  const employees = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  // Activity types we score against. Weights are intentionally simple.
+  const ACT_WEIGHTS = {
+    lead_created:              3,
+    lead_status_changed:       2,
+    lead_assigned:             1,
+    lead_payment:              4,
+    payment_recorded:          2,
+    application_stage_changed: 3,
+    uni_app_status:            3,
+    reply_to_student:          2,
+    note:                      1,
+  };
+  const ACT_GROUPS = {
+    lead_work:    ['lead_created', 'lead_status_changed', 'lead_assigned'],
+    payments:     ['lead_payment', 'payment_recorded'],
+    application:  ['application_stage_changed', 'uni_app_status'],
+    communication:['reply_to_student', 'note'],
+  };
+
+  const rows = employees.map(emp => {
+    // — Attendance —
+    const attLogs = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date BETWEEN ? AND ?").all(emp.emp_id, start, end);
+    const present = attLogs.filter(l => l.status === 'Present').length;
+    const late    = attLogs.filter(l => l.status === 'Late').length;
+    const absent  = Math.max(0, effWorking - present - late);
+    const hours   = attLogs.reduce((s, l) => s + (l.hours_worked || 0), 0);
+    const avgIn   = attLogs.filter(l => l.check_in).map(l => l.check_in).sort()[Math.floor(attLogs.length / 2)] || null;
+    const attendancePct = effWorking > 0 ? Math.round(((present + late) / effWorking) * 100) : 0;
+
+    // — Office Work (daily logs) —
+    const logs = db.prepare("SELECT date FROM daily_logs WHERE emp_id=? AND date BETWEEN ? AND ?").all(emp.emp_id, start, end);
+    const logsSubmitted = logs.length;
+    // Streak: count back from today (or end of month) however many consecutive days have a log
+    let streak = 0;
+    {
+      const dates = new Set(logs.map(l => l.date));
+      const d = new Date(Math.min(new Date(today).getTime(), endDate.getTime()));
+      while (true) {
+        const ds = d.toISOString().slice(0, 10);
+        if (ds < start) break;
+        const dow = d.getDay();
+        if (dow !== 5 && dow !== 6) {
+          if (!dates.has(ds)) break;
+          streak++;
+        }
+        d.setDate(d.getDate() - 1);
+      }
+    }
+    const logPct = effWorking > 0 ? Math.round((logsSubmitted / effWorking) * 100) : 0;
+
+    // — Activity (auto-pulled from activity_log) —
+    // Match by both possible identities: user account name and user_id link
+    const acts = db.prepare(`
+      SELECT type, COUNT(*) as n
+      FROM activity_log
+      WHERE substr(created_at,1,10) BETWEEN ? AND ?
+        AND (actor_name = ? OR actor_user_id IN (SELECT id FROM users WHERE emp_id=? OR LOWER(email)=LOWER(?)))
+      GROUP BY type`).all(start, end, emp.name, emp.emp_id, emp.email || '');
+    const actByType = {}; acts.forEach(a => actByType[a.type] = a.n);
+    let actScore = 0;
+    Object.entries(ACT_WEIGHTS).forEach(([type, w]) => actScore += (actByType[type] || 0) * w);
+    const groupTotals = Object.fromEntries(Object.entries(ACT_GROUPS).map(([g, types]) =>
+      [g, types.reduce((s, t) => s + (actByType[t] || 0), 0)]
+    ));
+    const totalEvents = Object.values(actByType).reduce((s, n) => s + n, 0);
+
+    // — Composite Score (0-100). Attendance 30 + Office Work 20 + Activity 50.
+    // Activity is normalised against a "good day = 12 weighted points" expectation.
+    const attendanceScore = Math.min(30, (attendancePct / 100) * 30);
+    const logsScore       = Math.min(20, (logPct / 100) * 20);
+    const targetActScore  = Math.max(1, effWorking * 12);
+    const activityScore   = Math.min(50, (actScore / targetActScore) * 50);
+    const score = Math.round(attendanceScore + logsScore + activityScore);
+
+    return {
+      emp_id: emp.emp_id, name: emp.name, role: emp.role,
+      attendance: { present, late, absent, workingDays: effWorking, totalHours: +hours.toFixed(1), avgCheckIn: avgIn, attendancePct },
+      office_work: { logsSubmitted, logPct, streak, effWorking },
+      activity:    { total: totalEvents, score: actScore, by_type: actByType, by_group: groupTotals },
+      score,
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  res.json({ month, workingDays, effWorking, employees: rows });
+}));
+
+// Per-employee drilldown — full activity feed + daily logs for one person
+app.get('/api/employee-kpi/:emp_id', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const start = `${month}-01`;
+  const endDate = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5)), 0);
+  const end = endDate.toISOString().slice(0, 10);
+  const emp = db.prepare("SELECT * FROM employees WHERE emp_id=?").get(req.params.emp_id);
+  if (!emp) return res.status(404).json({ error: 'Employee not found' });
+
+  const attendance = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date").all(emp.emp_id, start, end);
+  const logs       = db.prepare("SELECT * FROM daily_logs WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date DESC").all(emp.emp_id, start, end);
+  const activity   = db.prepare(`SELECT * FROM activity_log
+    WHERE substr(created_at,1,10) BETWEEN ? AND ?
+      AND (actor_name = ? OR actor_user_id IN (SELECT id FROM users WHERE emp_id=? OR LOWER(email)=LOWER(?)))
+    ORDER BY id DESC LIMIT 500`).all(start, end, emp.name, emp.emp_id, emp.email || '');
+  res.json({ employee: emp, month, attendance, logs, activity });
 }));
 
 // ─────────────────────────────────────────────────────────

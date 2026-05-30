@@ -15,7 +15,7 @@ const curMonth = new Date().toISOString().slice(0, 7);
 const today = new Date().toISOString().slice(0, 10);
 
 export default function HR() {
-  const [tab, setTab] = useState('employees');
+  const [tab, setTab] = useState('performance');
   const [employees, setEmployees] = useState([]);
   const [summary, setSummary] = useState([]);
   const [workingDays, setWorkingDays] = useState(0);
@@ -71,10 +71,11 @@ export default function HR() {
   const checkedInToday = todayLogs.map(l => l.emp_id);
 
   const tabs = [
-    { id: 'employees', label: 'Employees', icon: Users },
-    { id: 'attendance', label: 'Attendance', icon: Clock },
-    { id: 'payroll', label: 'Payroll', icon: DollarSign },
-    { id: 'kpi', label: 'KPI Tracker', icon: BarChart2 },
+    { id: 'performance', label: 'Performance', icon: TrendingUp },
+    { id: 'employees',   label: 'Employees',   icon: Users },
+    { id: 'attendance',  label: 'Attendance',  icon: Clock },
+    { id: 'payroll',     label: 'Payroll',     icon: DollarSign },
+    { id: 'kpi',         label: 'Sales KPI',   icon: BarChart2 },
   ];
 
   return (
@@ -291,6 +292,11 @@ export default function HR() {
             <AttendanceCalendar emp={selectedEmp} month={month} logs={empLogs} onRefresh={load} />
           )}
         </div>
+      )}
+
+      {/* ── PERFORMANCE TAB ── */}
+      {tab === 'performance' && (
+        <Performance month={month} />
       )}
 
       {/* ── PAYROLL TAB ── */}
@@ -892,6 +898,234 @@ function Payroll({ month }) {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────── PERFORMANCE ──────────────────────────
+   Three-signal employee scoreboard:
+     • Attendance       — from auto check-ins        (30 pts)
+     • Office Work      — daily logs each employee submits (20 pts)
+     • Activity (auto)  — pulled from activity_log    (50 pts)
+   Click any card to drill into one employee's full month.
+*/
+const PERF_GROUPS = [
+  { key: 'lead_work',     label: 'Lead touches',  cls: 'bg-blue-100 text-blue-700' },
+  { key: 'payments',      label: 'Payments',      cls: 'bg-emerald-100 text-emerald-700' },
+  { key: 'application',   label: 'Application',   cls: 'bg-violet-100 text-violet-700' },
+  { key: 'communication', label: 'Messages',      cls: 'bg-amber-100 text-amber-700' },
+];
+
+function Performance({ month }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState(null); // emp_id
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.employeeKpi(month).then(d => { setData(d); }).finally(() => setLoading(false));
+  }, [month]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) return <div className="text-slate-400 text-center py-16">Computing performance…</div>;
+  if (!data || data.employees.length === 0) {
+    return <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
+      <Users size={36} className="text-slate-300 mx-auto mb-3" />
+      No active employees this month.
+    </div>;
+  }
+
+  const top = data.employees[0];
+
+  return (
+    <div className="space-y-4">
+      {/* Hero — top performer + working-day context */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white font-bold text-lg flex items-center justify-center shadow-md">
+            <Award size={22} />
+          </div>
+          <div>
+            <p className="text-xs uppercase text-slate-400 tracking-wide font-medium">Top performer</p>
+            <p className="text-lg font-bold text-slate-800">{top.name}</p>
+            <p className="text-xs text-slate-500">Score {top.score} · {top.attendance.attendancePct}% attendance · {top.office_work.logsSubmitted}/{top.office_work.effWorking} daily logs</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <Calendar size={13} />
+          <span>{data.effWorking}/{data.workingDays} working days completed this month</span>
+        </div>
+      </div>
+
+      {/* Grid of employee cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {data.employees.map(e => (
+          <PerfCard key={e.emp_id} e={e} onClick={() => setPicked(e.emp_id)} />
+        ))}
+      </div>
+
+      {picked && (
+        <PerfDrilldown emp_id={picked} month={month} onClose={() => setPicked(null)} />
+      )}
+    </div>
+  );
+}
+
+function PerfCard({ e, onClick }) {
+  const scoreColor = e.score >= 70 ? 'text-emerald-600' : e.score >= 40 ? 'text-amber-600' : 'text-rose-600';
+  const ring       = e.score >= 70 ? 'ring-emerald-100' : e.score >= 40 ? 'ring-amber-100' : 'ring-rose-100';
+
+  return (
+    <button onClick={onClick}
+      className={`text-left bg-white rounded-2xl border border-slate-200 p-4 hover:shadow-md hover:border-blue-200 transition-all ring-4 ring-transparent hover:${ring}`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold flex items-center justify-center flex-shrink-0">
+            {e.name?.[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-800 truncate">{e.name}</p>
+            <p className="text-xs text-slate-400 truncate">{e.role || '—'}</p>
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className={`text-2xl font-bold ${scoreColor} leading-none`}>{e.score}</p>
+          <p className="text-[10px] text-slate-400 uppercase tracking-wide">score</p>
+        </div>
+      </div>
+
+      {/* Three-signal bars */}
+      <SignalRow label="Attendance" pct={e.attendance.attendancePct}
+        right={`${e.attendance.present + e.attendance.late}/${e.attendance.workingDays} days · ${e.attendance.late} late`} color="emerald" />
+      <SignalRow label="Daily logs" pct={e.office_work.logPct}
+        right={`${e.office_work.logsSubmitted}/${e.office_work.effWorking} ${e.office_work.streak ? `· 🔥 ${e.office_work.streak}` : ''}`} color="amber" />
+      <SignalRow label="Activity"   pct={Math.min(100, Math.round((e.activity.score / Math.max(1, e.office_work.effWorking * 12)) * 100))}
+        right={`${e.activity.total} events`} color="blue" />
+
+      {/* Activity group counters */}
+      <div className="flex flex-wrap gap-1 mt-3">
+        {PERF_GROUPS.map(g => (
+          (e.activity.by_group[g.key] || 0) > 0 && (
+            <span key={g.key} className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${g.cls}`}>
+              {g.label} · {e.activity.by_group[g.key]}
+            </span>
+          )
+        ))}
+        {e.activity.total === 0 && <span className="text-[10px] text-slate-300 italic">no system activity recorded</span>}
+      </div>
+    </button>
+  );
+}
+
+function SignalRow({ label, pct, right, color }) {
+  const cls = { emerald: 'bg-emerald-400', amber: 'bg-amber-400', blue: 'bg-blue-400' }[color] || 'bg-slate-400';
+  return (
+    <div className="mb-2">
+      <div className="flex justify-between text-[11px] mb-0.5">
+        <span className="text-slate-500 font-medium">{label}</span>
+        <span className="text-slate-600 font-medium">{right}</span>
+      </div>
+      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div className={`h-full ${cls}`} style={{ width: `${Math.max(2, pct)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function PerfDrilldown({ emp_id, month, onClose }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { api.employeeKpiOne(emp_id, month).then(setData); }, [emp_id, month]);
+  if (!data) return null;
+  const { employee, attendance, logs, activity } = data;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white h-full w-full max-w-2xl overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">{employee.name}</h3>
+            <p className="text-xs text-slate-500">{employee.emp_id} · {employee.role || '—'} · {month}</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg">✕</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Daily logs */}
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><Pencil size={14}/> Daily logs ({logs.length})</p>
+            {logs.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No daily logs submitted yet this month.</p>
+            ) : (
+              <div className="space-y-2">
+                {logs.slice(0, 10).map(l => (
+                  <div key={l.id} className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <p className="font-semibold text-slate-700 text-sm">{l.date}</p>
+                      <p className="text-[10px] text-slate-400">submitted {l.submitted_at?.slice(0,16)}</p>
+                    </div>
+                    <p className="text-xs text-slate-600 whitespace-pre-wrap"><strong>Did:</strong> {l.accomplishments}</p>
+                    {l.challenges && <p className="text-xs text-slate-600 whitespace-pre-wrap mt-1"><strong>Blockers:</strong> {l.challenges}</p>}
+                    {l.tomorrow_plan && <p className="text-xs text-slate-600 whitespace-pre-wrap mt-1"><strong>Tomorrow:</strong> {l.tomorrow_plan}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Attendance */}
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><Clock size={14}/> Attendance ({attendance.length})</p>
+            {attendance.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No attendance recorded.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
+                    <tr><th className="text-left px-3 py-2 font-semibold">Date</th>
+                        <th className="text-left px-3 py-2 font-semibold">Status</th>
+                        <th className="text-left px-3 py-2 font-semibold">In</th>
+                        <th className="text-left px-3 py-2 font-semibold">Out</th>
+                        <th className="text-right px-3 py-2 font-semibold">Hours</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {attendance.slice().reverse().slice(0, 14).map(a => (
+                      <tr key={a.id}>
+                        <td className="px-3 py-1.5">{a.date}</td>
+                        <td className="px-3 py-1.5">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${a.status === 'Late' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{a.status}</span>
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-[11px]">{a.check_in || '—'}</td>
+                        <td className="px-3 py-1.5 font-mono text-[11px]">{a.check_out || '—'}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{a.hours_worked ? `${a.hours_worked.toFixed?.(1) || a.hours_worked}h` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Activity */}
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><TrendingUp size={14}/> Activity ({activity.length})</p>
+            {activity.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No CRM activity recorded for this employee.</p>
+            ) : (
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {activity.map(a => (
+                  <div key={a.id} className="text-xs flex items-baseline gap-2 py-1 border-b border-slate-50">
+                    <span className="text-slate-400 tabular-nums">{(a.created_at || '').slice(0, 10)}</span>
+                    <span className="text-slate-500 font-medium">{a.type.replace(/_/g, ' ')}</span>
+                    {a.lead_name && <span className="text-slate-700 truncate">{a.lead_name}</span>}
+                    {a.to_value && <span className="text-slate-400 italic truncate">→ {a.to_value}</span>}
+                    {a.amount && <span className="text-emerald-600 font-semibold tabular-nums">৳{Number(a.amount).toLocaleString()}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

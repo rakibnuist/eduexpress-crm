@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X } from 'lucide-react';
+import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X, Sun } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -23,7 +23,11 @@ export default function Dashboard() {
   const [extraStats, setExtraStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [broadcasts, setBroadcasts] = useState([]);
+  const [dailyLog, setDailyLog]     = useState(null); // { linked, log }
   const month = new Date().toISOString().slice(0, 7);
+
+  // Daily-log status — used for the end-of-day banner
+  useEffect(() => { api.dailyLogsToday().then(setDailyLog).catch(() => setDailyLog(null)); }, []);
 
   // Owner broadcasts — pinned sticky notes
   useEffect(() => {
@@ -91,9 +95,27 @@ export default function Dashboard() {
   const convRate = total > 0 ? ((enrolled / total) * 100).toFixed(1) : 0;
 
   const activeBroadcasts = broadcasts.filter(b => !b.dismissed);
+  const hour = new Date().getHours();
+  // Show the end-of-day nudge after 16:00 if linked employee hasn't logged today
+  const showDailyLogNudge = dailyLog?.linked && !dailyLog.log && hour >= 16;
 
   return (
     <div className="space-y-6">
+      {/* End-of-day reminder for staff who haven't logged */}
+      {showDailyLogNudge && (
+        <Link to="/my-day"
+          className="block bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-100 text-amber-700"><Sun size={18}/></div>
+            <div className="flex-1">
+              <p className="font-semibold text-amber-900 text-sm">Don't forget to log your day</p>
+              <p className="text-xs text-amber-700">Takes 60 seconds — it counts toward your performance score.</p>
+            </div>
+            <ArrowRight size={16} className="text-amber-700"/>
+          </div>
+        </Link>
+      )}
+
       {/* Owner broadcasts — sticky notes that travel to everyone */}
       {activeBroadcasts.length > 0 && (
         <div className="space-y-2">
