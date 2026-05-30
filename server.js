@@ -592,26 +592,27 @@ function seedData() {
 // ─────────────────────────────────────────────────────────
 // SSE REAL-TIME BROADCAST
 // ─────────────────────────────────────────────────────────
+// Each SSE client = { res, user }. The user object lets us push only to admins,
+// or only to the consultant who owns a specific lead.
 const sseClients = new Map();
 
 app.get('/api/events', (req, res) => {
-  // Critical for Nginx/Hostinger — disables proxy buffering so events flow instantly
+  // Auth via cookie — EventSource always sends cookies, no extra setup needed.
+  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
+  if (!payload) return res.status(401).end();
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Accel-Buffering', 'no');   // ← disables nginx buffering
+  res.setHeader('X-Accel-Buffering', 'no');   // disables nginx buffering
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.flushHeaders();
 
   const id = Date.now() + Math.random();
-  sseClients.set(id, res);
-  // Send connected confirmation
+  sseClients.set(id, { res, user: payload });
   res.write(`data: ${JSON.stringify({ type: 'connected', id })}\n\n`);
-  // Force flush immediately
   if (typeof res.flush === 'function') res.flush();
 
-  // Keepalive ping every 20s (SSE comment, minimal overhead)
   const ping = setInterval(() => {
     try {
       res.write(`: ping\n\n`);
@@ -622,16 +623,35 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => { clearInterval(ping); sseClients.delete(id); });
 });
 
-function broadcast(type, data) {
+// Broadcast to every connected client. Optional `filter(user)` decides whether
+// to send to a given client — used to scope notifications by role/consultant.
+function broadcast(type, data, filter = null) {
   const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
   sseClients.forEach((client, id) => {
+    if (filter && !filter(client.user)) return;
     try {
-      client.write(msg);
-      // Force flush past Nginx proxy buffer immediately
-      if (typeof client.flush === 'function') client.flush();
+      client.res.write(msg);
+      if (typeof client.res.flush === 'function') client.res.flush();
     } catch {
       sseClients.delete(id);
     }
+  });
+}
+
+// Push a freshly-logged activity to the people who should see it.
+// Admins see everything; consultants only see activities about their own leads.
+function broadcastActivity(row) {
+  if (!row) return;
+  broadcast('activity', { activity: row }, (u) => {
+    if (u?.role === 'admin') return true;
+    if (!row.lead_id) return false;
+    // Cheap consultant-scope check — does this user own this lead?
+    const consultant = u?.consultant_name || u?.name;
+    if (!consultant) return false;
+    try {
+      const lead = db.prepare("SELECT assigned_consultant FROM leads WHERE id=?").get(row.lead_id);
+      return lead && lead.assigned_consultant === consultant;
+    } catch { return false; }
   });
 }
 
@@ -653,7 +673,7 @@ function getConfig(key) {
           payment_recorded, expense_recorded, user_created, attendance_in. */
 function logActivity({ type, actor, lead, amount, from, to, details }) {
   try {
-    db.prepare(`INSERT INTO activity_log
+    const info = db.prepare(`INSERT INTO activity_log
         (type, actor_user_id, actor_name, lead_id, lead_name, amount, from_value, to_value, details)
         VALUES (?,?,?,?,?,?,?,?,?)`).run(
       type,
@@ -666,6 +686,9 @@ function logActivity({ type, actor, lead, amount, from, to, details }) {
       to   == null ? null : String(to),
       details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null,
     );
+    // Push to connected clients so the bell + Cockpit feed update instantly
+    const row = db.prepare("SELECT * FROM activity_log WHERE id=?").get(info.lastInsertRowid);
+    if (typeof broadcastActivity === 'function') broadcastActivity(row);
   } catch (e) { console.error('[activity]', e.message); }
 }
 

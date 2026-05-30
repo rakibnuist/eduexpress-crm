@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
+import NotificationBell from './NotificationBell';
 
 const baseNav = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
@@ -100,6 +101,7 @@ export default function Layout({ children, user, onLogout }) {
           </button>
           <h1 className="text-sm font-semibold text-slate-700 flex-1">{pageTitle}</h1>
           <div className="flex items-center gap-2.5">
+            <NotificationBell user={user} />
             <div className="text-right hidden sm:block">
               <p className="text-xs font-medium text-slate-700">{user?.name || 'User'}</p>
               <p className="text-xs text-slate-400 capitalize">{user?.role || ''}</p>
