@@ -39,6 +39,12 @@ export const api = {
   updateDocument:  (id, d)   => req(`/documents/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   deleteDocument:  (id)      => req(`/documents/${id}`, { method: 'DELETE' }),
 
+  // Per-university applications (mirrors the NJTech/SUES/SXU columns)
+  universityApps:       (leadId)    => req(`/leads/${leadId}/university-applications`),
+  addUniversityApp:     (leadId, d) => req(`/leads/${leadId}/university-applications`, { method: 'POST', body: JSON.stringify(d) }),
+  updateUniversityApp:  (id, d)     => req(`/university-applications/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteUniversityApp:  (id)        => req(`/university-applications/${id}`, { method: 'DELETE' }),
+
   // Dashboard / settings
   dashboard: () => req('/dashboard'),
   settings:  () => req('/settings'),

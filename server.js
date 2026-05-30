@@ -183,18 +183,22 @@ app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => 
 }));
 
 // ─── APPLICATION PIPELINE ──────────────────────────────────────────────────
-// 9 stages — sales funnel ends at 'Enrolled', application pipeline takes over.
+// Aligned with EduExpress workflow (File Updates 2026.xlsx).
+// 8 stages from File Open → Arrived. Per-university tracker captures
+// returned/rejected at each individual university.
 const APPLICATION_STAGES = [
-  { key: 'inquiry',       label: 'Inquiry',          order: 0 },
-  { key: 'counselling',   label: 'Counselling',      order: 1 },
-  { key: 'documents',     label: 'Documents',        order: 2 },
-  { key: 'application',   label: 'Application Sent', order: 3 },
-  { key: 'offer',         label: 'Offer Letter',     order: 4 },
-  { key: 'visa_applied',  label: 'Visa Applied',     order: 5 },
-  { key: 'visa_approved', label: 'Visa Approved',    order: 6 },
-  { key: 'departed',      label: 'Departed',         order: 7 },
-  { key: 'arrived',       label: 'Arrived',          order: 8 },
+  { key: 'documents',     label: 'Documents',     order: 0 },  // Collecting docs
+  { key: 'ready',         label: 'Ready',         order: 1 },  // Docs ready, about to submit
+  { key: 'submitted',     label: 'Submitted',     order: 2 },  // Sent to university
+  { key: 'admitted',      label: 'Admitted',      order: 3 },  // Offer letter received
+  { key: 'visa_applied',  label: 'Visa Applied',  order: 4 },
+  { key: 'visa_approved', label: 'Visa Approved', order: 5 },
+  { key: 'departed',      label: 'Departed',      order: 6 },
+  { key: 'arrived',       label: 'Arrived',       order: 7 },
 ];
+
+// Per-university application status values.
+const UNI_APP_STATUSES = ['documents', 'ready', 'submitted', 'admitted', 'returned', 'rejected'];
 
 // Default document checklists per destination. Used when an application opens.
 // Each entry has a `required` array of doc types. Easy to edit later.
@@ -246,34 +250,43 @@ app.get('/api/applications', (req, res) => {
   }
   if (req.query.destination) { where.push("l.destination = @destination"); params.destination = req.query.destination; }
   if (req.query.consultant)  { where.push("l.assigned_consultant = @consultant"); params.consultant = req.query.consultant; }
-  const ws = 'WHERE ' + where.join(' AND ');
+  if (req.query.source)      { where.push("l.source = @source"); params.source = req.query.source; }
+  if (req.query.referrer)    { where.push("l.referrer = @referrer"); params.referrer = req.query.referrer; }
+  const ws2 = 'WHERE ' + where.join(' AND ');
 
   const rows = db.prepare(`
-    SELECT l.id, l.lead_id, l.client_name, l.phone, l.destination, l.university,
+    SELECT l.id, l.lead_id, l.client_name, l.phone, l.email, l.destination, l.university,
            l.lead_status, l.application_stage, l.visa_deadline, l.departure_date,
            l.intake_term, l.assigned_consultant, l.service_fee, l.paid, l.balance,
+           l.source, l.referrer, l.nationality, l.passport, l.degree, l.major,
+           l.drive_link, l.deposit,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id) AS docs_total,
-           (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id AND d.status IN ('received','verified')) AS docs_received
+           (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id AND d.status IN ('received','verified')) AS docs_received,
+           (SELECT COUNT(*) FROM lead_university_applications u WHERE u.lead_id=l.id) AS uni_total,
+           (SELECT COUNT(*) FROM lead_university_applications u WHERE u.lead_id=l.id AND u.status='admitted') AS uni_admitted,
+           (SELECT GROUP_CONCAT(university, ', ') FROM lead_university_applications u WHERE u.lead_id=l.id) AS uni_list
     FROM leads l
-    ${ws}
+    ${ws2}
     ORDER BY
       CASE l.application_stage
-        WHEN 'inquiry' THEN 0 WHEN 'counselling' THEN 1 WHEN 'documents' THEN 2
-        WHEN 'application' THEN 3 WHEN 'offer' THEN 4 WHEN 'visa_applied' THEN 5
-        WHEN 'visa_approved' THEN 6 WHEN 'departed' THEN 7 WHEN 'arrived' THEN 8
-        ELSE 0 END,
+        WHEN 'documents' THEN 0 WHEN 'ready' THEN 1 WHEN 'submitted' THEN 2
+        WHEN 'admitted' THEN 3 WHEN 'visa_applied' THEN 4 WHEN 'visa_approved' THEN 5
+        WHEN 'departed' THEN 6 WHEN 'arrived' THEN 7 ELSE 0 END,
       l.id DESC`).all(params);
 
   res.json({ stages: APPLICATION_STAGES, rows });
 });
 
-// Move a lead to a different application stage.
+// Move a lead to a different application stage + edit Excel-aligned fields.
 app.put('/api/leads/:id/stage', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
-  const { stage, visa_deadline, departure_date, university, intake_term, application_notes } = req.body || {};
+  const {
+    stage, visa_deadline, departure_date, university, intake_term, application_notes,
+    source, referrer, nationality, passport, degree, major, drive_link, deposit,
+  } = req.body || {};
   if (stage && !APPLICATION_STAGES.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
   }
@@ -284,14 +297,95 @@ app.put('/api/leads/:id/stage', (req, res) => {
     departure_date    = COALESCE(?, departure_date),
     university        = COALESCE(?, university),
     intake_term       = COALESCE(?, intake_term),
-    application_notes = COALESCE(?, application_notes)
-    WHERE id=?`).run(stage ?? null, visa_deadline ?? null, departure_date ?? null,
-                     university ?? null, intake_term ?? null, application_notes ?? null, req.params.id);
+    application_notes = COALESCE(?, application_notes),
+    source            = COALESCE(?, source),
+    referrer          = COALESCE(?, referrer),
+    nationality       = COALESCE(?, nationality),
+    passport          = COALESCE(?, passport),
+    degree            = COALESCE(?, degree),
+    major             = COALESCE(?, major),
+    drive_link        = COALESCE(?, drive_link),
+    deposit           = COALESCE(?, deposit)
+    WHERE id=?`).run(
+      stage ?? null, visa_deadline ?? null, departure_date ?? null,
+      university ?? null, intake_term ?? null, application_notes ?? null,
+      source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
+      degree ?? null, major ?? null, drive_link ?? null,
+      (deposit === '' || deposit == null) ? null : Number(deposit),
+      req.params.id);
   const fresh = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (stage && oldStage !== stage) {
     logActivity({ type: 'application_stage_changed', actor: req.user, lead: fresh, from: oldStage, to: stage });
   }
   res.json(fresh);
+});
+
+// ─── Per-university application tracker (mirrors NJTech/SUES/SXU columns) ──
+app.get('/api/leads/:id/university-applications', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const rows = db.prepare("SELECT * FROM lead_university_applications WHERE lead_id=? ORDER BY id").all(lead.id);
+  res.json(rows);
+});
+
+app.post('/api/leads/:id/university-applications', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const { university, program = null, status = 'documents', application_id = null, notes = null } = req.body || {};
+  if (!university) return res.status(400).json({ error: 'university is required' });
+  if (!UNI_APP_STATUSES.includes(status)) return res.status(400).json({ error: 'Bad status' });
+  const info = db.prepare(`INSERT INTO lead_university_applications
+    (lead_id, university, program, status, application_id, notes, updated_by)
+    VALUES (?,?,?,?,?,?,?)`).run(
+      lead.id, university, program, status, application_id, notes,
+      req.user?.name || req.user?.email || null);
+  res.json(db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(info.lastInsertRowid));
+});
+
+app.put('/api/university-applications/:id', (req, res) => {
+  const row = db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  const { university, program, status, application_id, submitted_on, decision_on, notes } = req.body || {};
+  if (status && !UNI_APP_STATUSES.includes(status)) return res.status(400).json({ error: 'Bad status' });
+
+  // Auto-stamp submitted_on/decision_on when the status flips into the right phase.
+  const sOn = status === 'submitted' && !row.submitted_on ? (submitted_on || new Date().toISOString().slice(0,10)) : (submitted_on ?? row.submitted_on);
+  const dOn = ['admitted','rejected','returned'].includes(status) && !row.decision_on ? (decision_on || new Date().toISOString().slice(0,10)) : (decision_on ?? row.decision_on);
+
+  db.prepare(`UPDATE lead_university_applications SET
+    university    = COALESCE(?, university),
+    program       = COALESCE(?, program),
+    status        = COALESCE(?, status),
+    application_id= COALESCE(?, application_id),
+    submitted_on  = ?,
+    decision_on   = ?,
+    notes         = COALESCE(?, notes),
+    updated_by    = ?,
+    updated_at    = datetime('now')
+    WHERE id=?`).run(
+      university ?? null, program ?? null, status ?? null, application_id ?? null,
+      sOn, dOn, notes ?? null,
+      req.user?.name || req.user?.email || null, req.params.id);
+  const fresh = db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(req.params.id);
+
+  // If this university just got admitted/rejected, log it for the owner feed.
+  if (status && row.status !== status) {
+    logActivity({ type: 'uni_app_status', actor: req.user, lead, from: row.status, to: status, details: { university: fresh.university } });
+  }
+  res.json(fresh);
+});
+
+app.delete('/api/university-applications/:id', (req, res) => {
+  const row = db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
+  if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
+  db.prepare("DELETE FROM lead_university_applications WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
 });
 
 // Documents for one lead — list + ensure-template helpers.
@@ -486,7 +580,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -595,6 +689,22 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS lead_university_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    university TEXT NOT NULL,
+    program TEXT,
+    status TEXT NOT NULL DEFAULT 'documents', -- documents | ready | submitted | admitted | returned | rejected
+    application_id TEXT,         -- university's reference / file number
+    submitted_on TEXT,
+    decision_on TEXT,
+    notes TEXT,
+    updated_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_uniapp_lead ON lead_university_applications(lead_id);
 
   CREATE TABLE IF NOT EXISTS lead_documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -743,6 +853,15 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN intake_term TEXT`,
     `ALTER TABLE leads      ADD COLUMN university TEXT`,
     `ALTER TABLE leads      ADD COLUMN application_notes TEXT`,
+    // Excel-aligned fields (from File Updates 2026.xlsx)
+    `ALTER TABLE leads      ADD COLUMN source TEXT`,
+    `ALTER TABLE leads      ADD COLUMN referrer TEXT`,
+    `ALTER TABLE leads      ADD COLUMN nationality TEXT`,
+    `ALTER TABLE leads      ADD COLUMN passport TEXT`,
+    `ALTER TABLE leads      ADD COLUMN degree TEXT`,
+    `ALTER TABLE leads      ADD COLUMN major TEXT`,
+    `ALTER TABLE leads      ADD COLUMN drive_link TEXT`,
+    `ALTER TABLE leads      ADD COLUMN deposit REAL DEFAULT 0`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
