@@ -1547,6 +1547,119 @@ app.get('/api/pnl', (req, res) => {
   }));
 });
 
+// ─── CASHFLOW (aligned with CashFlow 2026.xlsx) ────────────────────────────
+const INCOME_CATEGORIES = [
+  'Service Charge', 'File Opening', 'Application Deposit', 'Investment',
+  'Marketing', 'Refund', 'Previous Cash', 'Other Income',
+];
+const EXPENSE_CATEGORIES = [
+  'Salary', 'Office Rent', 'Air Ticket', 'Medical', 'App Fee',
+  'Meta Marketing', 'Marketing', 'Client Hospitality', 'Visa Fee',
+  'Translation Fee', 'Office Supplies', 'Utilities', 'Travel',
+  'Mata Support', 'Refund Out', 'Other Expense',
+];
+
+// Helper — opening balance for a given month = initial cash + all prior in/out.
+function computeOpeningBalance(month) {
+  const initial = parseFloat(getConfig('cash_initial')) || 0;
+  if (!month) return initial;
+  const sumIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ?").get(month).s;
+  const sumOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month < ?").get(month).s;
+  return initial + sumIn - sumOut;
+}
+
+// Categories endpoint — frontend uses these as dropdown presets.
+app.get('/api/cashflow/categories', (req, res) => {
+  res.json({ income: INCOME_CATEGORIES, expense: EXPENSE_CATEGORIES });
+});
+
+// Set initial cash (admin only) — the one-time opening balance.
+app.put('/api/cashflow/initial', (req, res, next) => requireAdmin(req, res, () => {
+  const v = Number(req.body?.amount);
+  if (!Number.isFinite(v)) return res.status(400).json({ error: 'amount required' });
+  setConfig('cash_initial', String(v));
+  res.json({ ok: true, cash_initial: v });
+}));
+
+// Monthly ledger — what the Excel shows for one month, side by side.
+// Includes running balance per row so the table reads like a real cashflow.
+app.get('/api/cashflow', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const incomeRows  = db.prepare("SELECT id,date,category,client_name,reference,amount,notes FROM income   WHERE month=? ORDER BY date, id").all(month);
+  const expenseRows = db.prepare("SELECT id,date,category,paid_to AS client_name,reference,amount,notes FROM expenses WHERE month=? ORDER BY date, id").all(month);
+  const opening = computeOpeningBalance(month);
+  const totalIn  = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
+  const totalOut = expenseRows.reduce((s, r) => s + (r.amount || 0), 0);
+
+  // Build a unified chronological feed for running-balance computation.
+  const events = [
+    ...incomeRows.map(r => ({ ...r, kind: 'in',  ts: `${r.date || month + '-01'}-i-${r.id}` })),
+    ...expenseRows.map(r => ({ ...r, kind: 'out', ts: `${r.date || month + '-01'}-o-${r.id}` })),
+  ].sort((a, b) => a.ts.localeCompare(b.ts));
+  let running = opening;
+  for (const e of events) { running += e.kind === 'in' ? e.amount : -e.amount; e.running = running; }
+  const rowsWithRunning = id => events.find(e => e.id === id && e.kind === 'in')  || events.find(e => e.id === id && e.kind === 'out');
+
+  // Re-attach running balance back to each row in order
+  const incomeWithRun  = incomeRows.map(r => ({ ...r, running: events.find(e => e.kind === 'in'  && e.id === r.id)?.running }));
+  const expenseWithRun = expenseRows.map(r => ({ ...r, running: events.find(e => e.kind === 'out' && e.id === r.id)?.running }));
+
+  // Category breakdowns for the donut/sidebar
+  const incByCat  = {}; incomeRows.forEach(r  => { const k = r.category || 'Uncategorised'; incByCat[k]  = (incByCat[k]  || 0) + (r.amount || 0); });
+  const expByCat  = {}; expenseRows.forEach(r => { const k = r.category || 'Uncategorised'; expByCat[k]  = (expByCat[k]  || 0) + (r.amount || 0); });
+  // Per-reference (who handled / referred) breakdown for income
+  const incByRef  = {}; incomeRows.forEach(r  => { const k = r.reference || 'Direct'; incByRef[k] = (incByRef[k] || 0) + (r.amount || 0); });
+
+  res.json({
+    month, opening,
+    income:  incomeWithRun,
+    expense: expenseWithRun,
+    totals: { in: totalIn, out: totalOut, net: totalIn - totalOut, closing: opening + totalIn - totalOut },
+    by_category: {
+      income:  Object.entries(incByCat).sort((a,b) => b[1]-a[1]).map(([name, amount]) => ({ name, amount })),
+      expense: Object.entries(expByCat).sort((a,b) => b[1]-a[1]).map(([name, amount]) => ({ name, amount })),
+    },
+    income_by_reference: Object.entries(incByRef).sort((a,b) => b[1]-a[1]).map(([name, amount]) => ({ name, amount })),
+  });
+}));
+
+// Year view — 12 months at a glance with running cash.
+app.get('/api/cashflow/year', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+  const year = (req.query.year || new Date().toISOString().slice(0, 4)).toString();
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  const initial = parseFloat(getConfig('cash_initial')) || 0;
+  const priorIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ?").get(`${year}-01`).s;
+  const priorOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month < ?").get(`${year}-01`).s;
+  let running = initial + priorIn - priorOut;
+
+  const rows = months.map(m => {
+    const inc = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month=?").get(m).s;
+    const exp = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month=?").get(m).s;
+    const opening = running;
+    const closing = opening + inc - exp;
+    running = closing;
+    return { month: m, opening, income: inc, expense: exp, net: inc - exp, closing };
+  });
+  res.json({ year, opening: rows[0]?.opening || initial, closing: rows[11]?.closing || initial, rows });
+}));
+
+// Investor / partner contributions — derived from income where category='Investment'.
+// Tracks both totals by person and time-series.
+app.get('/api/cashflow/investors', (req, res, next) => requireAdmin(req, res, () => {
+  const rows = db.prepare(`SELECT date, month, client_name, reference, amount, notes
+                           FROM income WHERE category='Investment' ORDER BY date, id`).all();
+  const byPerson = {};
+  rows.forEach(r => {
+    const key = r.client_name || 'Unknown';
+    byPerson[key] = (byPerson[key] || 0) + (r.amount || 0);
+  });
+  res.json({
+    total: rows.reduce((s, r) => s + (r.amount || 0), 0),
+    contributions: rows,
+    by_person: Object.entries(byPerson).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount })),
+  });
+}));
+
 // ─────────────────────────────────────────────────────────
 // EMPLOYEES / ATTENDANCE / KPI  (unchanged from before)
 // ─────────────────────────────────────────────────────────

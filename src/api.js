@@ -87,6 +87,13 @@ export const api = {
   deleteExpense: (id)     => req(`/expenses/${id}`, { method: 'DELETE' }),
   pnl: () => req('/pnl'),
 
+  // Cashflow
+  cashflow:           (month)  => req('/cashflow?' + new URLSearchParams({ month })),
+  cashflowYear:       (year)   => req('/cashflow/year?' + new URLSearchParams({ year })),
+  cashflowCategories: ()       => req('/cashflow/categories'),
+  cashflowInvestors:  ()       => req('/cashflow/investors'),
+  setInitialCash:     (amount) => req('/cashflow/initial', { method: 'PUT', body: JSON.stringify({ amount }) }),
+
   // Employees
   employees:      ()      => req('/employees'),
   createEmployee: (d)     => req('/employees',       { method: 'POST', body: JSON.stringify(d) }),

@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { api } from '../api';
 import Modal from '../components/Modal';
-import { Plus, Trash2, Pencil, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import {
+  Plus, Trash2, Pencil, TrendingUp, TrendingDown, DollarSign,
+  Wallet, ArrowDownCircle, ArrowUpCircle, Activity, Calendar,
+  PiggyBank, Banknote, ChevronLeft, ChevronRight, Save, Settings as Cog,
+} from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Legend, LineChart, Line, CartesianGrid,
 } from 'recharts';
 
 export default function Finance() {
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState('cashflow');
   const [income, setIncome] = useState({ rows: [], total: 0, sum: 0 });
   const [expenses, setExpenses] = useState({ rows: [], total: 0, sum: 0 });
   const [pnl, setPnl] = useState([]);
@@ -65,15 +69,26 @@ export default function Finance() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl w-fit">
-        {[['overview', '📊 Overview'], ['income', '💰 Income'], ['expenses', '💸 Expenses']].map(([t, label]) => (
+      <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
+        {[
+          ['cashflow',  '💵 Cashflow'],
+          ['year',      '📆 Year view'],
+          ['investors', '🏦 Investors'],
+          ['overview',  '📊 Overview'],
+          ['income',    '💰 Income'],
+          ['expenses',  '💸 Expenses'],
+        ].map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
               ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {label}
           </button>
         ))}
       </div>
+
+      {tab === 'cashflow' && <CashflowTab onChanged={load} settings={settings} />}
+      {tab === 'year'     && <YearTab />}
+      {tab === 'investors' && <InvestorsTab />}
 
       {/* Overview */}
       {tab === 'overview' && (
@@ -331,5 +346,507 @@ function FinanceForm({ type, record, settings, onSave }) {
         </button>
       </div>
     </form>
+  );
+}
+
+/* ───────────────────────────── CASHFLOW TAB ─────────────────────────────
+   Side-by-side income vs spend ledger that mirrors the office's
+   CashFlow 2026.xlsx layout. KPIs (Opening, In, Out, Net, Closing) read
+   like a real cashflow statement. Click any row to edit; quick-add per side.
+*/
+const cFmt = (n) => `৳${Math.round(Number(n || 0)).toLocaleString()}`;
+const cMonthLabel = (m) => {
+  if (!m) return '';
+  const [y, mo] = m.split('-');
+  return new Date(parseInt(y), parseInt(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+};
+const cAddMonth = (m, delta) => {
+  const [y, mo] = m.split('-').map(Number);
+  const d = new Date(y, mo - 1 + delta, 1);
+  return d.toISOString().slice(0, 7);
+};
+
+function CashflowTab({ onChanged, settings }) {
+  const [month, setMonth]   = useState(() => new Date().toISOString().slice(0, 7));
+  const [data, setData]     = useState(null);
+  const [cats, setCats]     = useState({ income: [], expense: [] });
+  const [editing, setEditing] = useState(null); // {side:'in'|'out', row?: existing}
+  const [initOpen, setInitOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    const d = await api.cashflow(month); setData(d);
+    const c = await api.cashflowCategories(); setCats(c);
+  }, [month]);
+  useEffect(() => { load(); }, [load]);
+
+  const handleSaved = () => { setEditing(null); load(); onChanged?.(); };
+
+  if (!data) return <div className="text-slate-400 text-center py-16">Loading…</div>;
+  const { opening, income, expense, totals } = data;
+  const cashColor = totals.closing < 0 ? 'rose' : totals.closing < (opening * 0.5) ? 'amber' : 'emerald';
+
+  return (
+    <div className="space-y-4">
+      {/* Month nav + initial-cash setter */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1">
+          <button onClick={() => setMonth(cAddMonth(month, -1))}
+            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg"><ChevronLeft size={15}/></button>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+            className="px-2 py-1 text-sm font-medium text-slate-800 bg-transparent focus:outline-none" />
+          <button onClick={() => setMonth(cAddMonth(month, +1))}
+            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg"><ChevronRight size={15}/></button>
+          <span className="px-2 text-xs text-slate-400 font-medium">{cMonthLabel(month)}</span>
+        </div>
+        <button onClick={() => setInitOpen(true)}
+          className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50">
+          <Cog size={13} /> Set opening cash
+        </button>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <KpiPill icon={<Wallet size={16}/>}        label="Opening cash" value={cFmt(opening)} color="slate" />
+        <KpiPill icon={<ArrowDownCircle size={16}/>} label="Money in"     value={cFmt(totals.in)} color="emerald" sub={`${income.length} entries`} />
+        <KpiPill icon={<ArrowUpCircle size={16}/>}   label="Money out"    value={cFmt(totals.out)} color="rose" sub={`${expense.length} entries`} />
+        <KpiPill icon={<Activity size={16}/>}        label="Net for month" value={cFmt(totals.net)} color={totals.net >= 0 ? 'blue' : 'rose'} />
+        <KpiPill icon={<PiggyBank size={16}/>}       label="Closing cash"  value={cFmt(totals.closing)} color={cashColor} />
+      </div>
+
+      {/* Side-by-side ledger */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <LedgerCard
+          side="in" title="Income" color="emerald"
+          rows={income} total={totals.in}
+          onAdd={() => setEditing({ side: 'in' })}
+          onEdit={row => setEditing({ side: 'in', row })}
+          referrers={(settings?.consultants || [])}
+        />
+        <LedgerCard
+          side="out" title="Spend" color="rose"
+          rows={expense} total={totals.out}
+          onAdd={() => setEditing({ side: 'out' })}
+          onEdit={row => setEditing({ side: 'out', row })}
+          referrers={(settings?.consultants || [])}
+        />
+      </div>
+
+      {/* Breakdown panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <BreakdownPanel title="Income by category"  rows={data.by_category.income}  color="emerald" />
+        <BreakdownPanel title="Spend by category"   rows={data.by_category.expense} color="rose" />
+      </div>
+      {data.income_by_reference.length > 0 && (
+        <BreakdownPanel title="Income by reference (who closed it)" rows={data.income_by_reference} color="blue" />
+      )}
+
+      {/* Editor modal */}
+      {editing && (
+        <CashflowEntryModal
+          side={editing.side}
+          row={editing.row}
+          month={month}
+          categories={editing.side === 'in' ? cats.income : cats.expense}
+          onClose={() => setEditing(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
+      {/* Set initial cash modal */}
+      {initOpen && <InitialCashModal current={opening} onClose={() => setInitOpen(false)} onSaved={() => { setInitOpen(false); load(); }} />}
+    </div>
+  );
+}
+
+function KpiPill({ icon, label, value, sub, color }) {
+  const colors = {
+    slate:   'bg-slate-50 text-slate-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    rose:    'bg-rose-50 text-rose-600',
+    amber:   'bg-amber-50 text-amber-600',
+    blue:    'bg-blue-50 text-blue-600',
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-3.5 flex items-start gap-2.5">
+      <div className={`p-2 rounded-lg ${colors[color]}`}>{icon}</div>
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">{label}</p>
+        <p className="text-xl font-bold text-slate-800 leading-tight">{value}</p>
+        {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function LedgerCard({ side, title, color, rows, total, onAdd, onEdit }) {
+  const tone = side === 'in'
+    ? { head: 'bg-emerald-50 text-emerald-700 border-emerald-100', total: 'text-emerald-700' }
+    : { head: 'bg-rose-50 text-rose-700 border-rose-100',          total: 'text-rose-700' };
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <div className={`flex items-center justify-between px-4 py-2.5 border-b ${tone.head}`}>
+        <div className="flex items-center gap-2">
+          {side === 'in' ? <ArrowDownCircle size={15}/> : <ArrowUpCircle size={15}/>}
+          <p className="font-semibold text-sm">{title}</p>
+          <span className="text-xs font-medium opacity-70">· {rows.length} entries</span>
+        </div>
+        <button onClick={onAdd}
+          className="flex items-center gap-1 text-xs font-medium bg-white border border-current px-2.5 py-1 rounded-lg hover:bg-current/5">
+          <Plus size={12} /> Add
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50/60 text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="text-left px-3 py-2 font-semibold">Type</th>
+              <th className="text-left px-3 py-2 font-semibold">{side === 'in' ? 'Client' : 'Paid to'}</th>
+              <th className="text-left px-3 py-2 font-semibold">Reference</th>
+              <th className="text-right px-3 py-2 font-semibold">Amount</th>
+              <th className="text-right px-3 py-2 font-semibold">Balance</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {rows.length === 0 ? (
+              <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">No entries this month</td></tr>
+            ) : rows.map(r => (
+              <tr key={r.id} onClick={() => onEdit(r)} className="hover:bg-slate-50 cursor-pointer">
+                <td className="px-3 py-2 text-slate-700">{r.category || '—'}</td>
+                <td className="px-3 py-2 text-slate-700 max-w-[160px] truncate">{r.client_name || '—'}</td>
+                <td className="px-3 py-2 text-slate-500 text-xs max-w-[140px] truncate">{r.reference || '—'}</td>
+                <td className={`px-3 py-2 text-right font-semibold tabular-nums ${tone.total}`}>{cFmt(r.amount)}</td>
+                <td className="px-3 py-2 text-right text-slate-500 tabular-nums text-xs">{cFmt(r.running)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-slate-50/60">
+            <tr>
+              <td colSpan={3} className="px-3 py-2.5 text-right text-slate-500 text-xs font-semibold uppercase tracking-wide">Total</td>
+              <td className={`px-3 py-2.5 text-right font-bold tabular-nums ${tone.total}`}>{cFmt(total)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BreakdownPanel({ title, rows, color }) {
+  if (rows.length === 0) return null;
+  const max = Math.max(...rows.map(r => r.amount));
+  const bar = { emerald: 'bg-emerald-400', rose: 'bg-rose-400', blue: 'bg-blue-400' }[color] || 'bg-slate-400';
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4">
+      <p className="font-semibold text-slate-700 text-sm mb-3">{title}</p>
+      <div className="space-y-2">
+        {rows.slice(0, 8).map(r => (
+          <div key={r.name}>
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-slate-600 truncate max-w-[60%]">{r.name}</span>
+              <span className="text-slate-700 font-semibold tabular-nums">{cFmt(r.amount)}</span>
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${bar}`} style={{ width: `${(r.amount / max) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CashflowEntryModal({ side, row, month, categories, onClose, onSaved }) {
+  const editing = !!row;
+  const [form, setForm] = useState({
+    date: row?.date || `${month}-${String(new Date().getDate()).padStart(2, '0')}`,
+    category: row?.category || '',
+    client_name: row?.client_name || '',
+    reference: row?.reference || '',
+    amount: row?.amount || '',
+    notes: row?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const payload = {
+      date: form.date,
+      category: form.category || null,
+      amount: Number(form.amount) || 0,
+      reference: form.reference || null,
+      notes: form.notes || null,
+      ...(side === 'in' ? { client_name: form.client_name } : { paid_to: form.client_name }),
+    };
+    try {
+      if (side === 'in') {
+        if (editing) await api.updateIncome(row.id, payload);
+        else         await api.createIncome(payload);
+      } else {
+        if (editing) await api.updateExpense(row.id, payload);
+        else         await api.createExpense(payload);
+      }
+      onSaved();
+    } catch (err) { alert(err.message); }
+    setSaving(false);
+  };
+
+  const del = async () => {
+    if (!confirm('Delete this entry?')) return;
+    try {
+      if (side === 'in') await api.deleteIncome(row.id);
+      else               await api.deleteExpense(row.id);
+      onSaved();
+    } catch (e) { alert(e.message); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="font-bold text-slate-800">{editing ? 'Edit' : 'New'} {side === 'in' ? 'income' : 'spend'}</h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <form onSubmit={submit} className="p-5 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Date</label>
+              <input type="date" required value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Type</label>
+              <input list="cf-cats" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                placeholder={side === 'in' ? 'Service Charge' : 'Salary'}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              <datalist id="cf-cats">{categories.map(c => <option key={c} value={c} />)}</datalist>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">{side === 'in' ? 'Client / source' : 'Paid to'}</label>
+            <input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))}
+              placeholder={side === 'in' ? 'MD SAIFUL HAQUE' : 'Office Rent'}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Reference</label>
+              <input value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))}
+                placeholder="e.g. Mukta (Rakib), Bank, Cash"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Amount (৳)</label>
+              <input type="number" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm tabular-nums" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Notes</label>
+            <textarea rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div className="flex items-center justify-between pt-2">
+            {editing ? (
+              <button type="button" onClick={del}
+                className="text-xs text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                <Trash2 size={12}/> Delete
+              </button>
+            ) : <span/>}
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+              <button type="submit" disabled={saving}
+                className={`text-sm px-4 py-2 rounded-xl text-white disabled:opacity-60 flex items-center gap-2
+                  ${side === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>
+                <Save size={13} /> {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function InitialCashModal({ current, onClose, onSaved }) {
+  const [val, setVal] = useState('');
+  const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try { await api.setInitialCash(Number(val) || 0); onSaved(); }
+    catch (err) { alert(err.message); }
+    setSaving(false);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800">Set opening cash</h3>
+          <p className="text-xs text-slate-500 mt-0.5">The cash balance you started with, before any income or expenses were recorded.</p>
+        </div>
+        <form onSubmit={submit} className="p-5 space-y-3">
+          <p className="text-xs text-slate-500">Current computed opening for this view: <strong>{cFmt(current)}</strong></p>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Opening cash (৳)</label>
+            <input type="number" required value={val} onChange={e => setVal(e.target.value)} autoFocus
+              placeholder="0" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-lg font-semibold tabular-nums" />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="text-sm px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────── YEAR TAB ───────────────────────────── */
+function YearTab() {
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [data, setData] = useState(null);
+  useEffect(() => { api.cashflowYear(year).then(setData); }, [year]);
+
+  if (!data) return <div className="text-slate-400 text-center py-16">Loading…</div>;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1">
+          <button onClick={() => setYear(y => y - 1)} className="p-1.5 hover:bg-slate-50 rounded-lg"><ChevronLeft size={15}/></button>
+          <span className="px-3 py-1 text-sm font-semibold">{data.year}</span>
+          <button onClick={() => setYear(y => y + 1)} className="p-1.5 hover:bg-slate-50 rounded-lg"><ChevronRight size={15}/></button>
+        </div>
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-slate-500">Opening: <strong className="text-slate-800">{cFmt(data.opening)}</strong></span>
+          <span className="text-slate-500">→ Closing: <strong className={data.closing >= data.opening ? 'text-emerald-600' : 'text-rose-600'}>{cFmt(data.closing)}</strong></span>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="text-left  px-4 py-3 font-semibold">Month</th>
+                <th className="text-right px-4 py-3 font-semibold">Opening</th>
+                <th className="text-right px-4 py-3 font-semibold">In</th>
+                <th className="text-right px-4 py-3 font-semibold">Out</th>
+                <th className="text-right px-4 py-3 font-semibold">Net</th>
+                <th className="text-right px-4 py-3 font-semibold">Closing</th>
+                <th className="text-left  px-4 py-3 font-semibold">Cash trend</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {data.rows.map(r => {
+                const max = Math.max(...data.rows.map(x => Math.abs(x.closing)), Math.abs(data.opening), 1);
+                return (
+                  <tr key={r.month} className="hover:bg-slate-50/60">
+                    <td className="px-4 py-3 font-medium text-slate-800">{cMonthLabel(r.month)}</td>
+                    <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{cFmt(r.opening)}</td>
+                    <td className="px-4 py-3 text-right text-emerald-700 font-semibold tabular-nums">{r.income ? cFmt(r.income) : <span className="text-slate-300">—</span>}</td>
+                    <td className="px-4 py-3 text-right text-rose-700 font-semibold tabular-nums">{r.expense ? cFmt(r.expense) : <span className="text-slate-300">—</span>}</td>
+                    <td className={`px-4 py-3 text-right font-semibold tabular-nums ${r.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{cFmt(r.net)}</td>
+                    <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-800">{cFmt(r.closing)}</td>
+                    <td className="px-4 py-3">
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden w-32">
+                        <div className={`h-full rounded-full ${r.closing >= 0 ? 'bg-emerald-400' : 'bg-rose-400'}`}
+                          style={{ width: `${Math.min(100, (Math.abs(r.closing) / max) * 100)}%` }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data.rows} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="2 2" vertical={false} stroke="#e2e8f0"/>
+          <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={m => m?.slice(5)} />
+          <YAxis tick={{ fontSize: 11 }} />
+          <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} formatter={v => cFmt(v)} />
+          <Line type="monotone" dataKey="closing" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Cash position" />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ─────────────────────────── INVESTORS TAB ─────────────────────────── */
+function InvestorsTab() {
+  const [data, setData] = useState(null);
+  useEffect(() => { api.cashflowInvestors().then(setData).catch(() => setData({ total: 0, contributions: [], by_person: [] })); }, []);
+  if (!data) return <div className="text-slate-400 text-center py-16">Loading…</div>;
+  const max = Math.max(...data.by_person.map(p => p.amount), 1);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Total capital injected</p>
+        <p className="text-3xl font-bold text-slate-800 mt-1">{cFmt(data.total)}</p>
+        <p className="text-xs text-slate-400">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
+      </div>
+
+      {data.by_person.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
+          <PiggyBank size={32} className="text-slate-300 mx-auto mb-2" />
+          <p className="text-slate-600 font-semibold">No investor entries yet</p>
+          <p className="text-xs text-slate-400 mt-1">Record an income entry with category <strong>Investment</strong> to track partner contributions here.</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-white border border-slate-200 rounded-2xl p-5">
+            <p className="font-semibold text-slate-700 text-sm mb-3">By person</p>
+            <div className="space-y-2.5">
+              {data.by_person.map(p => (
+                <div key={p.name}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium text-slate-700">{p.name}</span>
+                    <span className="font-bold text-slate-800 tabular-nums">{cFmt(p.amount)}</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-violet-400 rounded-full" style={{ width: `${(p.amount / max) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+              <p className="font-semibold text-slate-700 text-sm">All contributions</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50/40 text-xs uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="text-left  px-4 py-2 font-semibold">Date</th>
+                    <th className="text-left  px-4 py-2 font-semibold">Person</th>
+                    <th className="text-left  px-4 py-2 font-semibold">Reference</th>
+                    <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                    <th className="text-left  px-4 py-2 font-semibold">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {data.contributions.map((c, i) => (
+                    <tr key={i} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-2 text-slate-500">{c.date}</td>
+                      <td className="px-4 py-2 font-medium text-slate-800">{c.client_name}</td>
+                      <td className="px-4 py-2 text-slate-500 text-xs">{c.reference || '—'}</td>
+                      <td className="px-4 py-2 text-right font-semibold tabular-nums text-violet-700">{cFmt(c.amount)}</td>
+                      <td className="px-4 py-2 text-slate-500 text-xs max-w-[300px] truncate">{c.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
