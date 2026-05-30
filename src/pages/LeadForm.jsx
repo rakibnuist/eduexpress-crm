@@ -1,83 +1,279 @@
-import { useState } from 'react';
+/* LeadForm — comprehensive create/edit form, sectioned for scannability.
+   Captures everything: the original CRM fields + the Excel-aligned fields
+   from File Updates 2026 (source, referrer, passport, degree, major,
+   nationality, intake, drive link, deposit) + medical/emergency block. */
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
+import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
-const FIELDS = [
-  ['client_name', 'Client Name', 'text', true],
-  ['phone', 'Phone', 'text', true],
-  ['email', 'Email', 'email'],
-  ['date_added', 'Date Added', 'date'],
-  ['destination', 'Destination', 'select:destinations'],
-  ['last_education', 'Last Education', 'text'],
-  ['gpa', 'GPA/CGPA', 'number'],
-  ['english_score', 'English Score', 'text'],
-  ['program', 'Program', 'text'],
-  ['lead_source', 'Lead Source', 'select:leadSources'],
-  ['lead_status', 'Lead Status', 'select:leadStatuses'],
-  ['assigned_consultant', 'Consultant', 'select:consultants'],
-  ['service_fee', 'Service Fee (BDT)', 'number'],
-  ['paid', 'Paid (BDT)', 'number'],
-  ['payment_status', 'Payment Status', 'select:paymentStatuses'],
-  ['next_followup', 'Next Follow-up', 'date'],
-  ['notes', 'Notes', 'textarea'],
-];
+const SOURCES   = ['In-house', 'Agent'];
+const DEGREES   = ['Diploma', 'Bachelor', 'L+Bachelor', 'L+Diploma', 'Masters', 'PhD'];
+const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
 export default function LeadForm({ lead, settings, onSave }) {
-  const [form, setForm] = useState(lead ? {
-    ...lead, gpa: lead.gpa || '', service_fee: lead.service_fee || '',
-    paid: lead.paid || '', phone: lead.phone || ''
-  } : { lead_status: 'New Lead', date_added: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState(initial(lead));
   const [saving, setSaving] = useState(false);
+  const [referrerList, setReferrerList] = useState([]);
 
-  async function handleSubmit(e) {
+  // Pre-populate the referrer autocomplete from values already in use.
+  // Saves consultants from typo'ing existing names.
+  useEffect(() => {
+    api.leads({ limit: 2000 }).then(d => {
+      const set = new Set();
+      (d.leads || []).forEach(l => { if (l.referrer) set.add(l.referrer); });
+      setReferrerList(Array.from(set).sort());
+    }).catch(() => {});
+  }, []);
+
+  // Auto-balance = fee - paid; show live but don't make it editable.
+  const balance = useMemo(() => {
+    const fee  = parseFloat(form.service_fee) || 0;
+    const paid = parseFloat(form.paid) || 0;
+    return Math.max(0, fee - paid);
+  }, [form.service_fee, form.paid]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      if (lead) await api.updateLead(lead.id, form);
-      else await api.createLead(form);
-      onSave();
+      const payload = {
+        ...form,
+        gpa:         form.gpa === '' ? null : Number(form.gpa),
+        service_fee: form.service_fee === '' ? 0 : Number(form.service_fee),
+        paid:        form.paid        === '' ? 0 : Number(form.paid),
+        deposit:     form.deposit     === '' ? 0 : Number(form.deposit),
+      };
+      if (lead) await api.updateLead(lead.id, payload);
+      else      await api.createLead(payload);
+      onSave?.();
+    } catch (err) {
+      alert(err.message || 'Save failed');
     } finally { setSaving(false); }
-  }
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  };
 
   return (
-    <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {FIELDS.map(([key, label, type, required]) => {
-        const val = form[key] ?? '';
-        if (type === 'textarea') return (
-          <div key={key} className="sm:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
-            <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none" rows={3}
-              value={val} onChange={e => set(key, e.target.value)} />
-          </div>
-        );
-        if (type.startsWith('select:')) {
-          const optKey = type.replace('select:', '');
-          const opts = settings?.[optKey] || [];
-          return (
-            <div key={key}>
-              <label className="block text-xs font-medium text-slate-600 mb-1">{label}{required && ' *'}</label>
-              <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" value={val} onChange={e => set(key, e.target.value)} required={required}>
-                <option value="">— select —</option>
-                {opts.map(o => <option key={o}>{o}</option>)}
-              </select>
+    <form onSubmit={submit} className="space-y-5">
+      {/* ── Contact ── */}
+      <Section icon={<User size={14}/>} title="Contact" color="blue">
+        <Row>
+          <Field label="Full name" required value={form.client_name} onChange={v => set('client_name', v)} placeholder="e.g. Md Saiful Haque" />
+          <Field label="Phone" required type="tel" value={form.phone} onChange={v => set('phone', v)} placeholder="+8801XXX-XXXXXX" />
+        </Row>
+        <Row>
+          <Field label="Email" type="email" value={form.email} onChange={v => set('email', v)} placeholder="student@example.com" />
+          <Field label="Nationality" value={form.nationality} onChange={v => set('nationality', v)} placeholder="Bangladesh" list="nationality-list" />
+          <datalist id="nationality-list">
+            {['Bangladesh', 'Pakistan', 'India', 'Nepal', 'Sri Lanka', 'Morocco', 'Egypt'].map(n => <option key={n} value={n} />)}
+          </datalist>
+        </Row>
+        <Row>
+          <Field label="Passport number" value={form.passport} onChange={v => set('passport', v)} placeholder="A12345678" mono />
+          <Field label="Date added" type="date" value={form.date_added} onChange={v => set('date_added', v)} />
+        </Row>
+      </Section>
+
+      {/* ── Academic ── */}
+      <Section icon={<GraduationCap size={14}/>} title="Academic" color="violet">
+        <Row>
+          <SelectField label="Destination" value={form.destination} onChange={v => set('destination', v)}
+            options={settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia']} placeholder="— pick —" />
+          <Field label="Intake term" value={form.intake_term} onChange={v => set('intake_term', v)} placeholder="September 2026" list="intake-list" />
+          <datalist id="intake-list">
+            {['Spring 2026', 'March 2026', 'September 2026', 'Spring 2027', 'September 2027'].map(n => <option key={n} value={n} />)}
+          </datalist>
+        </Row>
+        <Row>
+          <SelectField label="Degree" value={form.degree} onChange={v => set('degree', v)} options={DEGREES} placeholder="— pick —" />
+          <Field label="Major / Program" value={form.major || form.program} onChange={v => set('major', v)} placeholder="International Economy" />
+        </Row>
+        <Row>
+          <Field label="Last education" value={form.last_education} onChange={v => set('last_education', v)} placeholder="HSC · Science" />
+          <Field label="Primary university (preference)" value={form.university} onChange={v => set('university', v)} placeholder="e.g. NJTech" />
+        </Row>
+        <Row>
+          <Field label="GPA / CGPA" type="number" step="0.01" value={form.gpa} onChange={v => set('gpa', v)} placeholder="4.50" />
+          <Field label="English score" value={form.english_score} onChange={v => set('english_score', v)} placeholder="IELTS 6.5 / MOI" />
+        </Row>
+      </Section>
+
+      {/* ── Sales & Source ── */}
+      <Section icon={<Briefcase size={14}/>} title="Sales & Source" color="indigo">
+        <Row>
+          <SelectField label="Source (Remark)" value={form.source} onChange={v => set('source', v)} options={SOURCES} placeholder="— pick —" />
+          <Field label="Referrer (Referance)" value={form.referrer} onChange={v => set('referrer', v)}
+            placeholder="e.g. BheUni, AZ Int, Mahmud, Office (M)" list="referrer-list" />
+          <datalist id="referrer-list">
+            {referrerList.map(r => <option key={r} value={r} />)}
+            {(settings?.consultants || []).map(c => <option key={'c-' + c} value={c} />)}
+          </datalist>
+        </Row>
+        <Row>
+          <SelectField label="Lead source" value={form.lead_source} onChange={v => set('lead_source', v)}
+            options={settings?.leadSources || []} placeholder="— pick —" />
+          <SelectField label="Lead status" value={form.lead_status} onChange={v => set('lead_status', v)}
+            options={settings?.leadStatuses || []} placeholder="— pick —" />
+        </Row>
+        <Row>
+          <SelectField label="Assigned consultant" value={form.assigned_consultant} onChange={v => set('assigned_consultant', v)}
+            options={settings?.consultants || []} placeholder="— pick —" />
+          <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
+        </Row>
+      </Section>
+
+      {/* ── Financial ── */}
+      <Section icon={<Wallet size={14}/>} title="Financial" color="emerald">
+        <Row cols={4}>
+          <Field label="Service fee (৳)" type="number" value={form.service_fee} onChange={v => set('service_fee', v)} placeholder="0" />
+          <Field label="Paid so far (৳)" type="number" value={form.paid} onChange={v => set('paid', v)} placeholder="0" />
+          <Field label="Deposit (৳)" type="number" value={form.deposit} onChange={v => set('deposit', v)} placeholder="0" />
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Balance</label>
+            <div className="border border-slate-200 bg-slate-50 rounded-xl px-3 py-2 text-sm tabular-nums font-semibold text-slate-700">
+              ৳{balance.toLocaleString()}
             </div>
-          );
-        }
-        return (
-          <div key={key}>
-            <label className="block text-xs font-medium text-slate-600 mb-1">{label}{required && ' *'}</label>
-            <input type={type} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={val}
-              onChange={e => set(key, e.target.value)} required={required} step={type === 'number' ? 'any' : undefined} />
           </div>
-        );
-      })}
-      <div className="sm:col-span-2 flex justify-end gap-2 pt-2">
+        </Row>
+        <Row cols={1}>
+          <SelectField label="Payment status" value={form.payment_status} onChange={v => set('payment_status', v)}
+            options={settings?.paymentStatuses || []} placeholder="— pick —" />
+        </Row>
+      </Section>
+
+      {/* ── Files & Notes ── */}
+      <Section icon={<FolderOpen size={14}/>} title="Files & Notes" color="amber">
+        <Row cols={1}>
+          <Field label="Google Drive folder" value={form.drive_link} onChange={v => set('drive_link', v)}
+            placeholder="https://drive.google.com/…" mono />
+        </Row>
+        <Row cols={1}>
+          <TextareaField label="Notes" value={form.notes} onChange={v => set('notes', v)}
+            placeholder="Anything the next person should know about this student…" rows={3} />
+        </Row>
+      </Section>
+
+      {/* ── Medical & Emergency (collapsible) ── */}
+      <details className="group bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <summary className="cursor-pointer px-5 py-3 flex items-center gap-2 hover:bg-slate-50 list-none">
+          <div className="p-1.5 rounded-lg bg-rose-50 text-rose-600"><Heart size={14}/></div>
+          <span className="font-semibold text-slate-700 text-sm flex-1">Medical & Emergency</span>
+          <ChevronDown size={15} className="text-slate-400 group-open:rotate-180 transition-transform" />
+        </summary>
+        <div className="p-5 pt-2 space-y-3 border-t border-slate-100">
+          <Row>
+            <SelectField label="Blood group" value={form.blood_group} onChange={v => set('blood_group', v)}
+              options={BLOOD} placeholder="—" />
+            <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => set('date_of_birth', v)} />
+          </Row>
+          <Row cols={1}>
+            <Field label="Emergency contact" value={form.emergency_contact} onChange={v => set('emergency_contact', v)}
+              placeholder="Name + relationship + phone (e.g. Father · +880 1XXX-XXXXXX)" />
+          </Row>
+          <Row cols={1}>
+            <TextareaField label="Medical notes" value={form.medical_notes} onChange={v => set('medical_notes', v)}
+              placeholder="Allergies, conditions, medications…" rows={2} />
+          </Row>
+        </div>
+      </details>
+
+      {/* Actions */}
+      <div className="flex justify-end gap-2 pt-1 sticky bottom-0 bg-white py-3 -mx-6 px-6 border-t border-slate-100">
         <button type="submit" disabled={saving}
-          className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60">
-          {saving ? 'Saving…' : lead ? 'Update Lead' : 'Add Lead'}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-medium disabled:opacity-60 flex items-center gap-2 shadow-sm">
+          <Save size={14}/> {saving ? 'Saving…' : (lead ? 'Update lead' : 'Add lead')}
         </button>
       </div>
     </form>
+  );
+}
+
+/* ─── Initial form state from an existing lead (or sensible defaults) ─── */
+function initial(lead) {
+  if (!lead) return {
+    lead_status: 'New Lead',
+    date_added: new Date().toISOString().slice(0, 10),
+    nationality: 'Bangladesh',
+    service_fee: '', paid: '', deposit: '',
+  };
+  return {
+    ...lead,
+    gpa:         lead.gpa ?? '',
+    service_fee: lead.service_fee ?? '',
+    paid:        lead.paid ?? '',
+    deposit:     lead.deposit ?? '',
+    phone:       lead.phone ?? '',
+    // ensure all the Excel + medical fields exist on the form even if null in DB
+    source: lead.source ?? '', referrer: lead.referrer ?? '',
+    nationality: lead.nationality ?? '', passport: lead.passport ?? '',
+    degree: lead.degree ?? '', major: lead.major ?? '',
+    intake_term: lead.intake_term ?? '', university: lead.university ?? '',
+    drive_link: lead.drive_link ?? '',
+    blood_group: lead.blood_group ?? '', date_of_birth: lead.date_of_birth ?? '',
+    medical_notes: lead.medical_notes ?? '', emergency_contact: lead.emergency_contact ?? '',
+  };
+}
+
+/* ─── small UI primitives ─── */
+function Section({ icon, title, color, children }) {
+  const palette = {
+    blue:    'bg-blue-50 text-blue-600',
+    violet:  'bg-violet-50 text-violet-600',
+    indigo:  'bg-indigo-50 text-indigo-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    amber:   'bg-amber-50 text-amber-600',
+    rose:    'bg-rose-50 text-rose-600',
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-2.5 border-b border-slate-100 bg-slate-50/40">
+        <div className={`p-1.5 rounded-lg ${palette[color] || palette.blue}`}>{icon}</div>
+        <span className="font-semibold text-slate-700 text-sm">{title}</span>
+      </div>
+      <div className="p-5 space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function Row({ cols = 2, children }) {
+  const cls = { 1: 'grid-cols-1', 2: 'grid-cols-1 sm:grid-cols-2', 3: 'grid-cols-1 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' }[cols];
+  return <div className={`grid ${cls} gap-3`}>{children}</div>;
+}
+
+function Field({ label, value = '', onChange, type = 'text', placeholder, required, list, mono, step }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-600 mb-1">
+        {label}{required && <span className="text-rose-500"> *</span>}
+      </label>
+      <input type={type} required={required} value={value ?? ''} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder} list={list} step={step}
+        className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${mono ? 'font-mono' : ''}`} />
+    </div>
+  );
+}
+
+function SelectField({ label, value = '', onChange, options = [], placeholder = '— select —', required }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-600 mb-1">
+        {label}{required && <span className="text-rose-500"> *</span>}
+      </label>
+      <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required}
+        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
+        <option value="">{placeholder}</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function TextareaField({ label, value = '', onChange, placeholder, rows = 3 }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-600 mb-1">{label}</label>
+      <textarea rows={rows} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" />
+    </div>
   );
 }

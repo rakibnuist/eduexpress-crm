@@ -1308,13 +1308,77 @@ app.get('/api/leads/:id', (req, res) => {
   }
   res.json(lead);
 });
+// Build a uniform params object for the lead create/update statements.
+// Whitelist exactly the columns we persist so unknown fields in req.body
+// can't slip into the SQL.
+function leadParams(d, lead_id, balance) {
+  const num = v => v === '' || v == null ? 0 : Number(v);
+  const txt = v => (v === '' || v == null) ? null : v;
+  return {
+    lead_id, balance,
+    date_added: d.date_added || new Date().toISOString().slice(0,10),
+    client_name: d.client_name,
+    phone: d.phone, email: d.email,
+    destination: txt(d.destination),
+    last_education: txt(d.last_education),
+    gpa: d.gpa === '' || d.gpa == null ? null : Number(d.gpa),
+    english_score: txt(d.english_score),
+    program: txt(d.program || d.major),
+    lead_source: d.lead_source || 'Manual',
+    lead_status: d.lead_status || 'New Lead',
+    assigned_consultant: txt(d.assigned_consultant),
+    service_fee: num(d.service_fee), paid: num(d.paid),
+    payment_status: txt(d.payment_status),
+    next_followup: txt(d.next_followup),
+    notes: txt(d.notes),
+    meta_lead_id: txt(d.meta_lead_id), meta_form_id: txt(d.meta_form_id),
+    meta_ad_id: txt(d.meta_ad_id), meta_campaign: txt(d.meta_campaign),
+    // Excel-aligned
+    source: txt(d.source), referrer: txt(d.referrer),
+    nationality: txt(d.nationality), passport: txt(d.passport),
+    degree: txt(d.degree), major: txt(d.major),
+    intake_term: txt(d.intake_term), university: txt(d.university),
+    drive_link: txt(d.drive_link), deposit: num(d.deposit),
+    // Medical
+    blood_group: txt(d.blood_group), date_of_birth: txt(d.date_of_birth),
+    medical_notes: txt(d.medical_notes), emergency_contact: txt(d.emergency_contact),
+  };
+}
+
+const LEAD_INSERT_SQL = `INSERT INTO leads (
+  lead_id, date_added, client_name, phone, email, destination, last_education, gpa,
+  english_score, program, lead_source, lead_status, assigned_consultant,
+  service_fee, paid, balance, payment_status, next_followup, notes,
+  meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
+  source, referrer, nationality, passport, degree, major, intake_term, university,
+  drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact
+) VALUES (
+  @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
+  @english_score, @program, @lead_source, @lead_status, @assigned_consultant,
+  @service_fee, @paid, @balance, @payment_status, @next_followup, @notes,
+  @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
+  @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
+  @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact
+)`;
+const LEAD_UPDATE_SQL = `UPDATE leads SET
+  client_name=@client_name, phone=@phone, email=@email, destination=@destination,
+  last_education=@last_education, gpa=@gpa, english_score=@english_score, program=@program,
+  lead_source=@lead_source, lead_status=@lead_status, assigned_consultant=@assigned_consultant,
+  service_fee=@service_fee, paid=@paid, balance=@balance, payment_status=@payment_status,
+  next_followup=@next_followup, notes=@notes,
+  source=@source, referrer=@referrer, nationality=@nationality, passport=@passport,
+  degree=@degree, major=@major, intake_term=@intake_term, university=@university,
+  drive_link=@drive_link, deposit=@deposit,
+  blood_group=@blood_group, date_of_birth=@date_of_birth, medical_notes=@medical_notes,
+  emergency_contact=@emergency_contact
+WHERE id=@id`;
+
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
   const lead_id = d.lead_id || nextLeadId();
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
-  const info = db.prepare(`INSERT INTO leads (lead_id,date_added,client_name,phone,email,destination,last_education,gpa,english_score,program,lead_source,lead_status,assigned_consultant,service_fee,paid,balance,payment_status,next_followup,notes,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign)
-    VALUES (@lead_id,@date_added,@client_name,@phone,@email,@destination,@last_education,@gpa,@english_score,@program,@lead_source,@lead_status,@assigned_consultant,@service_fee,@paid,@balance,@payment_status,@next_followup,@notes,@meta_lead_id,@meta_form_id,@meta_ad_id,@meta_campaign)`)
-    .run({ lead_id, date_added: d.date_added||new Date().toISOString().slice(0,10), client_name: d.client_name, phone: d.phone, email: d.email, destination: d.destination, last_education: d.last_education, gpa: d.gpa, english_score: d.english_score, program: d.program, lead_source: d.lead_source||'Manual', lead_status: d.lead_status||'New Lead', assigned_consultant: d.assigned_consultant, service_fee: d.service_fee||0, paid: d.paid||0, balance, payment_status: d.payment_status, next_followup: d.next_followup, notes: d.notes, meta_lead_id: d.meta_lead_id||null, meta_form_id: d.meta_form_id||null, meta_ad_id: d.meta_ad_id||null, meta_campaign: d.meta_campaign||null });
+  const params = leadParams(d, lead_id, balance);
+  const info = db.prepare(LEAD_INSERT_SQL).run(params);
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
   sendCAPIEvent('Lead', lead);
   logActivity({ type: 'lead_created', actor: req.user, lead, details: { source: lead.lead_source, destination: lead.destination, assigned_consultant: lead.assigned_consultant } });
@@ -1322,11 +1386,14 @@ app.post('/api/leads', async (req, res) => {
     logActivity({ type: 'lead_assigned', actor: req.user, lead, to: lead.assigned_consultant });
   res.json(lead);
 });
+
 app.put('/api/leads/:id', async (req, res) => {
   const d = req.body;
   const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!oldLead) return res.status(404).json({ error: 'Not found' });
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
-  db.prepare(`UPDATE leads SET client_name=@client_name,phone=@phone,email=@email,destination=@destination,last_education=@last_education,gpa=@gpa,english_score=@english_score,program=@program,lead_source=@lead_source,lead_status=@lead_status,assigned_consultant=@assigned_consultant,service_fee=@service_fee,paid=@paid,balance=@balance,payment_status=@payment_status,next_followup=@next_followup,notes=@notes WHERE id=@id`).run({ ...d, id: req.params.id, balance });
+  const params = leadParams(d, oldLead.lead_id, balance);
+  db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
 
   // Audit the changes that matter to an owner.
