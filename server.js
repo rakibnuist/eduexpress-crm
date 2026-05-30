@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -10,8 +11,57 @@ const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+// ─── AUTH primitives ───────────────────────────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET || ('dev-' + crypto.randomBytes(32).toString('hex'));
+const AUTH_COOKIE = 'eduexpress_auth';
+const SESSION_DAYS = 30;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const test = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex')); }
+  catch { return false; }
+}
+function signToken(payload) {
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Math.floor(Date.now()/1000) + SESSION_DAYS*86400 })).toString('base64url');
+  const sig  = crypto.createHmac('sha256', JWT_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+function verifyToken(token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const expected = crypto.createHmac('sha256', JWT_SECRET).update(body).digest('base64url');
+  let a, b;
+  try { a = Buffer.from(sig, 'base64url'); b = Buffer.from(expected, 'base64url'); } catch { return null; }
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (payload.exp && payload.exp < Date.now()/1000) return null;
+    return payload;
+  } catch { return null; }
+}
+function getCookie(req, name) {
+  const c = req.headers.cookie || '';
+  const m = c.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function setAuthCookie(res, token) {
+  const parts = [`${AUTH_COOKIE}=${encodeURIComponent(token)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${SESSION_DAYS*86400}`];
+  if (process.env.NODE_ENV === 'production') parts.push('Secure');
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+function clearAuthCookie(res) {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
 
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
@@ -33,6 +83,78 @@ app.use((req, res, next) => {
   next();
 });
 
+// ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const user = db.prepare("SELECT * FROM users WHERE email=? AND active=1").get(String(email).toLowerCase().trim());
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
+  const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name });
+  setAuthCookie(res, token);
+  res.json({ id: user.id, email: user.email, name: user.name, role: user.role, consultant_name: user.consultant_name });
+});
+
+app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
+
+app.get('/api/auth/me', (req, res) => {
+  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  const user = db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=? AND active=1").get(payload.id);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  res.json(user);
+});
+
+// ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events'];
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (AUTH_FREE.includes(req.path)) return next();
+  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = payload;
+  next();
+});
+
+// Admin-only guard helper
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  next();
+}
+
+// ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
+app.get('/api/users', (req, res, next) => requireAdmin(req, res, () => {
+  const users = db.prepare("SELECT id,email,name,role,consultant_name,active,created_at,last_login FROM users ORDER BY id").all();
+  res.json(users);
+}));
+app.post('/api/users', (req, res, next) => requireAdmin(req, res, () => {
+  const { email, name, password, role = 'consultant', consultant_name = null } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  try {
+    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name) VALUES (?,?,?,?,?)`)
+      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), role === 'admin' ? 'admin' : 'consultant', consultant_name);
+    res.json(db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=?").get(info.lastInsertRowid));
+  } catch (e) {
+    res.status(400).json({ error: e.message.includes('UNIQUE') ? 'That email is already in use' : e.message });
+  }
+}));
+app.put('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
+  const { name, role, consultant_name, active, password } = req.body || {};
+  const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  const newHash = password ? hashPassword(password) : cur.password_hash;
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), active=COALESCE(?,active), password_hash=? WHERE id=?`)
+    .run(name ?? null, role ?? null, consultant_name ?? null, active ?? null, newHash, req.params.id);
+  res.json(db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=?").get(req.params.id));
+}));
+app.delete('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
+  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
+  db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
@@ -48,7 +170,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -144,6 +266,18 @@ function setupSchema() { db.exec(`
   CREATE TABLE IF NOT EXISTS meta_config (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT UNIQUE, value TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'consultant',
+    consultant_name TEXT,
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_login TEXT
   );
 
   -- ── MESSAGING ──────────────────────────────────────────
@@ -269,6 +403,15 @@ function seedData() {
       ['Follow Up', "Hi! This is a follow-up from EduExpress. Have you had a chance to consider our programs? We're here to help! 😊", 'followup'],
       ['Not Available', 'Sorry, our office is closed right now. We will get back to you during business hours (11AM–6PM). Thank you!', 'auto'],
     ].forEach(([t, c, cat]) => qr.run(t, c, cat));
+  }
+
+  // Seed the first admin user if there are none yet
+  if (db.prepare('SELECT COUNT(*) as c FROM users').get().c === 0) {
+    const email = process.env.ADMIN_EMAIL    || 'admin@eduexpressint.com';
+    const pass  = process.env.ADMIN_PASSWORD || 'ChangeMe!2026';
+    db.prepare(`INSERT INTO users (email,name,password_hash,role) VALUES (?,?,?,?)`)
+      .run(email.toLowerCase(), 'Administrator', hashPassword(pass), 'admin');
+    console.log(`🔐 Seeded admin user: ${email}  (password set from ADMIN_PASSWORD env or default)`);
   }
 }
 
@@ -457,6 +600,11 @@ app.get('/api/leads', (req, res) => {
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
   if (source === 'meta') where.push("meta_lead_id IS NOT NULL");
+  // Consultants are scoped to their own assigned leads — enforced server-side.
+  if (req.user?.role === 'consultant') {
+    where.push("assigned_consultant=@me");
+    params.me = req.user.consultant_name || req.user.name || '';
+  }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const total  = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
@@ -466,6 +614,9 @@ app.get('/api/leads', (req, res) => {
 app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (req.user?.role === 'consultant' && lead.assigned_consultant !== (req.user.consultant_name || req.user.name)) {
+    return res.status(403).json({ error: 'Not your lead' });
+  }
   res.json(lead);
 });
 app.post('/api/leads', async (req, res) => {
