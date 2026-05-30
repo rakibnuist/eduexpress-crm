@@ -85,16 +85,30 @@ app.use((req, res, next) => {
 
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, lat, lng } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   const user = db.prepare("SELECT * FROM users WHERE email=? AND active=1").get(String(email).toLowerCase().trim());
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
   db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-  const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name });
+  const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
   setAuthCookie(res, token);
-  res.json({ id: user.id, email: user.email, name: user.name, role: user.role, consultant_name: user.consultant_name });
+
+  // Auto attendance (best-effort; never blocks login if it fails)
+  let attendance = null;
+  try {
+    attendance = autoCheckIn(user, {
+      lat: Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : undefined,
+      lng: Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : undefined,
+    });
+  } catch (e) { console.error('[auto-attendance]', e.message); }
+
+  res.json({
+    id: user.id, email: user.email, name: user.name, role: user.role,
+    consultant_name: user.consultant_name, emp_id: user.emp_id,
+    attendance, // { ok, created/alreadyIn/reason, time, status }
+  });
 });
 
 app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
@@ -126,33 +140,44 @@ function requireAdmin(req, res, next) {
 
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
 app.get('/api/users', (req, res, next) => requireAdmin(req, res, () => {
-  const users = db.prepare("SELECT id,email,name,role,consultant_name,active,created_at,last_login FROM users ORDER BY id").all();
+  const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login FROM users ORDER BY id").all();
   res.json(users);
 }));
 app.post('/api/users', (req, res, next) => requireAdmin(req, res, () => {
-  const { email, name, password, role = 'consultant', consultant_name = null } = req.body || {};
+  const { email, name, password, role = 'consultant', consultant_name = null, emp_id = null } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
-    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name) VALUES (?,?,?,?,?)`)
-      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), role === 'admin' ? 'admin' : 'consultant', consultant_name);
-    res.json(db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=?").get(info.lastInsertRowid));
+    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
+      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), role === 'admin' ? 'admin' : 'consultant', consultant_name, emp_id);
+    res.json(db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(info.lastInsertRowid));
   } catch (e) {
     res.status(400).json({ error: e.message.includes('UNIQUE') ? 'That email is already in use' : e.message });
   }
 }));
 app.put('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
-  const { name, role, consultant_name, active, password } = req.body || {};
+  const { name, role, consultant_name, emp_id, active, password } = req.body || {};
   const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   const newHash = password ? hashPassword(password) : cur.password_hash;
-  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), active=COALESCE(?,active), password_hash=? WHERE id=?`)
-    .run(name ?? null, role ?? null, consultant_name ?? null, active ?? null, newHash, req.params.id);
-  res.json(db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=?").get(req.params.id));
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=? WHERE id=?`)
+    .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, req.params.id);
+  res.json(db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(req.params.id));
 }));
 app.delete('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
   if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
   db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+}));
+
+// ─── OFFICE CONFIG (open/close hours + geofence) ────────────────────────────
+const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m'];
+app.get('/api/office-config', (req, res) => {
+  const cfg = Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)]));
+  res.json(cfg);
+});
+app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => {
+  for (const k of OFFICE_KEYS) if (k in req.body) setConfig(k, req.body[k] === '' ? null : req.body[k]);
+  res.json(Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)])));
 }));
 
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
@@ -388,6 +413,7 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
     `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
     `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
+    `ALTER TABLE users      ADD COLUMN emp_id TEXT`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
@@ -489,6 +515,85 @@ function nextLeadId() {
 
 function getConfig(key) {
   return db.prepare("SELECT value FROM meta_config WHERE key=?").get(key)?.value || null;
+}
+function setConfig(key, value) {
+  db.prepare(`INSERT INTO meta_config (key,value) VALUES (?,?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+    .run(key, value == null ? null : String(value));
+}
+
+/* ─── Auto attendance helpers ─────────────────────────────────────────────
+   - Find the employee record linked to a logged-in user (by emp_id or email)
+   - Close any of their previous-day open check-ins to the configured close time
+   - Auto check-in for today (optionally gated by a configured office geofence)
+*/
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function findEmployeeForUser(user) {
+  if (!user) return null;
+  if (user.emp_id) {
+    const e = db.prepare("SELECT * FROM employees WHERE emp_id=? AND active='Yes'").get(user.emp_id);
+    if (e) return e;
+  }
+  if (user.email) {
+    return db.prepare("SELECT * FROM employees WHERE LOWER(email)=LOWER(?) AND active='Yes'").get(user.email) || null;
+  }
+  return null;
+}
+function timeToHours(hhmm) {
+  if (!hhmm || !/^\d{1,2}:\d{2}/.test(hhmm)) return null;
+  const [h, m] = hhmm.split(':').map(Number);
+  return h + m / 60;
+}
+function autoCloseStaleAttendance(emp, today) {
+  const closeTime = getConfig('office_close_time') || '18:00';
+  const stale = db.prepare("SELECT id, check_in, date FROM attendance WHERE emp_id=? AND check_out IS NULL AND date < ?").all(emp.emp_id, today);
+  for (const s of stale) {
+    const start = timeToHours(s.check_in) ?? 9.5;
+    const end   = timeToHours(closeTime) ?? 18;
+    const hours = Math.max(0, +(end - start).toFixed(2));
+    db.prepare("UPDATE attendance SET check_out=?, hours_worked=?, source=COALESCE(source,'manual')||'+auto-close' WHERE id=?")
+      .run(closeTime, hours, s.id);
+  }
+  return stale.length;
+}
+function autoCheckIn(user, opts = {}) {
+  const emp = findEmployeeForUser(user);
+  if (!emp) return { ok: false, reason: 'no_linked_employee' };
+
+  const today = new Date().toISOString().slice(0, 10);
+  autoCloseStaleAttendance(emp, today);
+
+  // Geofence (if office_lat/lng configured). Otherwise — always allow.
+  const olat = parseFloat(getConfig('office_lat'));
+  const olng = parseFloat(getConfig('office_lng'));
+  const radius = parseInt(getConfig('office_radius_m')) || 200;
+  if (Number.isFinite(olat) && Number.isFinite(olng)) {
+    if (!Number.isFinite(opts.lat) || !Number.isFinite(opts.lng)) {
+      return { ok: false, reason: 'no_location' };
+    }
+    const d = haversineMeters(olat, olng, opts.lat, opts.lng);
+    if (d > radius) return { ok: false, reason: 'outside_office', distance: Math.round(d) };
+  }
+
+  // Already checked in today?
+  const existing = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date=?").get(emp.emp_id, today);
+  if (existing) return { ok: true, alreadyIn: true, id: existing.id };
+
+  const now = new Date();
+  const time = now.toTimeString().slice(0, 5);
+  const openTime = timeToHours(getConfig('office_open_time') || '09:30');
+  const lateAfter = openTime != null ? openTime + 0.25 : 9.75; // 15-min grace
+  const status = timeToHours(time) > lateAfter ? 'Late' : 'Present';
+
+  const info = db.prepare("INSERT INTO attendance (emp_id, name, date, check_in, status, source) VALUES (?,?,?,?,?,'auto-login')")
+    .run(emp.emp_id, emp.name, today, time, status);
+  return { ok: true, created: info.lastInsertRowid, status, time };
 }
 
 function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email, avatar_url }) {

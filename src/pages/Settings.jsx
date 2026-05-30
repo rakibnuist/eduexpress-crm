@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2 } from 'lucide-react';
+import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save } from 'lucide-react';
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
@@ -18,6 +18,9 @@ export default function Settings() {
 
       {/* User Management */}
       <UserManagement consultants={settings.consultants || []} />
+
+      {/* Office settings — drives auto check-in / check-out + geofence */}
+      <OfficeSettings />
 
       {/* Office Info */}
       <Card icon={<Info size={18} />} title="Office Info" color="blue">
@@ -210,24 +213,30 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
     name: u.name || '',
     role: u.role || 'consultant',
     consultant_name: u.consultant_name || '',
+    emp_id: u.emp_id || '',
     password: '',
   });
+  const [employees, setEmployees] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+
+  useEffect(() => { api.employees().then(setEmployees).catch(() => {}); }, []);
 
   const save = async (e) => {
     e.preventDefault();
     setError(''); setSaving(true);
     try {
+      const payload = {
+        name: form.name,
+        role: form.role,
+        consultant_name: form.role === 'consultant' ? form.consultant_name : null,
+        emp_id: form.emp_id || null,
+      };
       if (editing) {
-        const patch = { name: form.name, role: form.role, consultant_name: form.role === 'consultant' ? form.consultant_name : null };
-        if (form.password) patch.password = form.password;
-        await api.updateUser(u.id, patch);
+        if (form.password) payload.password = form.password;
+        await api.updateUser(u.id, payload);
       } else {
-        await api.createUser({
-          email: form.email, name: form.name, password: form.password, role: form.role,
-          consultant_name: form.role === 'consultant' ? form.consultant_name : null,
-        });
+        await api.createUser({ email: form.email, password: form.password, ...payload });
       }
       onSaved();
     } catch (err) {
@@ -277,6 +286,18 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
           )}
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">
+              Linked employee <span className="text-slate-400 font-normal">(enables auto check-in on login)</span>
+            </label>
+            <select value={form.emp_id} onChange={e => setForm(f => ({ ...f, emp_id: e.target.value }))}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+              <option value="">— Not linked —</option>
+              {employees.filter(e => e.active === 'Yes').map(e => (
+                <option key={e.id} value={e.emp_id}>{e.name} · {e.emp_id}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">
               {editing ? 'New password (leave blank to keep current)' : 'Password'}
             </label>
             <input type="password" required={!editing} minLength={6}
@@ -297,6 +318,134 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* ────────────────────────── OFFICE SETTINGS ────────────────────────── */
+function OfficeSettings() {
+  const [cfg, setCfg]     = useState(null);
+  const [form, setForm]   = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg]     = useState('');
+
+  useEffect(() => {
+    api.officeConfig().then(d => { setCfg(d); setForm({
+      office_open_time:  d.office_open_time  || '09:30',
+      office_close_time: d.office_close_time || '18:00',
+      office_lat:        d.office_lat || '',
+      office_lng:        d.office_lng || '',
+      office_radius_m:   d.office_radius_m || '200',
+    }); });
+  }, []);
+
+  const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) { setMsg('Geolocation not supported by this browser'); return; }
+    setMsg('Getting location…');
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        update('office_lat', p.coords.latitude.toFixed(6));
+        update('office_lng', p.coords.longitude.toFixed(6));
+        setMsg(`📍 Location set (±${Math.round(p.coords.accuracy)}m). Don't forget to Save.`);
+      },
+      e => setMsg('Could not get location: ' + e.message),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const clearGeofence = () => {
+    update('office_lat', ''); update('office_lng', '');
+    setMsg('Geofence cleared — auto check-in will run from anywhere on save.');
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.saveOfficeConfig(form);
+      setMsg('✓ Saved');
+      setTimeout(() => setMsg(''), 2500);
+    } catch (err) { setMsg('Error: ' + err.message); }
+    setSaving(false);
+  };
+
+  if (!cfg) return null;
+  const geoEnabled = form.office_lat && form.office_lng;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-amber-50 text-amber-700 border-amber-100">
+        <MapPin size={18} />
+        <span className="font-semibold text-sm flex-1">Office Hours & Auto-Attendance</span>
+      </div>
+      <form onSubmit={save} className="p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Office opens at</label>
+            <input type="time" value={form.office_open_time} onChange={e => update('office_open_time', e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            <p className="text-[11px] text-slate-400 mt-1">Logins later than this + 15 min mark "Late".</p>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Office closes at</label>
+            <input type="time" value={form.office_close_time} onChange={e => update('office_close_time', e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            <p className="text-[11px] text-slate-400 mt-1">Stale check-ins (still open from a previous day) get this checkout time.</p>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <label className="text-sm font-semibold text-slate-700">Office geofence</label>
+              <p className="text-[11px] text-slate-400">Only auto-check-in if the login happens within this radius. Leave blank to allow from anywhere.</p>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${geoEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+              {geoEnabled ? 'Active' : 'Off'}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Latitude</label>
+              <input value={form.office_lat} onChange={e => update('office_lat', e.target.value)}
+                placeholder="23.7806" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Longitude</label>
+              <input value={form.office_lng} onChange={e => update('office_lng', e.target.value)}
+                placeholder="90.4193" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Radius (m)</label>
+              <input type="number" min="20" max="2000" value={form.office_radius_m} onChange={e => update('office_radius_m', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button type="button" onClick={useCurrentLocation}
+              className="text-xs px-3 py-1.5 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 flex items-center gap-1.5">
+              <MapPin size={13} /> Use current location
+            </button>
+            {geoEnabled && (
+              <button type="button" onClick={clearGeofence}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
+                Disable geofence
+              </button>
+            )}
+          </div>
+        </div>
+
+        {msg && <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">{msg}</div>}
+
+        <div className="flex justify-end pt-1">
+          <button type="submit" disabled={saving}
+            className="text-sm px-5 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 flex items-center gap-2">
+            <Save size={14} /> {saving ? 'Saving…' : 'Save settings'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

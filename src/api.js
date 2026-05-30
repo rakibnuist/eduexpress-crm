@@ -18,9 +18,13 @@ async function req(path, opts = {}) {
 
 export const api = {
   // Auth
-  me:     ()                => req('/auth/me'),
-  login:  (email, password) => req('/auth/login',  { method: 'POST', body: JSON.stringify({ email, password }) }),
-  logout: ()                => req('/auth/logout', { method: 'POST' }),
+  me:     ()                              => req('/auth/me'),
+  login:  (email, password, loc = null)   => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, lat: loc?.lat, lng: loc?.lng }) }),
+  logout: ()                              => req('/auth/logout', { method: 'POST' }),
+
+  // Office config
+  officeConfig:     ()  => req('/office-config'),
+  saveOfficeConfig: (d) => req('/office-config', { method: 'POST', body: JSON.stringify(d) }),
 
   // Dashboard / settings
   dashboard: () => req('/dashboard'),

@@ -12,8 +12,29 @@ export default function Login({ onSuccess }) {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    // Best-effort geolocation — used by the server's office-geofence auto-attendance.
+    // If the user denies or the browser doesn't support it, login still works; the
+    // server simply falls back to "no geofence configured = always allow".
+    let loc = null;
+    if (navigator.geolocation) {
+      loc = await new Promise(resolve => {
+        navigator.geolocation.getCurrentPosition(
+          p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          () => resolve(null),
+          { timeout: 4000, maximumAge: 60000 }
+        );
+      });
+    }
+
     try {
-      const user = await api.login(email.trim(), password);
+      const user = await api.login(email.trim(), password, loc);
+      // Surface the attendance result before handing off to the app
+      const a = user.attendance;
+      if (a?.ok && a.created)     sessionStorage.setItem('att_msg', `✓ Checked in at ${a.time}${a.status === 'Late' ? ' (Late)' : ''}`);
+      else if (a?.ok && a.alreadyIn) sessionStorage.setItem('att_msg', `Already checked in for today`);
+      else if (a?.reason === 'outside_office') sessionStorage.setItem('att_msg', `⚠ You're ${a.distance}m from the office — not checked in`);
+      else if (a?.reason === 'no_location')    sessionStorage.setItem('att_msg', `Location not shared — not checked in`);
       onSuccess(user);
     } catch (err) {
       setError(err.message || 'Login failed');

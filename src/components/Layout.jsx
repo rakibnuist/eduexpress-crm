@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, Kanban, DollarSign,
   UserCheck, Settings, Menu, X, GraduationCap, LogOut,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../api';
 
 const baseNav = [
@@ -30,6 +30,15 @@ export default function Layout({ children, user, onLogout }) {
   };
 
   const initials = (user?.name || 'A').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
+
+  // Show the brief auto-attendance message set during login (e.g. "✓ Checked in at 09:32").
+  const [attMsg, setAttMsg] = useState(() => sessionStorage.getItem('att_msg'));
+  useEffect(() => {
+    if (!attMsg) return;
+    sessionStorage.removeItem('att_msg');
+    const t = setTimeout(() => setAttMsg(null), 6000);
+    return () => clearTimeout(t);
+  }, [attMsg]);
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -103,6 +112,15 @@ export default function Layout({ children, user, onLogout }) {
             </button>
           </div>
         </header>
+
+        {attMsg && (
+          <div className="bg-emerald-50 border-b border-emerald-100 text-emerald-700 text-xs px-4 lg:px-6 py-2 flex items-center justify-between">
+            <span>{attMsg}</span>
+            <button onClick={() => setAttMsg(null)} className="text-emerald-500 hover:text-emerald-700">
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           {children}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar } from 'lucide-react';
+import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -21,29 +21,42 @@ const PIPE_COLORS = {
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [extraStats, setExtraStats] = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const month = new Date().toISOString().slice(0, 7);
 
   useEffect(() => {
     api.dashboard().then(setData);
-    // Extra: top sources, destination breakdown
-    Promise.all([
-      api.leads({ limit: 2000 }),
-    ]).then(([all]) => {
+
+    // Top sources + destinations (all-time)
+    api.leads({ limit: 2000 }).then(all => {
       const leads = all.leads;
-      // Source breakdown
       const srcMap = {};
       leads.forEach(l => { if (l.lead_source) srcMap[l.lead_source] = (srcMap[l.lead_source] || 0) + 1; });
       const sources = Object.entries(srcMap).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, value]) => ({ name, value }));
-      // Destination
       const destMap = {};
       leads.forEach(l => { if (l.destination) destMap[l.destination] = (destMap[l.destination] || 0) + 1; });
       const destinations = Object.entries(destMap).map(([name, value]) => ({ name, value }));
-      // Consultant leaderboard
-      const conMap = {};
-      leads.forEach(l => { if (l.assigned_consultant) conMap[l.assigned_consultant] = (conMap[l.assigned_consultant] || 0) + 1; });
-      const consultants = Object.entries(conMap).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
-      setExtraStats({ sources, destinations, consultants });
+      setExtraStats({ sources, destinations });
     });
-  }, []);
+
+    // Performance leaderboard — this month, ranked by enrollments then revenue
+    api.kpi(month).then(rows => {
+      const ranked = (rows || [])
+        .filter(r => r.consultant)
+        .map(r => ({
+          name: r.consultant,
+          enrolled: r.enrolled || 0,
+          revenue: r.revenue || 0,
+          collected: r.collected || 0,
+          leadsThisMonth: r.thisMonth || 0,
+          conversionRate: parseFloat(r.conversionRate) || 0,
+          targetEnrolled: r.target_enrolled || 0,
+          targetRevenue: r.target_revenue || 0,
+        }))
+        .sort((a, b) => b.enrolled - a.enrolled || b.revenue - a.revenue);
+      setLeaderboard(ranked);
+    }).catch(() => setLeaderboard([]));
+  }, [month]);
 
   if (!data) return (
     <div className="flex items-center justify-center h-64">
@@ -192,32 +205,82 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Consultant Leaderboard */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-          <h3 className="font-semibold text-slate-700 mb-3">Consultant Leads</h3>
-          {extraStats && (
-            <div className="space-y-2">
-              {extraStats.consultants.map((c, i) => (
-                <div key={c.name} className="flex items-center gap-3">
-                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
-                    ${i === 0 ? 'bg-amber-100 text-amber-600' : i === 1 ? 'bg-slate-100 text-slate-600' : 'bg-orange-50 text-orange-500'}`}>
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium text-slate-700 truncate">{c.name}</span>
-                      <span className="text-slate-500">{c.count}</span>
-                    </div>
-                    <div className="h-1 bg-slate-100 rounded-full mt-1 overflow-hidden">
-                      <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(c.count / extraStats.consultants[0].count) * 100}%` }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Performance Leaderboard — this month */}
+        <PerformanceLeaderboard rows={leaderboard} month={month} />
       </div>
+    </div>
+  );
+}
+
+/* ─── Performance Leaderboard ─────────────────────────────────────────────
+   Ranks consultants by enrollments (then revenue) for the current month.
+   Top 3 get podium medals; everyone else lists below with a target progress bar.
+*/
+function PerformanceLeaderboard({ rows, month }) {
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-5">
+        <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Top Performers · {month}</h3>
+        <p className="text-sm text-slate-400 text-center py-6">No consultant activity this month yet</p>
+      </div>
+    );
+  }
+  const top3 = rows.slice(0, 3);
+  const rest = rows.slice(3);
+  const leaderRevenue = Math.max(1, ...rows.map(r => r.revenue));
+
+  const podium = [
+    { icon: Trophy,  cls: 'from-amber-400 to-amber-600',  bg: 'bg-amber-50',  ring: 'ring-amber-200',  label: '1st' },
+    { icon: Medal,   cls: 'from-slate-300 to-slate-500',  bg: 'bg-slate-50',  ring: 'ring-slate-200',  label: '2nd' },
+    { icon: Award,   cls: 'from-orange-300 to-orange-500',bg: 'bg-orange-50', ring: 'ring-orange-200', label: '3rd' },
+  ];
+  const fmt = (n) => n >= 1000 ? `৳${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}K` : `৳${Number(n).toLocaleString()}`;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+      <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Top Performers · {month}</h3>
+      <div className="space-y-2.5 mb-4">
+        {top3.map((c, i) => {
+          const p = podium[i];
+          const Icon = p.icon;
+          return (
+            <div key={c.name} className={`flex items-center gap-3 p-3 rounded-xl ${p.bg} ring-1 ${p.ring}`}>
+              <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${p.cls} text-white flex items-center justify-center shadow-sm flex-shrink-0`}>
+                <Icon size={16} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 justify-between">
+                  <p className="font-semibold text-slate-800 text-sm truncate">{c.name}</p>
+                  <span className="text-xs text-slate-500 flex-shrink-0">{c.conversionRate}% conv</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                  <span><strong className="text-emerald-600">{c.enrolled}</strong> enrolled</span>
+                  <span>{c.leadsThisMonth} leads</span>
+                  <span><strong className="text-slate-700">{fmt(c.revenue)}</strong></span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {rest.length > 0 && (
+        <div className="space-y-2 border-t border-slate-100 pt-3">
+          {rest.map((c, i) => (
+            <div key={c.name} className="flex items-center gap-3">
+              <span className="w-6 text-center text-xs font-bold text-slate-400 flex-shrink-0">{i + 4}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium text-slate-700 truncate">{c.name}</span>
+                  <span className="text-xs text-slate-500"><strong>{c.enrolled}</strong> · {fmt(c.revenue)}</span>
+                </div>
+                <div className="h-1 bg-slate-100 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(c.revenue / leaderRevenue) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
