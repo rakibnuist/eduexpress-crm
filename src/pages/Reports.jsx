@@ -123,49 +123,25 @@ function ReportBody({ data, period }) {
         <Headline icon={<Calendar size={16}/>}      label="Attendance"  value={`${h.attendance.current}%`} color="amber" />
       </div>
 
-      {/* Trend chart */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-        <h3 className="font-semibold text-slate-700 text-sm mb-3">Daily trend — {data.period.label}</h3>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={data.trend} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>
-            <defs>
-              <linearGradient id="gradLeads" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.95}/>
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.3}/>
-              </linearGradient>
-              <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#10b981" stopOpacity={0.95}/>
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0.3}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} tickFormatter={d => d.slice(period === 'week' ? 8 : 5)} />
-            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
-            <Tooltip 
-              contentStyle={{ background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)', fontSize: 11 }} 
-              formatter={(v, k) => k === 'newLeads' ? [`${v} leads`, 'New leads'] : [`৳${Number(v).toLocaleString()}`, 'Revenue']} 
-            />
-            <Bar dataKey="newLeads" fill="url(#gradLeads)" radius={[4,4,0,0]} name="New leads" maxBarSize={30} />
-            <Bar dataKey="revenue"  fill="url(#gradRevenue)" radius={[4,4,0,0]} name="Revenue" maxBarSize={30} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card title="Leads & Status Overview (Numbers)">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+            <Mini label="New Leads"      value={data.leads.new} />
+            <Mini label="Contacted (Pos)" value={data.leads.by_status?.positive || 0} color="emerald" />
+            <Mini label="Office Visit"   value={data.leads.by_status?.office_visit || 0} color="blue" />
+            <Mini label="File Opened"    value={data.leads.by_status?.file_open || 0} color="violet" />
+            <Mini label="No Response"    value={data.leads.by_status?.no_response || 0} color="rose" />
+          </div>
+          <p className="text-[11px] text-slate-400 leading-normal">
+            Overview of newly acquired leads and direct interactions during this period. Contacted (Pos) indicates students showing positive interest, while No Response flags leads that require follow-up.
+          </p>
+        </Card>
+
         <Card title="Leads breakdown">
           <KvList label="By source"      rows={data.leads.by_source.map(r => ({ name: r.k, value: r.n }))} />
           <KvList label="By destination" rows={data.leads.by_destination.map(r => ({ name: r.k, value: r.n }))} />
           <p className="text-xs text-slate-500 mt-2">Conversion rate <strong className="text-slate-700">{data.leads.conversion_rate}%</strong> · {data.leads.enrolled} enrolled out of {data.leads.new}</p>
-        </Card>
-
-        <Card title="Application activity">
-          {data.applications.stages_advanced.length === 0
-            ? <p className="text-xs text-slate-400 italic">No stage advances</p>
-            : <KvList label="Stages advanced" rows={data.applications.stages_advanced.map(r => ({ name: r.stage, value: r.n }))} />}
-          {data.applications.university_moves.length > 0 && (
-            <KvList label="University updates" rows={data.applications.university_moves.map(r => ({ name: r.status, value: r.n }))} />
-          )}
         </Card>
 
         <Card title="Cashflow Overview">
@@ -182,53 +158,38 @@ function ReportBody({ data, period }) {
             <KvList label="Top paying clients"   rows={data.cashflow.top_clients.map(r => ({ name: r.k, value: fmt(r.v) }))} />}
         </Card>
 
-        <Card title="Partnership September Distribution Targets">
-          <p className="text-[11px] text-slate-400 mb-3">Theoretical distribution of Closing Cash ({fmtFull(data.cashflow.closing)}) based on the official annual profit sharing splits:</p>
-          <div className="space-y-2">
-            {[
-              { name: 'Abdullah Al Rakib', pct: 45, val: data.cashflow.closing * 0.45, color: 'bg-blue-500' },
-              { name: 'Tahmid Imam', pct: 30, val: data.cashflow.closing * 0.30, color: 'bg-violet-500' },
-              { name: 'Sakib Al Jubaer', pct: 25, val: data.cashflow.closing * 0.25, color: 'bg-amber-500' }
-            ].map(p => (
-              <div key={p.name} className="flex justify-between items-center text-xs p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${p.color}`} />
-                  <div>
-                    <span className="font-semibold text-slate-700">{p.name}</span>
-                    <span className="text-[10px] text-slate-400 ml-1.5">{p.pct}% Share</span>
-                  </div>
-                </div>
-                <span className="font-bold text-slate-850 tabular-nums">{fmtFull(p.val)}</span>
-              </div>
-            ))}
+        <Card title="Team performance & Attendance">
+          <div className="grid grid-cols-5 gap-1.5 mb-4">
+            <Mini label="Attendance"    value={`${data.attendance.attendance_pct}%`} />
+            <Mini label="Late Entries"  value={data.attendance.late_count} color={data.attendance.late_count > 0 ? 'rose' : ''} />
+            <Mini label="Worklogs"      value={data.attendance.total_logs} />
+            <Mini label="Total Hours"   value={`${data.attendance.total_hours || 0}h`} color="blue" />
+            <Mini label="Avg Hours/d"   value={`${data.attendance.avg_hours || 0}h`} color="emerald" />
           </div>
-          <div className="bg-amber-50/50 border border-amber-100/60 rounded-xl p-3 flex items-start gap-2 mt-3 text-[10px] text-slate-500 leading-normal">
-            <span className="text-amber-500 font-bold">ℹ</span>
-            <span>Annual profit distribution is executed in September every year, computed on net cash balances at the end of the August financial ledger.</span>
-          </div>
-        </Card>
-
-        <Card title="Team performance">
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <Mini label="Attendance"  value={`${data.attendance.attendance_pct}%`} />
-            <Mini label="Late entries" value={data.attendance.late_count} />
-            <Mini label="Daily logs"   value={data.attendance.total_logs} />
-          </div>
-          <p className="text-xs uppercase text-slate-400 font-semibold mb-1.5">Top performers</p>
+          <p className="text-xs uppercase text-slate-400 font-semibold mb-2">Top performers standing</p>
           {data.top_performers.length === 0
             ? <p className="text-xs text-slate-400 italic">No activity recorded</p>
             : <div className="space-y-1.5">
                 {data.top_performers.map((p, i) => (
-                  <div key={p.name} className="flex items-center gap-2 text-xs">
+                  <div key={p.name} className="flex items-center gap-2 text-xs p-1.5 rounded-xl border border-slate-50 bg-slate-50/40">
                     <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0
                       ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-slate-100 text-slate-600' : 'bg-orange-50 text-orange-500'}`}>
                       {i + 1}
                     </span>
-                    <span className="flex-1 font-medium text-slate-700 truncate">{p.name}</span>
-                    <span className="text-slate-500">{p.events} actions · {p.points} pts</span>
+                    <span className="flex-1 font-semibold text-slate-700 truncate">{p.name}</span>
+                    <span className="text-slate-500 font-medium tabular-nums">{p.events} actions · {p.points} pts</span>
                   </div>
                 ))}
               </div>}
+        </Card>
+
+        <Card title="Application activity">
+          {data.applications.stages_advanced.length === 0
+            ? <p className="text-xs text-slate-400 italic">No stage advances</p>
+            : <KvList label="Stages advanced" rows={data.applications.stages_advanced.map(r => ({ name: r.stage, value: r.n }))} />}
+          {data.applications.university_moves.length > 0 && (
+            <KvList label="University updates" rows={data.applications.university_moves.map(r => ({ name: r.status, value: r.n }))} />
+          )}
         </Card>
       </div>
 
@@ -247,6 +208,7 @@ function ReportBody({ data, period }) {
     </div>
   );
 }
+
 
 function Headline({ icon, label, value, delta, color }) {
   const palette = {
@@ -509,75 +471,6 @@ function buildPrintableHTML(d) {
       font-weight: 700;
       color: #0f172a;
     }
-    
-    .partner-card {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 1px solid #f1f5f9;
-      background: #f8fafc;
-      margin-bottom: 6px;
-      font-size: 11.5px;
-    }
-    .partner-card:last-child {
-      margin-bottom: 0;
-    }
-    .partner-info {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .partner-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-    }
-    .dot-rakib { background-color: #2563eb; }
-    .dot-tahmid { background-color: #7c3aed; }
-    .dot-sakib { background-color: #d97706; }
-    
-    .partner-name {
-      font-weight: 600;
-      color: #334155;
-    }
-    .partner-share {
-      font-size: 9px;
-      color: #64748b;
-      margin-left: 6px;
-      font-weight: 600;
-      background: #e2e8f0;
-      padding: 1px 5px;
-      border-radius: 9999px;
-    }
-    .partner-val {
-      font-weight: 850;
-      color: #0f172a;
-    }
-    .info-box {
-      background-color: #fffbeb;
-      border: 1px solid #fef3c7;
-      color: #b45309;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-top: 10px;
-      font-size: 9.5px;
-      line-height: 1.4;
-      display: flex;
-      gap: 6px;
-    }
-    .info-icon { font-weight: 800; flex-shrink: 0; }
-    
-    ul {
-      margin: 6px 0 0 16px;
-      padding: 0;
-      font-size: 11.5px;
-      color: #334155;
-    }
-    li {
-      margin-bottom: 4px;
-    }
     footer {
       margin-top: 40px;
       font-size: 10px;
@@ -587,7 +480,6 @@ function buildPrintableHTML(d) {
       padding-top: 12px;
       font-weight: 500;
     }
-    
     @media print {
       body {
         background: #ffffff;
@@ -611,7 +503,6 @@ function buildPrintableHTML(d) {
   const deltaCls = (v) => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
   const arrow = (v) => v > 0 ? '↑' : v < 0 ? '↓' : '→';
   const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
-  const fmtFull = (n) => `৳${Math.round(Number(n || 0)).toLocaleString()}`;
   
   const kpi = (lbl, val, dlt) => `
     <div class="kpi-card">
@@ -634,7 +525,7 @@ function buildPrintableHTML(d) {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>EduExpress Executive Digest — ${d.period.label}</title>
+  <title>EduExpress Executive Performance Digest — ${d.period.label}</title>
   <style>${css}</style>
 </head>
 <body>
@@ -649,7 +540,7 @@ function buildPrintableHTML(d) {
       </div>
       <div class="report-meta">
         <h1>${d.period.type === 'week' ? 'Weekly' : 'Monthly'} Performance Digest</h1>
-        <p>${d.period.label} &nbsp;|&nbsp; Comparative Analytics</p>
+        <p>${d.period.label} &nbsp;|&nbsp; Executive Summary</p>
       </div>
     </header>
 
@@ -661,22 +552,41 @@ function buildPrintableHTML(d) {
       ${kpi('Attendance', h.attendance.current + '%')}
     </div>
 
-    <h2>Leads & Conversions Analysis</h2>
+    <h2>Leads & Interaction Performance</h2>
     <div class="grid-2col">
       <div class="panel">
-        <h3>By Source (Market Segment)</h3>
-        ${rowList(d.leads.by_source)}
+        <h3>Leads & Status Overview (Numbers)</h3>
+        <div class="row"><span>New Leads Sourced</span><span class="v">${d.leads.new}</span></div>
+        <div class="row"><span>Contacted (Positive Response)</span><span class="v">${d.leads.by_status?.positive || 0}</span></div>
+        <div class="row"><span>Office Visits Completed</span><span class="v">${d.leads.by_status?.office_visit || 0}</span></div>
+        <div class="row"><span>Files Opened (Pipeline)</span><span class="v">${d.leads.by_status?.file_open || 0}</span></div>
+        <div class="row"><span>No Response (Follow-ups needed)</span><span class="v">${d.leads.by_status?.no_response || 0}</span></div>
       </div>
       <div class="panel">
-        <h3>By Destination (University Target)</h3>
-        ${rowList(d.leads.by_destination)}
+        <h3>Leads Sourced By Segment</h3>
+        ${rowList(d.leads.by_source)}
       </div>
     </div>
-    <p style="font-size:11px; margin-top:-6px; margin-bottom: 20px; color:#475569; text-align: right; font-weight: 500;">
-      Corporate Conversion Rate: <strong style="color: #0f172a;">${d.leads.conversion_rate}%</strong> · Enrolled: <strong>${d.leads.enrolled}</strong> out of ${d.leads.new} new acquisitions
-    </p>
 
-    <h2>Financial Position & Cashflow</h2>
+    <div class="grid-2col">
+      <div class="panel">
+        <h3>Leads By Destination Country</h3>
+        ${rowList(d.leads.by_destination)}
+      </div>
+      <div class="panel">
+        <h3>Application Activity Log</h3>
+        ${d.applications.stages_advanced.length === 0 
+          ? '<div class="row"><em style="color:#94a3b8">No pipeline stage transitions</em></div>'
+          : d.applications.stages_advanced.slice(0, 5).map(r => `
+              <div class="row">
+                <span>Advanced to ${r.stage}</span>
+                <span class="v">${r.n} times</span>
+              </div>
+            `).join('')}
+      </div>
+    </div>
+
+    <h2>Financial & Cashflow Ledger</h2>
     <div class="kpi-grid">
       ${kpi('Opening Bal', fmt(d.cashflow.opening))}
       ${kpi('Money In', fmt(d.cashflow.in))}
@@ -687,70 +597,29 @@ function buildPrintableHTML(d) {
 
     <div class="grid-2col">
       <div class="panel">
-        <h3>Top Revenue Streams</h3>
+        <h3>Primary Income Categories</h3>
         ${rowList(d.cashflow.income_by_category.slice(0, 5), fmt)}
       </div>
       <div class="panel">
-        <h3>Top Operating Expenses</h3>
+        <h3>Operational Spends Breakdown</h3>
         ${rowList(d.cashflow.expense_by_category.slice(0, 5), fmt)}
       </div>
     </div>
 
-    <h2>Partnership Profit Projections & Distributions</h2>
-    <div class="grid-2col">
-      <div class="panel">
-        <h3>Partnership September Distribution Targets</h3>
-        <div class="partner-card">
-          <div class="partner-info">
-            <div class="partner-dot dot-rakib"></div>
-            <span class="partner-name">Abdullah Al Rakib</span>
-            <span class="partner-share">45% Split</span>
-          </div>
-          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.45)}</span>
-        </div>
-        <div class="partner-card">
-          <div class="partner-info">
-            <div class="partner-dot dot-tahmid"></div>
-            <span class="partner-name">Tahmid Imam</span>
-            <span class="partner-share">30% Split</span>
-          </div>
-          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.30)}</span>
-        </div>
-        <div class="partner-card">
-          <div class="partner-info">
-            <div class="partner-dot dot-sakib"></div>
-            <span class="partner-name">Sakib Al Jubaer</span>
-            <span class="partner-share">25% Split</span>
-          </div>
-          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.25)}</span>
-        </div>
-        <div class="info-box">
-          <span class="info-icon">ℹ</span>
-          <span>Projections are computed dynamically on the current Closing Cash balance of ${fmtFull(d.cashflow.closing)}. Annual profit distributions are officially processed in September.</span>
-        </div>
-      </div>
-      
-      <div class="panel">
-        <h3>Top Direct Revenue Accounts</h3>
-        ${d.cashflow.top_clients.length 
-          ? rowList(d.cashflow.top_clients.slice(0, 5), fmt)
-          : '<div class="row"><em style="color:#94a3b8">No single-client records found</em></div>'}
-      </div>
-    </div>
-
-    <h2>Operations, Teams & Recruitment Advances</h2>
+    <h2>Employee Attendance & Performance standings</h2>
     <div class="grid-2col">
       <div class="panel">
         <h3>Staff Attendance & Logs Activity</h3>
         <div class="row"><span>Monthly Attendance Average</span><span class="v">${d.attendance.attendance_pct}%</span></div>
         <div class="row"><span>Late Check-in Occurrences</span><span class="v">${d.attendance.late_count}</span></div>
         <div class="row"><span>Daily Worklogs Submitted</span><span class="v">${d.attendance.total_logs}</span></div>
-        <div class="row"><span>Active Personnel in Period</span><span class="v">${d.attendance.active_employees}</span></div>
+        <div class="row"><span>Total Productive Hours</span><span class="v">${d.attendance.total_hours || 0} hrs</span></div>
+        <div class="row"><span>Average Daily Shift Duration</span><span class="v">${d.attendance.avg_hours || 0} hrs</span></div>
       </div>
       <div class="panel">
         <h3>Top Performance Standings (by Work Score)</h3>
         ${d.top_performers.length === 0 
-          ? '<div class="row"><em style="color:#94a3b8">No employee activity recorded in this period</em></div>'
+          ? '<div class="row"><em style="color:#94a3b8">No activity logs recorded</em></div>'
           : d.top_performers.map((p, i) => `
               <div class="row">
                 <span>${i + 1}. ${p.name}</span>

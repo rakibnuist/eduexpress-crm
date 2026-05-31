@@ -1069,6 +1069,34 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Remap source names failed:", e.message);
   }
+
+  // Self-healing migration to seed pre-June 2026 partner investments
+  try {
+    db.prepare("UPDATE income SET client_name = 'Sakib Al Jubaer' WHERE category='Investment' AND client_name IN ('Sakib', 'Sakib Al Jubaer')").run();
+
+    const investments = [
+      { name: 'Abdullah Al Rakib', date: '2024-09-01', month: '2024-09', ref: 'Capital Injection 2024', val: 281800 },
+      { name: 'Abdullah Al Rakib', date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 387915 },
+      { name: 'Sakib Al Jubaer',    date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 37000 },
+      { name: 'Tahmid Imam',        date: '2024-09-01', month: '2024-09', ref: 'Capital Injection 2024', val: 100100 },
+      { name: 'Tahmid Imam',        date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 70000 },
+      { name: 'Tahmid Imam',        date: '2026-01-15', month: '2026-01', ref: 'Capital Injection 2026', val: 96521 }
+    ];
+
+    const check = db.prepare("SELECT COUNT(*) as c FROM income WHERE category='Investment' AND client_name=? AND reference=?");
+    const insert = db.prepare(`INSERT INTO income (date, month, category, client_name, reference, amount, notes)
+                               VALUES (?, ?, 'Investment', ?, ?, ?, 'Consolidated capital injection pre-data')`);
+    
+    investments.forEach(inv => {
+      if (check.get(inv.name, inv.ref).c === 0) {
+        insert.run(inv.date, inv.month, inv.name, inv.ref, inv.val);
+        console.log(`[migration] Seeded investment for ${inv.name}: ${inv.val} BDT`);
+      }
+    });
+    console.log("[migration] Partner investments self-healing checks complete.");
+  } catch (e) {
+    console.error("[migration] Seeding partner investments failed:", e.message);
+  }
 }
 
 function seedData() {
@@ -2726,17 +2754,13 @@ app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () =
     ORDER BY id DESC LIMIT 3`).all(startStr, endStr);
   visaApprovals.forEach(v => highlights.push({ icon: '🛂', text: `${v.lead_name} visa approved (by ${v.actor_name})` }));
 
-  // ── Daily trend within the period (for sparklines) ─────────────────────
-  const trend = [];
-  for (let d = new Date(range.start); d <= range.end; d.setUTCDate(d.getUTCDate() + 1)) {
-    const day = isoDate(d);
-    trend.push({
-      date: day,
-      newLeads: db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?`).get(day, day).n,
-      revenue:  db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income WHERE date=?`).get(day).s,
-      spend:    db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date=?`).get(day).s,
-    });
-  }
+  const newLeadCount = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE lead_status='New Lead' AND (((date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)))`).get(startStr, endStr, startStr, endStr).n;
+  const officeVisitCount = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE lead_status='Office Visited' AND (((date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)))`).get(startStr, endStr, startStr, endStr).n;
+  const fileOpenCount = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE lead_status='File Opened' AND (((date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)))`).get(startStr, endStr, startStr, endStr).n;
+  const positiveCount = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE lead_status='Positive' AND (((date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)))`).get(startStr, endStr, startStr, endStr).n;
+  const noResponseCount = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE lead_status='No Response' AND (((date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)))`).get(startStr, endStr, startStr, endStr).n;
+
+  const workTimeRow = db.prepare(`SELECT COALESCE(SUM(hours_worked),0) AS total_hours, COALESCE(AVG(hours_worked),0) AS avg_hours FROM attendance WHERE date BETWEEN ? AND ?`).get(startStr, endStr);
 
   const delta = (cur, prev) => prev === 0 ? (cur > 0 ? 100 : 0) : Math.round(((cur - prev) / prev) * 100);
 
@@ -2750,16 +2774,30 @@ app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () =
       net_cash:     { current: cashIn.s - cashOut.s, previous: prevIn - prevOut, delta: delta(cashIn.s - cashOut.s, prevIn - prevOut) },
       attendance:   { current: attendancePct },
     },
-    leads:         { new: newLeadsRow.n, by_source: leadsBySource, by_destination: leadsByDest, enrolled, conversion_rate: newLeadsRow.n ? Math.round((enrolled / newLeadsRow.n) * 100) : 0 },
+    leads:         { 
+      new: newLeadsRow.n, 
+      by_source: leadsBySource, 
+      by_destination: leadsByDest, 
+      enrolled, 
+      conversion_rate: newLeadsRow.n ? Math.round((enrolled / newLeadsRow.n) * 100) : 0,
+      by_status: {
+        new_lead: newLeadCount,
+        office_visit: officeVisitCount,
+        file_open: fileOpenCount,
+        positive: positiveCount,
+        no_response: noResponseCount
+      }
+    },
     applications:  { stages_advanced: stagesAdvanced, university_moves: uniMoves },
     cashflow:      { opening, in: cashIn.s, out: cashOut.s, net: cashIn.s - cashOut.s, closing,
                      income_by_category: incomeCat, expense_by_category: expenseCat, top_clients: topClients,
                      income_entries: cashIn.c, expense_entries: cashOut.c },
     attendance:    { active_employees: activeEmps, working_days: workingDays, attendance_pct: attendancePct,
-                     late_count: lateCount, total_logs: dailyLogsSubmitted },
+                     late_count: lateCount, total_logs: dailyLogsSubmitted,
+                     total_hours: Math.round(workTimeRow.total_hours),
+                     avg_hours: Number(workTimeRow.avg_hours.toFixed(1)) },
     top_performers: topPerformers,
     highlights,
-    trend,
   });
 }));
 
