@@ -61,13 +61,13 @@ export default function Dashboard() {
       setExtraStats({ sources, destinations });
     });
 
-    // Performance leaderboard — this month, ranked by enrollments then revenue
+    // Performance leaderboard — this month, ranked by file opens then revenue
     api.kpi(month).then(rows => {
       const ranked = (rows || [])
         .filter(r => r.consultant)
         .map(r => ({
           name: r.consultant,
-          enrolled: r.enrolled || 0,
+          fileOpened: r.fileOpened || 0,
           revenue: r.revenue || 0,
           collected: r.collected || 0,
           leadsThisMonth: r.thisMonth || 0,
@@ -75,7 +75,7 @@ export default function Dashboard() {
           targetEnrolled: r.target_enrolled || 0,
           targetRevenue: r.target_revenue || 0,
         }))
-        .sort((a, b) => b.enrolled - a.enrolled || b.revenue - a.revenue);
+        .sort((a, b) => b.fileOpened - a.fileOpened || b.revenue - a.revenue);
       setLeaderboard(ranked);
     }).catch(() => setLeaderboard([]));
   }, [month]);
@@ -92,7 +92,7 @@ export default function Dashboard() {
   const { pipeline, total, followupToday, recentLeads, totalPaid } = data;
   const enrolled = pipeline.find(p => p.lead_status === 'Enrolled')?.count || 0;
   const fileOpened = pipeline.find(p => p.lead_status === 'File Opened')?.count || 0;
-  const convRate = total > 0 ? ((enrolled / total) * 100).toFixed(1) : 0;
+  const convRate = total > 0 ? ((fileOpened / total) * 100).toFixed(1) : 0;
 
   const activeBroadcasts = broadcasts.filter(b => !b.dismissed);
   const hour = new Date().getHours();
@@ -171,7 +171,7 @@ export default function Dashboard() {
           icon={<TrendingUp size={20} />}
           label="Conversion Rate"
           value={`${convRate}%`}
-          sub={`${enrolled} enrolled`}
+          sub={`${fileOpened} files opened`}
           color="bg-emerald-50 text-emerald-600"
         />
         <KpiCard
@@ -327,7 +327,7 @@ function PerformanceLeaderboard({ rows, month }) {
                   <span className="text-xs text-slate-500 flex-shrink-0">{c.conversionRate}% conv</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                  <span><strong className="text-emerald-600">{c.enrolled}</strong> enrolled</span>
+                  <span><strong className="text-blue-600">{c.fileOpened}</strong> files opened</span>
                   <span>{c.leadsThisMonth} leads</span>
                   <span><strong className="text-slate-700">{fmt(c.revenue)}</strong></span>
                 </div>
@@ -344,7 +344,7 @@ function PerformanceLeaderboard({ rows, month }) {
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium text-slate-700 truncate">{c.name}</span>
-                  <span className="text-xs text-slate-500"><strong>{c.enrolled}</strong> · {fmt(c.revenue)}</span>
+                  <span className="text-xs text-slate-500"><strong className="text-blue-600">{c.fileOpened}</strong> · {fmt(c.revenue)}</span>
                 </div>
                 <div className="h-1 bg-slate-100 rounded-full mt-1 overflow-hidden">
                   <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(c.revenue / leaderRevenue) * 100}%` }} />

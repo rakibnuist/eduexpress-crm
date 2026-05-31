@@ -480,7 +480,7 @@ function KPITracker({ kpis, month, onRefresh }) {
 
 function KPICard({ kpi: k, onSetTarget }) {
   const leadsProgress = k.target_leads > 0 ? Math.min(100, Math.round((k.thisMonth / k.target_leads) * 100)) : null;
-  const enrollProgress = k.target_enrolled > 0 ? Math.min(100, Math.round((k.enrolled / k.target_enrolled) * 100)) : null;
+  const fileOpenedProgress = k.target_enrolled > 0 ? Math.min(100, Math.round((k.fileOpened / k.target_enrolled) * 100)) : null;
   const revProgress = k.target_revenue > 0 ? Math.min(100, Math.round((k.revenue / k.target_revenue) * 100)) : null;
 
   return (
@@ -524,14 +524,14 @@ function KPICard({ kpi: k, onSetTarget }) {
       </div>
 
       {/* Targets progress */}
-      {(leadsProgress !== null || enrollProgress !== null || revProgress !== null) && (
+      {(leadsProgress !== null || fileOpenedProgress !== null || revProgress !== null) && (
         <div className="space-y-2 border-t border-slate-100 pt-3">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Targets</p>
           {leadsProgress !== null && (
             <ProgressBar label="Leads" current={k.thisMonth} target={k.target_leads} pct={leadsProgress} color="blue" />
           )}
-          {enrollProgress !== null && (
-            <ProgressBar label="Enrolled" current={k.enrolled} target={k.target_enrolled} pct={enrollProgress} color="green" />
+          {fileOpenedProgress !== null && (
+            <ProgressBar label="File Opens" current={k.fileOpened} target={k.target_enrolled} pct={fileOpenedProgress} color="blue" />
           )}
           {revProgress !== null && (
             <ProgressBar label="Revenue" current={`৳${k.revenue.toLocaleString()}`} target={`৳${k.target_revenue.toLocaleString()}`} pct={revProgress} color="violet" />
@@ -702,7 +702,7 @@ function TargetForm({ kpi, month, onSave }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-slate-500">Set monthly targets for <strong>{kpi.consultant}</strong> in <strong>{month}</strong></p>
-      {[['target_leads', 'Target Leads', 'number'], ['target_enrolled', 'Target Enrollments', 'number'], ['target_revenue', 'Target Revenue (BDT)', 'number']].map(([k, l]) => (
+      {[['target_leads', 'Target Leads', 'number'], ['target_enrolled', 'Target File Opens', 'number'], ['target_revenue', 'Target Revenue (BDT)', 'number']].map(([k, l]) => (
         <div key={k}>
           <label className="block text-xs font-medium text-slate-600 mb-1">{l}</label>
           <input type="number" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={form[k] || ''} onChange={e => set(k, e.target.value)} />

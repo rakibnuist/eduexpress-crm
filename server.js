@@ -211,16 +211,23 @@ app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => 
 // Aligned with EduExpress workflow (File Updates 2026.xlsx).
 // 8 stages from File Open → Arrived. Per-university tracker captures
 // returned/rejected at each individual university.
-const APPLICATION_STAGES = [
-  { key: 'documents',     label: 'Documents',     order: 0 },  // Collecting docs
-  { key: 'ready',         label: 'Ready',         order: 1 },  // Docs ready, about to submit
-  { key: 'submitted',     label: 'Submitted',     order: 2 },  // Sent to university
-  { key: 'admitted',      label: 'Admitted',      order: 3 },  // Offer letter received
-  { key: 'visa_applied',  label: 'Visa Applied',  order: 4 },
-  { key: 'visa_approved', label: 'Visa Approved', order: 5 },
-  { key: 'departed',      label: 'Departed',      order: 6 },
-  { key: 'arrived',       label: 'Arrived',       order: 7 },
-];
+function getApplicationStages() {
+  const getList = (key, defaults) => {
+    const val = getConfig(key);
+    try { if (val) return JSON.parse(val); } catch {}
+    return defaults;
+  };
+  const list = getList('settings_fileStages', ['Documents Collecting','Documents Ready','Applied to University','Offer Letter Received','Visa Applied','Visa Approved','Visa Rejected','Enrolled','Cancelled']);
+  const standardKeys = ['documents', 'ready', 'submitted', 'admitted', 'visa_applied', 'visa_approved', 'departed', 'arrived'];
+  return list.map((label, order) => {
+    let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (key === 'documents_collecting') key = 'documents';
+    if (key === 'documents_ready') key = 'ready';
+    if (key === 'applied_to_university') key = 'submitted';
+    if (key === 'offer_letter_received') key = 'admitted';
+    return { key, label, order };
+  });
+}
 
 // Per-university application status values.
 const UNI_APP_STATUSES = ['documents', 'ready', 'submitted', 'admitted', 'returned', 'rejected'];
@@ -260,7 +267,7 @@ function leadIsVisibleTo(lead, user) {
 
 // Reference: list of stages + doc templates (for the UI).
 app.get('/api/application/meta', (req, res) => {
-  res.json({ stages: APPLICATION_STAGES, docTemplates: DOC_TEMPLATES, defaultDocs: DEFAULT_DOCS });
+  res.json({ stages: getApplicationStages(), docTemplates: DOC_TEMPLATES, defaultDocs: DEFAULT_DOCS });
 });
 
 // All leads currently in the application pipeline (i.e. that have a stage set,
@@ -293,14 +300,20 @@ app.get('/api/applications', (req, res) => {
            (SELECT GROUP_CONCAT(university, ', ') FROM lead_university_applications u WHERE u.lead_id=l.id) AS uni_list
     FROM leads l
     ${ws2}
-    ORDER BY
-      CASE l.application_stage
-        WHEN 'documents' THEN 0 WHEN 'ready' THEN 1 WHEN 'submitted' THEN 2
-        WHEN 'admitted' THEN 3 WHEN 'visa_applied' THEN 4 WHEN 'visa_approved' THEN 5
-        WHEN 'departed' THEN 6 WHEN 'arrived' THEN 7 ELSE 0 END,
-      l.id DESC`).all(params);
+    ORDER BY l.id DESC`).all(params);
 
-  res.json({ stages: APPLICATION_STAGES, rows });
+  const stages = getApplicationStages();
+  // Sort rows dynamically in memory based on the order of stages from Settings list
+  rows.sort((a, b) => {
+    const stageA = a.application_stage || 'documents';
+    const stageB = b.application_stage || 'documents';
+    const orderA = stages.find(s => s.key === stageA)?.order ?? 0;
+    const orderB = stages.find(s => s.key === stageB)?.order ?? 0;
+    if (orderA !== orderB) return orderA - orderB;
+    return b.id - a.id;
+  });
+
+  res.json({ stages, rows });
 });
 
 // Move a lead to a different application stage + edit Excel-aligned fields.
@@ -314,7 +327,8 @@ app.put('/api/leads/:id/stage', (req, res) => {
     source, referrer, nationality, passport, degree, major, drive_link, deposit,
     blood_group, date_of_birth, medical_notes, emergency_contact,
   } = req.body || {};
-  if (stage && !APPLICATION_STAGES.some(s => s.key === stage)) {
+  const stages = getApplicationStages();
+  if (stage && !stages.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
   }
   const oldStage = lead.application_stage;
@@ -1780,7 +1794,7 @@ app.get('/api/public/student/:token', (req, res) => {
       drive_link: lead.drive_link,
       blood_group: lead.blood_group,
     },
-    stages: APPLICATION_STAGES,
+    stages: getApplicationStages(),
     universities: uniApps,
     documents: docs.map(d => ({
       id: d.id,
@@ -2092,7 +2106,7 @@ app.get('/api/kpi/:month', (req, res) => {
     const revenue  = db.prepare("SELECT SUM(service_fee) as s FROM leads WHERE assigned_consultant=?").get(c).s||0;
     const collected= db.prepare("SELECT SUM(paid) as s FROM leads WHERE assigned_consultant=?").get(c).s||0;
     const target   = db.prepare("SELECT * FROM kpi_targets WHERE consultant=? AND month=?").get(c,month)||{};
-    return { consultant:c, total, thisMonth, enrolled:byStatus['Enrolled']||0, fileOpened:byStatus['File Opened']||0, officeVisited:byStatus['Office Visited']||0, positive:byStatus['Positive']||0, notInterested:byStatus['Not Interested']||0, revenue, collected, conversionRate: total>0?((( byStatus['Enrolled']||0)/total)*100).toFixed(1):0, responseRate: total>0?(((total-(byStatus['No Response']||0))/total)*100).toFixed(1):0, target_leads:target.target_leads||0, target_enrolled:target.target_enrolled||0, target_revenue:target.target_revenue||0 };
+    return { consultant:c, total, thisMonth, enrolled:byStatus['Enrolled']||0, fileOpened:byStatus['File Opened']||0, officeVisited:byStatus['Office Visited']||0, positive:byStatus['Positive']||0, notInterested:byStatus['Not Interested']||0, revenue, collected, conversionRate: total>0?((( byStatus['File Opened']||0)/total)*100).toFixed(1):0, responseRate: total>0?(((total-(byStatus['No Response']||0))/total)*100).toFixed(1):0, target_leads:target.target_leads||0, target_enrolled:target.target_enrolled||0, target_revenue:target.target_revenue||0 };
   }));
 });
 app.put('/api/kpi/targets', (req, res) => {

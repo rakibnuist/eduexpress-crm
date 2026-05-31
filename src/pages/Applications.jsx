@@ -35,6 +35,21 @@ const STAGE_COLORS = {
   arrived:       { bg: 'bg-green-50',  border: 'border-green-200',  pill: 'bg-green-200 text-green-800' },
 };
 
+const STAGE_COLORS_LIST = [
+  { bg: 'bg-slate-50',   border: 'border-slate-200',   pill: 'bg-slate-200 text-slate-700' },
+  { bg: 'bg-blue-50',    border: 'border-blue-200',    pill: 'bg-blue-200 text-blue-800' },
+  { bg: 'bg-violet-50',  border: 'border-violet-200',  pill: 'bg-violet-200 text-violet-800' },
+  { bg: 'bg-amber-50',   border: 'border-amber-200',   pill: 'bg-amber-200 text-amber-800' },
+  { bg: 'bg-orange-50',  border: 'border-orange-200',  pill: 'bg-orange-200 text-orange-800' },
+  { bg: 'bg-teal-50',    border: 'border-teal-200',    pill: 'bg-teal-200 text-teal-800' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', pill: 'bg-emerald-200 text-emerald-800' },
+  { bg: 'bg-green-50',   border: 'border-green-200',   pill: 'bg-green-200 text-green-800' },
+  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  pill: 'bg-indigo-200 text-indigo-800' },
+  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', pill: 'bg-fuchsia-200 text-fuchsia-800' },
+  { bg: 'bg-pink-50',    border: 'border-pink-200',    pill: 'bg-pink-200 text-pink-800' },
+  { bg: 'bg-sky-50',     border: 'border-sky-200',     pill: 'bg-sky-200 text-sky-800' },
+];
+
 const DOC_STATUSES = [
   { key: 'pending',      label: 'Pending',      cls: 'bg-slate-100 text-slate-600 border-slate-200' },
   { key: 'received',     label: 'Received',     cls: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -164,10 +179,10 @@ export default function Applications({ user }) {
                 : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
             All <span className="ml-1 opacity-75">{rows.length}</span>
           </button>
-          {stages.map(s => {
+          {stages.map((s, index) => {
             const n = stageCounts[s.key] || 0;
             const active = filterStage === s.key;
-            const color = STAGE_COLORS[s.key] || STAGE_COLORS.documents;
+            const color = STAGE_COLORS[s.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
             return (
               <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)}
                 disabled={n === 0}
@@ -234,9 +249,9 @@ function KanbanView({ stages, rows, onPick }) {
   return (
     <div className="overflow-x-auto pb-2">
       <div className="flex gap-3 min-w-max">
-        {stages.map(stage => {
+        {stages.map((stage, index) => {
           const items = byStage[stage.key] || [];
-          const color = STAGE_COLORS[stage.key] || STAGE_COLORS.documents;
+          const color = STAGE_COLORS[stage.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
           return (
             <div key={stage.key} className={`w-72 flex-shrink-0 rounded-2xl border ${color.border} ${color.bg}`}>
               <div className="px-3 py-2.5 border-b border-white/60 flex items-center justify-between">
