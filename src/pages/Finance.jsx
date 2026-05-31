@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  Legend, LineChart, Line, CartesianGrid,
+  Legend, LineChart, Line, CartesianGrid, PieChart, Pie, Cell,
 } from 'recharts';
 
 export default function Finance() {
@@ -433,10 +433,20 @@ function CashflowTab({ onChanged, settings }) {
         />
       </div>
 
-      {/* Breakdown panels */}
+      {/* Breakdown — donuts side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <BreakdownPanel title="Income by category"  rows={data.by_category.income}  color="emerald" />
-        <BreakdownPanel title="Spend by category"   rows={data.by_category.expense} color="rose" />
+        <DonutPanel
+          title="Income breakdown"
+          total={totals.in}
+          rows={data.by_category.income}
+          palette={['#10b981','#34d399','#6ee7b7','#a7f3d0','#d1fae5','#86efac','#22c55e','#16a34a']}
+          accent="emerald" />
+        <DonutPanel
+          title="Spend breakdown"
+          total={totals.out}
+          rows={data.by_category.expense}
+          palette={['#f43f5e','#fb7185','#fda4af','#fecdd3','#fee2e2','#f87171','#ef4444','#dc2626','#b91c1c']}
+          accent="rose" />
       </div>
       {data.income_by_reference.length > 0 && (
         <BreakdownPanel title="Income by reference (who closed it)" rows={data.income_by_reference} color="blue" />
@@ -529,6 +539,52 @@ function LedgerCard({ side, title, color, rows, total, onAdd, onEdit }) {
             </tr>
           </tfoot>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function DonutPanel({ title, total, rows, palette, accent }) {
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-2xl p-4">
+        <p className="font-semibold text-slate-700 text-sm mb-1">{title}</p>
+        <p className="text-xs text-slate-400 italic py-8 text-center">No entries this month</p>
+      </div>
+    );
+  }
+  // Combine tail rows into "Other" so the donut stays readable
+  const top = rows.slice(0, 6).map(r => ({ name: r.name, value: r.amount }));
+  const tail = rows.slice(6).reduce((s, r) => s + (r.amount || 0), 0);
+  if (tail > 0) top.push({ name: 'Other', value: tail });
+  const accentText = { emerald: 'text-emerald-700', rose: 'text-rose-700' }[accent] || 'text-slate-700';
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4">
+      <p className="font-semibold text-slate-700 text-sm mb-3">{title}</p>
+      <div className="grid grid-cols-5 gap-3 items-center">
+        <div className="col-span-2 relative">
+          <ResponsiveContainer width="100%" height={160}>
+            <PieChart>
+              <Pie data={top} dataKey="value" nameKey="name" innerRadius={48} outerRadius={70} stroke="none" paddingAngle={1}>
+                {top.map((_, i) => <Cell key={i} fill={palette[i % palette.length]} />)}
+              </Pie>
+              <Tooltip formatter={(v) => cFmt(v)} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <p className={`text-base font-bold ${accentText} tabular-nums leading-tight`}>{cFmt(total)}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">total</p>
+          </div>
+        </div>
+        <div className="col-span-3 space-y-1">
+          {top.map((r, i) => (
+            <div key={r.name} className="flex items-center gap-2 text-xs">
+              <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: palette[i % palette.length] }} />
+              <span className="text-slate-600 truncate flex-1">{r.name}</span>
+              <span className="text-slate-800 font-semibold tabular-nums">{cFmt(r.value)}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

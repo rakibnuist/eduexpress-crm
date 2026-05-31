@@ -4,7 +4,7 @@ import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
-import { Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 export default function Leads() {
@@ -20,7 +20,6 @@ export default function Leads() {
   });
   const [modal, setModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
-  const [showFilters, setShowFilters] = useState(false);
   const searchRef = useRef();
 
   const load = useCallback(() => {
@@ -84,38 +83,44 @@ export default function Leads() {
         </div>
       </div>
 
-      {/* Search + Filters bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-48">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input ref={searchRef}
-            className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-            placeholder="Search by name, phone, ID, email…"
-            value={filters.search}
-            onChange={e => setFilter('search', e.target.value)} />
+      {/* Search + Filters bar (sticky for long tables) */}
+      <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-sm -mx-4 lg:-mx-6 px-4 lg:px-6 py-2 border-b border-slate-100">
+        <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex flex-wrap gap-2 items-center">
+          <div className="relative flex-1 min-w-48">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input ref={searchRef}
+              className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+              placeholder="Search by name, phone, ID, email…"
+              value={filters.search}
+              onChange={e => setFilter('search', e.target.value)} />
+          </div>
+          {/* Inline filter dropdowns — always visible, no panel toggle */}
+          {settings && (
+            <>
+              <FilterSelect value={filters.status} onChange={v => setFilter('status', v)} options={settings.leadStatuses} placeholder="All statuses" />
+              <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All consultants" />
+              <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All destinations" />
+            </>
+          )}
+          {(activeFilters > 0 || filters.search) && (
+            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', page: 1 })}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">
+              <X size={13} /> Clear all
+            </button>
+          )}
         </div>
-        <button onClick={() => setShowFilters(s => !s)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition-colors
-            ${showFilters || activeFilters ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-          <SlidersHorizontal size={15} />
-          Filters {activeFilters > 0 && <span className="bg-blue-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs">{activeFilters}</span>}
-        </button>
-        {activeFilters > 0 && (
-          <button onClick={() => setFilters(f => ({ ...f, status: '', consultant: '', destination: '', page: 1 }))}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500">
-            <X size={13} /> Clear
-          </button>
+
+        {/* Active-filter chips — visible row showing what's currently filtering */}
+        {(filters.status || filters.consultant || filters.destination || filters.search) && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
+            {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
+            {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}
+            {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
+            <span className="text-xs text-slate-400 self-center ml-1">{data.total.toLocaleString()} match{data.total === 1 ? '' : 'es'}</span>
+          </div>
         )}
       </div>
-
-      {/* Expanded filters */}
-      {showFilters && settings && (
-        <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap gap-2">
-          <FilterSelect value={filters.status} onChange={v => setFilter('status', v)} options={settings.leadStatuses} placeholder="All Statuses" />
-          <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
-          <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
-        </div>
-      )}
 
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -234,5 +239,14 @@ function FilterSelect({ value, onChange, options, placeholder }) {
       <option value="">{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
+  );
+}
+
+function Chip({ children, onClear }) {
+  return (
+    <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full border border-blue-100">
+      {children}
+      <button onClick={onClear} className="hover:bg-blue-100 rounded-full p-0.5"><X size={11} /></button>
+    </span>
   );
 }

@@ -53,6 +53,7 @@ export default function Applications({ user }) {
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [filterStage, setFilterStage]     = useState('all');
   const [filterDest, setFilterDest]       = useState('all');
   const [filterSource, setFilterSource]   = useState('all');
   const [filterReferrer, setFilterReferrer] = useState('all');
@@ -68,11 +69,22 @@ export default function Applications({ user }) {
   useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
 
   const filtered = useMemo(() => rows.filter(r => {
+    if (filterStage    !== 'all' && (r.application_stage || 'documents') !== filterStage) return false;
     if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
     if (filterSource   !== 'all' && r.source !== filterSource)        return false;
     if (filterReferrer !== 'all' && r.referrer !== filterReferrer)    return false;
     return true;
-  }), [rows, filterDest, filterSource, filterReferrer]);
+  }), [rows, filterStage, filterDest, filterSource, filterReferrer]);
+
+  // Per-stage counts (across all rows, not filtered, so the strip is stable)
+  const stageCounts = useMemo(() => {
+    const m = Object.fromEntries(stages.map(s => [s.key, 0]));
+    rows.forEach(r => {
+      const k = stages.some(s => s.key === r.application_stage) ? r.application_stage : 'documents';
+      m[k] = (m[k] || 0) + 1;
+    });
+    return m;
+  }, [rows, stages]);
 
   const destinations = useMemo(() => unique(rows.map(r => r.destination)), [rows]);
   const referrers    = useMemo(() => unique(rows.map(r => r.referrer)), [rows]);
@@ -135,6 +147,34 @@ export default function Applications({ user }) {
           </button>
         </div>
       </div>
+
+      {/* Stage pill strip — click to filter, click again to clear */}
+      {stages.length > 0 && rows.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          <button onClick={() => setFilterStage('all')}
+            className={`flex-shrink-0 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
+              ${filterStage === 'all' ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+            All <span className="ml-1 opacity-75">{rows.length}</span>
+          </button>
+          {stages.map(s => {
+            const n = stageCounts[s.key] || 0;
+            const active = filterStage === s.key;
+            const color = STAGE_COLORS[s.key] || STAGE_COLORS.documents;
+            return (
+              <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)}
+                disabled={n === 0}
+                className={`flex-shrink-0 flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
+                  ${active ? `${color.bg} border-current shadow-sm scale-[1.02]`
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${color.pill.split(' ')[0]}`}/>
+                {s.label}
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-white/60' : 'bg-slate-100'}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {loading && rows.length === 0 ? (
         <div className="text-slate-400 text-center py-16">Loading…</div>
