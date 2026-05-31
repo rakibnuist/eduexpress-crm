@@ -15,7 +15,7 @@ import {
   GraduationCap, RefreshCw, X, CheckCircle2, AlertTriangle, ExternalLink,
   CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
   LayoutGrid, Table as TableIcon, Filter, Building2, User, ChevronDown,
-  Share2, Copy, QrCode, RotateCw,
+  Share2, Copy, QrCode, RotateCw, Search,
 } from 'lucide-react';
 
 const ensureAbsoluteUrl = (url) => {
@@ -79,6 +79,7 @@ export default function Applications({ user }) {
   const [filterDest, setFilterDest]       = useState('all');
   const [filterSource, setFilterSource]   = useState('all');
   const [filterReferrer, setFilterReferrer] = useState('all');
+  const [searchQuery, setSearchQuery]     = useState('');
   const [view, setView] = useState(() => localStorage.getItem('app_view') || 'kanban');
 
   const load = useCallback(async () => {
@@ -95,8 +96,20 @@ export default function Applications({ user }) {
     if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
     if (filterSource   !== 'all' && r.source !== filterSource)        return false;
     if (filterReferrer !== 'all' && r.referrer !== filterReferrer)    return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = (r.client_name || '').toLowerCase().includes(q);
+      const idMatch = (r.lead_id || '').toLowerCase().includes(q);
+      const destMatch = (r.destination || '').toLowerCase().includes(q);
+      const majorMatch = (r.major || '').toLowerCase().includes(q);
+      const universityMatch = (r.university || '').toLowerCase().includes(q);
+      const consultantMatch = (r.assigned_consultant || '').toLowerCase().includes(q);
+      const degreeMatch = (r.degree || '').toLowerCase().includes(q);
+      const referrerMatch = (r.referrer || '').toLowerCase().includes(q);
+      if (!nameMatch && !idMatch && !destMatch && !majorMatch && !universityMatch && !consultantMatch && !degreeMatch && !referrerMatch) return false;
+    }
     return true;
-  }), [rows, filterStage, filterDest, filterSource, filterReferrer]);
+  }), [rows, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
 
   // Per-stage counts (across all rows, not filtered, so the strip is stable)
   const stageCounts = useMemo(() => {
@@ -122,9 +135,11 @@ export default function Applications({ user }) {
     return m;
   }, [filtered]);
 
+  const isFilterActive = filterSource !== 'all' || filterDest !== 'all' || filterReferrer !== 'all' || searchQuery;
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <GraduationCap size={22} className="text-blue-600" /> Application Pipeline
@@ -137,36 +152,81 @@ export default function Applications({ user }) {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* View toggle */}
-          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
             <button onClick={() => setView('kanban')}
-              className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md ${view === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <LayoutGrid size={13} /> Kanban
             </button>
             <button onClick={() => setView('table')}
-              className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <TableIcon size={13} /> Table
             </button>
           </div>
-          {/* Filters */}
-          <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
-            <option value="all">All sources</option>
-            {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={filterDest} onChange={e => setFilterDest(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
-            <option value="all">All destinations</option>
-            {destinations.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select value={filterReferrer} onChange={e => setFilterReferrer(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white max-w-[160px]">
-            <option value="all">All referrers</option>
-            {referrers.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
           <button onClick={load} disabled={loading}
-            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">
+            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+        </div>
+      </div>
+
+      {/* Advanced Sticky Filter & Search Bar */}
+      <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-md -mx-4 lg:-mx-6 px-4 lg:px-6 py-2 border-b border-slate-200/80">
+        <div className="bg-white border border-slate-200 rounded-2xl p-2.5 shadow-sm flex flex-wrap gap-2.5 items-center">
+          <div className="relative flex-1 min-w-[240px]">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              className="pl-10 pr-9 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
+              placeholder="Search by name, ID, major, university, degree, consultant..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
+              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
+                ${filterSource !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              <option value="all">All Sources</option>
+              {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            
+            <select value={filterDest} onChange={e => setFilterDest(e.target.value)}
+              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
+                ${filterDest !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              <option value="all">All Destinations</option>
+              {destinations.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+
+            <select value={filterReferrer} onChange={e => setFilterReferrer(e.target.value)}
+              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[160px]
+                ${filterReferrer !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              <option value="all">All Referrers</option>
+              {referrers.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+
+            {isFilterActive && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterSource('all');
+                  setFilterDest('all');
+                  setFilterReferrer('all');
+                }}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold"
+              >
+                <X size={14} /> Clear all filters
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -247,20 +307,27 @@ function KanbanView({ stages, rows, onPick }) {
   }, [rows, stages]);
 
   return (
-    <div className="overflow-x-auto pb-2">
-      <div className="flex gap-3 min-w-max">
+    <div className="overflow-x-auto pb-3">
+      <div className="flex gap-4 min-w-max">
         {stages.map((stage, index) => {
           const items = byStage[stage.key] || [];
           const color = STAGE_COLORS[stage.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
           return (
-            <div key={stage.key} className={`w-72 flex-shrink-0 rounded-2xl border ${color.border} ${color.bg}`}>
-              <div className="px-3 py-2.5 border-b border-white/60 flex items-center justify-between">
-                <span className="font-semibold text-slate-700 text-sm">{stage.label}</span>
+            <div key={stage.key} className={`w-[290px] flex-shrink-0 rounded-2xl border ${color.border} ${color.bg} shadow-sm transition-all duration-200 flex flex-col`}>
+              {/* Colored top band */}
+              <div className={`h-1.5 w-full ${color.pill.split(' ')[0]}`} />
+              
+              <div className="px-3.5 py-3 border-b border-white/60 flex items-center justify-between">
+                <span className="font-bold text-slate-800 text-sm tracking-tight">{stage.label}</span>
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${color.pill}`}>{items.length}</span>
               </div>
-              <div className="p-2 space-y-2 max-h-[640px] overflow-y-auto">
+              
+              <div className="p-2.5 space-y-2.5 max-h-[640px] overflow-y-auto min-h-[140px] flex-1">
                 {items.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic text-center py-4">empty</p>
+                  <div className="py-12 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200/80 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center">
+                    <FileText size={18} className="text-slate-300 mb-1.5" />
+                    <p className="font-semibold text-slate-500">No student files</p>
+                  </div>
                 ) : items.map(card => (
                   <ApplicationCard key={card.id} card={card} onClick={() => onPick(card)} />
                 ))}
