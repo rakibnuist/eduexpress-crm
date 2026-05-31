@@ -412,15 +412,45 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
     setSaving(false);
   };
 
-  const advance = async () => {
+  // Click a stage chip → save immediately AND move the card on the kanban.
+  // Previously this only changed local form state, so consultants had to
+  // click 'Save details' for the column to update.
+  const changeStage = async (newStage) => {
+    if (newStage === form.application_stage) return;
+    const previous = form.application_stage;
+    setForm(f => ({ ...f, application_stage: newStage })); // optimistic
+    try {
+      await api.updateStage(leadId, { stage: newStage });
+      await load();
+      onChanged?.();
+      const label = stages.find(s => s.key === newStage)?.label || newStage;
+      toast.success(`Moved to ${label}`);
+    } catch (e) {
+      // Roll back local state on failure
+      setForm(f => ({ ...f, application_stage: previous }));
+      toast.error(e.message || 'Could not change stage');
+    }
+  };
+
+  const advance = () => {
     const idx = stages.findIndex(s => s.key === (form.application_stage || 'documents'));
     if (idx === -1 || idx >= stages.length - 1) return;
-    const next = stages[idx + 1].key;
-    setSaving(true);
-    try { await api.updateStage(leadId, { stage: next }); await load(); onChanged?.();
-          toast.success(`Advanced to ${stages[idx + 1].label}`); }
-    catch (e) { toast.error(e.message || 'Could not advance'); }
-    setSaving(false);
+    return changeStage(stages[idx + 1].key);
+  };
+
+  const deleteLead = async () => {
+    const ok = await confirm({
+      title: `Delete ${lead.client_name}?`,
+      body: `This will permanently remove this student from Applications and All Leads. The student portal link will stop working.`,
+      tone: 'danger', confirmLabel: 'Delete student',
+    });
+    if (!ok) return;
+    try {
+      await api.deleteLead(leadId);
+      toast.success(`${lead.client_name} deleted`);
+      onChanged?.();
+      onClose?.();
+    } catch (e) { toast.error(e.message || 'Could not delete'); }
   };
 
   const setDocStatus = async (doc, status) => {
@@ -486,6 +516,10 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
                 <ExternalLink size={12} /> Drive folder
               </a>
             )}
+            <button onClick={deleteLead}
+              className="flex items-center gap-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
+              <Trash2 size={12} /> Delete
+            </button>
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
           </div>
         </div>
@@ -504,8 +538,8 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
           <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
             {stages.map((s, i) => (
               <div key={s.key} className="flex items-center gap-1.5">
-                <button onClick={() => updateField('application_stage', s.key)}
-                  className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all
+                <button onClick={() => changeStage(s.key)} disabled={saving}
+                  className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50
                     ${i === currentIdx
                       ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                       : i < currentIdx
