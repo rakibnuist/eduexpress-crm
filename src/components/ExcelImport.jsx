@@ -80,28 +80,36 @@ function parseCashflow(workbook, fileName) {
       }
     });
 
+    // Filter for the summary/totals rows that sit at the bottom of every
+    // month sheet — we never want to import those as real entries because
+    // they double-count the columns.
+    const isSummary = (v) => {
+      if (!v || typeof v !== 'string') return false;
+      const s = v.trim().toLowerCase();
+      return s === 'total' || s === 'total income' || s === 'total spend' ||
+             s === 'total cash' || s === 'grand total' || s.startsWith('total ');
+    };
+
     for (let r = 2; r < aoa.length; r++) {
       const row = aoa[r];
       if (!row) continue;
       // Income side
       const inType = row[idx.incomeType], inClient = row[idx.client], inAmount = parseAmount(row[idx.amount]);
-      if (inType || inClient || inAmount) {
-        if (inAmount && (inType || inClient)) {
-          rows.push({
-            kind: 'in',
-            month,
-            date: excelDateToISO(row[idx.notes] || null, month),
-            category: inType || null,
-            client_name: inClient || null,
-            reference: row[idx.reference] || null,
-            amount: inAmount,
-            notes: typeof row[idx.notes] === 'string' && !/^\d{4}-\d{2}-\d{2}/.test(row[idx.notes]) ? row[idx.notes] : null,
-          });
-        }
+      if (inAmount && (inType || inClient) && !isSummary(inType) && !isSummary(inClient)) {
+        rows.push({
+          kind: 'in',
+          month,
+          date: excelDateToISO(row[idx.notes] || null, month),
+          category: inType || null,
+          client_name: inClient || null,
+          reference: row[idx.reference] || null,
+          amount: inAmount,
+          notes: typeof row[idx.notes] === 'string' && !/^\d{4}-\d{2}-\d{2}/.test(row[idx.notes]) ? row[idx.notes] : null,
+        });
       }
       // Spend side
       const outType = row[idx.spendType], outClient = row[idx.spendClient], outAmount = parseAmount(row[idx.spendAmount]);
-      if (outAmount && (outType || outClient)) {
+      if (outAmount && (outType || outClient) && !isSummary(outType) && !isSummary(outClient)) {
         rows.push({
           kind: 'out',
           month,
