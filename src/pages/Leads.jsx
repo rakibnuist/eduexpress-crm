@@ -147,11 +147,11 @@ export default function Leads({ user }) {
 
   const stats = useMemo(() => {
     const list = view === 'kanban' ? Object.values(byStatus).flat() : data.leads || [];
-    const pageFee = list.reduce((acc, curr) => acc + (curr.service_fee || 0), 0);
-    const pagePaid = list.reduce((acc, curr) => acc + (curr.paid || 0), 0);
-    const pageBalance = list.reduce((acc, curr) => acc + (curr.balance || 0), 0);
+    const totalInquiries = list.length;
+    const consultations = list.filter(l => l.lead_status === 'Office Visited').length;
+    const activeFiles = list.filter(l => l.lead_status === 'File Opened' || l.lead_status === 'Enrolled').length;
     const dueToday = list.filter(l => l.next_followup === today).length;
-    return { pageFee, pagePaid, pageBalance, dueToday };
+    return { totalInquiries, consultations, activeFiles, dueToday };
   }, [data.leads, byStatus, today, view]);
 
   // ── Drag and Drop columns handlers ─────────────────────────────
@@ -224,21 +224,45 @@ export default function Leads({ user }) {
 
       {/* Page-level dynamic summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow">
-          <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Total Fees ({view === 'kanban' ? 'Pipeline' : 'Page'})</p>
-          <p className="text-lg font-extrabold text-slate-850 leading-tight mt-1">৳{stats.pageFee.toLocaleString()}</p>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow flex items-start justify-between">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Total Inquiries</p>
+            <p className="text-2xl font-extrabold text-slate-800 leading-tight mt-1">{stats.totalInquiries.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-400 mt-1">Active prospects on {view === 'kanban' ? 'board' : 'page'}</p>
+          </div>
+          <div className="p-2 bg-sky-50 rounded-xl text-sky-600">
+            <User size={18} />
+          </div>
         </div>
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow">
-          <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Collected ({view === 'kanban' ? 'Pipeline' : 'Page'})</p>
-          <p className="text-lg font-extrabold text-emerald-600 leading-tight mt-1">৳{stats.pagePaid.toLocaleString()}</p>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow flex items-start justify-between">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Consultations</p>
+            <p className="text-2xl font-extrabold text-violet-600 leading-tight mt-1">{stats.consultations.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-400 mt-1">Office counseling done</p>
+          </div>
+          <div className="p-2 bg-violet-50 rounded-xl text-violet-600">
+            <Building2 size={18} />
+          </div>
         </div>
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow">
-          <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Balance Due ({view === 'kanban' ? 'Pipeline' : 'Page'})</p>
-          <p className="text-lg font-extrabold text-rose-500 leading-tight mt-1">৳{stats.pageBalance.toLocaleString()}</p>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow flex items-start justify-between">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Active Files</p>
+            <p className="text-2xl font-extrabold text-emerald-600 leading-tight mt-1">{stats.activeFiles.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-400 mt-1">File Opened / Enrolled</p>
+          </div>
+          <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
+            <FolderOpen size={18} />
+          </div>
         </div>
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow">
-          <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Due Follow-ups ({view === 'kanban' ? 'Pipeline' : 'Page'})</p>
-          <p className="text-lg font-extrabold text-amber-650 leading-tight mt-1">{stats.dueToday} leads</p>
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-shadow flex items-start justify-between">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Due Follow-ups</p>
+            <p className={`text-2xl font-extrabold leading-tight mt-1 ${stats.dueToday > 0 ? 'text-rose-500' : 'text-slate-600'}`}>{stats.dueToday.toLocaleString()}</p>
+            <p className="text-[10px] text-slate-400 mt-1">Actions scheduled today</p>
+          </div>
+          <div className={`p-2 rounded-xl ${stats.dueToday > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'}`}>
+            <CalendarDays size={18} />
+          </div>
         </div>
       </div>
 

@@ -412,13 +412,18 @@ const DOC_STATUS_CLS = {
   not_required: 'bg-slate-50 text-slate-400',
 };
 const UNI_STATUS_CLS = {
-  documents: 'bg-slate-100 text-slate-700',
-  ready:     'bg-blue-100 text-blue-700',
-  submitted: 'bg-violet-100 text-violet-700',
-  admitted:  'bg-emerald-100 text-emerald-700',
-  returned:  'bg-amber-100 text-amber-700',
-  rejected:  'bg-rose-100 text-rose-700',
+  ready:               'bg-sky-100 text-sky-700 border border-sky-200',
+  submitted:           'bg-blue-100 text-blue-700 border border-blue-200',
+  pending:             'bg-slate-100 text-slate-700 border border-slate-200',
+  processing:          'bg-indigo-100 text-indigo-700 border border-indigo-200',
+  initial_review_pass: 'bg-teal-100 text-teal-700 border border-teal-200',
+  interview:           'bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200',
+  pre_admission:       'bg-purple-100 text-purple-700 border border-purple-200',
+  admitted:            'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  returned:            'bg-amber-100 text-amber-700 border border-amber-200',
+  rejected:            'bg-rose-100 text-rose-700 border border-rose-200',
 };
+
 
 /* ─── Timeline ─── */
 function Timeline({ leadId, timeline, onPosted }) {

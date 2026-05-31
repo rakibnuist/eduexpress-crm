@@ -7,7 +7,7 @@ import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
-const SOURCES   = ['In-house', 'Agent'];
+const SOURCES   = ['In-House', 'B2B'];
 const DEGREES   = ['Diploma', 'Bachelor', 'L+Bachelor', 'L+Diploma', 'Masters', 'PhD'];
 const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 

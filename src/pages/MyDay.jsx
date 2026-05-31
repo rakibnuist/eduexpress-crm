@@ -75,7 +75,10 @@ export default function MyDay({ user }) {
 
   // Auto-pulled activity summary — what the system already noticed they did today
   useEffect(() => {
-    api.activity({ since: `${todayISO()} 00:00:00`, limit: 200 })
+    const localStart = new Date();
+    localStart.setHours(0, 0, 0, 0); // start of local day
+    const sinceStr = localStart.toISOString().replace('T', ' ').slice(0, 19); // YYYY-MM-DD HH:MM:SS in UTC
+    api.activity({ since: sinceStr, limit: 200 })
       .then(rows => {
         const mine = (rows || []).filter(a => 
           a.actor_user_id === user?.id || 

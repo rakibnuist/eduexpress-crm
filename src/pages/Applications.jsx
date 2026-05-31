@@ -11,6 +11,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
+import Modal from '../components/Modal';
 import {
   GraduationCap, RefreshCw, X, CheckCircle2, AlertTriangle, ExternalLink,
   CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
@@ -25,14 +26,23 @@ const ensureAbsoluteUrl = (url) => {
 };
 
 const STAGE_COLORS = {
-  documents:     { bg: 'bg-slate-50',  border: 'border-slate-200',  pill: 'bg-slate-200 text-slate-700' },
-  ready:         { bg: 'bg-blue-50',   border: 'border-blue-200',   pill: 'bg-blue-200 text-blue-800' },
-  submitted:     { bg: 'bg-violet-50', border: 'border-violet-200', pill: 'bg-violet-200 text-violet-800' },
-  admitted:      { bg: 'bg-amber-50',  border: 'border-amber-200',  pill: 'bg-amber-200 text-amber-800' },
-  visa_applied:  { bg: 'bg-orange-50', border: 'border-orange-200', pill: 'bg-orange-200 text-orange-800' },
-  visa_approved: { bg: 'bg-teal-50',   border: 'border-teal-200',   pill: 'bg-teal-200 text-teal-800' },
-  departed:      { bg: 'bg-emerald-50',border: 'border-emerald-200',pill: 'bg-emerald-200 text-emerald-800' },
-  arrived:       { bg: 'bg-green-50',  border: 'border-green-200',  pill: 'bg-green-200 text-green-800' },
+  documents:          { bg: 'bg-slate-50 text-slate-700',  border: 'border-slate-200',   pill: 'bg-slate-200 text-slate-700' },
+  ready:              { bg: 'bg-blue-50 text-blue-800',    border: 'border-blue-200',    pill: 'bg-blue-200 text-blue-800' },
+  submitted:          { bg: 'bg-violet-50 text-violet-850',border: 'border-violet-200',  pill: 'bg-violet-200 text-violet-800' },
+  interview:          { bg: 'bg-indigo-50 text-indigo-800',border: 'border-indigo-200',  pill: 'bg-indigo-200 text-indigo-800' },
+  in_review:          { bg: 'bg-sky-50 text-sky-800',      border: 'border-sky-200',     pill: 'bg-sky-200 text-sky-800' },
+  pre_admission:      { bg: 'bg-cyan-50 text-cyan-800',    border: 'border-cyan-200',    pill: 'bg-cyan-200 text-cyan-800' },
+  deposit:            { bg: 'bg-amber-50 text-amber-800',  border: 'border-amber-200',   pill: 'bg-amber-200 text-amber-800' },
+  admitted:           { bg: 'bg-emerald-50 text-emerald-800', border: 'border-emerald-200', pill: 'bg-emerald-200 text-emerald-800' },
+  jw202:              { bg: 'bg-teal-50 text-teal-800',    border: 'border-teal-200',    pill: 'bg-teal-200 text-teal-800' },
+  rejected:           { bg: 'bg-rose-50 text-rose-800',    border: 'border-rose-200',    pill: 'bg-rose-200 text-rose-800' },
+  visa_applied:       { bg: 'bg-orange-50 text-orange-800',border: 'border-orange-200',  pill: 'bg-orange-200 text-orange-800' },
+  visa_approved:      { bg: 'bg-green-50 text-green-800',  border: 'border-green-200',   pill: 'bg-green-200 text-green-800' },
+  payment_complete:   { bg: 'bg-fuchsia-50 text-fuchsia-800', border: 'border-fuchsia-200', pill: 'bg-fuchsia-200 text-fuchsia-800' },
+  visa_rejected:      { bg: 'bg-red-50 text-red-800',      border: 'border-red-200',     pill: 'bg-red-200 text-red-800' },
+  enrolled:           { bg: 'bg-emerald-100 text-emerald-800', border: 'border-emerald-350', pill: 'bg-emerald-600 text-white font-bold' },
+  cancelled:          { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300',   pill: 'bg-slate-550 text-white' },
+  withdraw:           { bg: 'bg-orange-100 text-orange-800', border: 'border-orange-350', pill: 'bg-orange-600 text-white font-bold' },
 };
 
 const STAGE_COLORS_LIST = [
@@ -59,20 +69,25 @@ const DOC_STATUSES = [
 ];
 
 const UNI_STATUSES = [
-  { key: 'documents', label: 'Documents', cls: 'bg-slate-100 text-slate-700' },
-  { key: 'ready',     label: 'Ready',     cls: 'bg-blue-100 text-blue-700' },
-  { key: 'submitted', label: 'Submitted', cls: 'bg-violet-100 text-violet-700' },
-  { key: 'admitted',  label: 'Admitted',  cls: 'bg-emerald-100 text-emerald-700' },
-  { key: 'returned',  label: 'Returned',  cls: 'bg-amber-100 text-amber-700' },
-  { key: 'rejected',  label: 'Rejected',  cls: 'bg-rose-100 text-rose-700' },
+  { key: 'ready',               label: 'Ready',               cls: 'bg-blue-100 text-blue-700' },
+  { key: 'submitted',           label: 'Submitted',           cls: 'bg-violet-100 text-violet-700' },
+  { key: 'pending',             label: 'Pending',             cls: 'bg-slate-100 text-slate-650' },
+  { key: 'processing',          label: 'Processing',          cls: 'bg-indigo-100 text-indigo-700' },
+  { key: 'initial_review_pass', label: 'Initial Review Pass', cls: 'bg-sky-100 text-sky-700' },
+  { key: 'interview',           label: 'Interview',           cls: 'bg-amber-100 text-amber-700' },
+  { key: 'pre_admission',       label: 'Pre-Admission',       cls: 'bg-cyan-100 text-cyan-700' },
+  { key: 'admitted',            label: 'Admitted',            cls: 'bg-emerald-100 text-emerald-750 font-bold' },
+  { key: 'returned',            label: 'Returned',            cls: 'bg-orange-100 text-orange-700 font-medium' },
+  { key: 'rejected',            label: 'Rejected',            cls: 'bg-rose-100 text-rose-700 font-medium' },
 ];
 
-const SOURCES = ['In-house', 'Agent'];
+const SOURCES = ['In-House', 'B2B', 'China'];
 const DEGREES = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'L+Bachelor', 'L+Diploma'];
 
 export default function Applications({ user }) {
   useEffect(() => { document.title = "Application Hub | EduExpress Core"; }, []);
 
+  const toast = useToast();
   const [stages, setStages]   = useState([]);
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +98,63 @@ export default function Applications({ user }) {
   const [filterReferrer, setFilterReferrer] = useState('all');
   const [searchQuery, setSearchQuery]     = useState('');
   const [view, setView] = useState(() => localStorage.getItem('app_view') || 'kanban');
+
+  const [settings, setSettings] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newApp, setNewApp] = useState({
+    client_name: '',
+    phone: '',
+    destination: 'China',
+    degree: 'Bachelor',
+    major: '',
+    university: '',
+    source: 'In-House',
+    referrer: '',
+    assigned_consultant: '',
+  });
+
+  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
+  const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
+
+  const [hideEmptyColumns, setHideEmptyColumns] = useState(() => localStorage.getItem('hide_empty_cols') === 'true');
+  useEffect(() => { localStorage.setItem('hide_empty_cols', hideEmptyColumns); }, [hideEmptyColumns]);
+
+  useEffect(() => {
+    api.settings().then(setSettings).catch(() => {});
+  }, []);
+
+  const handleCreateApplication = async (e) => {
+    e.preventDefault();
+    if (!newApp.client_name || !newApp.phone) {
+      toast.error("Full name and Phone number are required");
+      return;
+    }
+    try {
+      const payload = {
+        ...newApp,
+        isChinaApp: true,
+        lead_status: 'File Opened',
+        application_stage: 'documents',
+      };
+      await api.createLead(payload);
+      toast.success(`Application for ${newApp.client_name} created successfully`);
+      setShowAddModal(false);
+      setNewApp({
+        client_name: '',
+        phone: '',
+        destination: 'China',
+        degree: 'Bachelor',
+        major: '',
+        university: '',
+        source: 'In-House',
+        referrer: '',
+        assigned_consultant: '',
+      });
+      load();
+    } catch (err) {
+      toast.error(err.message || 'Could not create application');
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,12 +200,13 @@ export default function Applications({ user }) {
   const destinations = useMemo(() => unique(rows.map(r => r.destination)), [rows]);
   const referrers    = useMemo(() => unique(rows.map(r => r.referrer)), [rows]);
 
-  // Stats by source (Agent vs In-house) — matches the Excel's "Remark" column
+  // Stats by source (B2B vs In-House) — matches the Excel's "Remark" column
   const sourceSplit = useMemo(() => {
-    const m = { 'In-house': 0, 'Agent': 0, 'Unknown': 0 };
+    const m = { 'In-House': 0, 'B2B': 0, 'Unknown': 0 };
     filtered.forEach(r => {
-      if (r.source === 'In-house') m['In-house']++;
-      else if (r.source === 'Agent') m['Agent']++;
+      const s = r.source || '';
+      if (s.toLowerCase() === 'in-house') m['In-House']++;
+      else if (s === 'B2B' || s === 'Agent') m['B2B']++;
       else m['Unknown']++;
     });
     return m;
@@ -150,8 +223,8 @@ export default function Applications({ user }) {
           </h2>
           <p className="text-sm text-slate-500">
             {filtered.length} active{rows.length !== filtered.length ? ` of ${rows.length}` : ''} ·
-            <strong className="text-emerald-600 ml-1">{sourceSplit['In-house']}</strong> in-house ·
-            <strong className="text-violet-600 ml-1">{sourceSplit['Agent']}</strong> agent
+            <strong className="text-emerald-600 ml-1">{sourceSplit['In-House']}</strong> in-house ·
+            <strong className="text-violet-600 ml-1">{sourceSplit['B2B']}</strong> B2B
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -169,6 +242,10 @@ export default function Applications({ user }) {
           <button onClick={load} disabled={loading}
             className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98]">
+            <Plus size={16} /> Add Application
           </button>
         </div>
       </div>
@@ -200,7 +277,7 @@ export default function Applications({ user }) {
               className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
                 ${filterSource !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
               <option value="all">All Sources</option>
-              {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+              {visibleSources.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             
             <select value={filterDest} onChange={e => setFilterDest(e.target.value)}
@@ -216,6 +293,14 @@ export default function Applications({ user }) {
               <option value="all">All Referrers</option>
               {referrers.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
+
+            {view === 'kanban' && (
+              <label className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white cursor-pointer select-none hover:bg-slate-50 transition-colors">
+                <input type="checkbox" checked={hideEmptyColumns} onChange={e => setHideEmptyColumns(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
+                <span className="text-slate-600 font-semibold">Hide empty columns</span>
+              </label>
+            )}
 
             {isFilterActive && (
               <button
@@ -267,7 +352,7 @@ export default function Applications({ user }) {
       ) : filtered.length === 0 ? (
         <EmptyState />
       ) : view === 'kanban' ? (
-        <KanbanView stages={stages} rows={filtered} onPick={setSelected} />
+        <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} />
       ) : (
         <TableView rows={filtered} onPick={setSelected} stages={stages} />
       )}
@@ -280,6 +365,142 @@ export default function Applications({ user }) {
           onClose={() => setSelected(null)}
           onChanged={load}
         />
+      )}
+
+      {showAddModal && (
+        <Modal title="Add Direct China Application" onClose={() => setShowAddModal(false)}>
+          <form onSubmit={handleCreateApplication} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={newApp.client_name}
+                  onChange={e => setNewApp({ ...newApp, client_name: e.target.value })}
+                  placeholder="e.g. Md Saiful Haque"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Phone Number <span className="text-red-500">*</span></label>
+                <input
+                  type="tel"
+                  required
+                  value={newApp.phone}
+                  onChange={e => setNewApp({ ...newApp, phone: e.target.value })}
+                  placeholder="e.g. +88017XXXXXXXX"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Destination</label>
+                <select
+                  value={newApp.destination}
+                  onChange={e => setNewApp({ ...newApp, destination: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
+                >
+                  {(settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia']).map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Degree</label>
+                <select
+                  value={newApp.degree}
+                  onChange={e => setNewApp({ ...newApp, degree: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
+                >
+                  {DEGREES.map(deg => (
+                    <option key={deg} value={deg}>{deg}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Major</label>
+                <input
+                  type="text"
+                  value={newApp.major}
+                  onChange={e => setNewApp({ ...newApp, major: e.target.value })}
+                  placeholder="e.g. Computer Science"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Primary University</label>
+                <input
+                  type="text"
+                  value={newApp.university}
+                  onChange={e => setNewApp({ ...newApp, university: e.target.value })}
+                  placeholder="e.g. Sichuan University"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Source (Remark)</label>
+                <select
+                  value={newApp.source}
+                  onChange={e => setNewApp({ ...newApp, source: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
+                >
+                  {visibleSources.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer</label>
+                <input
+                  type="text"
+                  value={newApp.referrer}
+                  onChange={e => setNewApp({ ...newApp, referrer: e.target.value })}
+                  placeholder="e.g. BheUni, Mahmud"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Assigned Consultant</label>
+              <select
+                value={newApp.assigned_consultant}
+                onChange={e => setNewApp({ ...newApp, assigned_consultant: e.target.value })}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
+              >
+                <option value="">— pick —</option>
+                {(settings?.consultants || []).map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5"
+              >
+                <Save size={13} /> Create Application
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
@@ -300,7 +521,7 @@ function EmptyState() {
 }
 
 /* ───────────────────────────── KANBAN ───────────────────────────── */
-function KanbanView({ stages, rows, onPick }) {
+function KanbanView({ stages, rows, onPick, hideEmptyColumns }) {
   const byStage = useMemo(() => {
     const map = Object.fromEntries(stages.map(s => [s.key, []]));
     const defaultStage = stages[0]?.key || 'documents';
@@ -311,10 +532,15 @@ function KanbanView({ stages, rows, onPick }) {
     return map;
   }, [rows, stages]);
 
+  const visibleStages = useMemo(() => {
+    if (!hideEmptyColumns) return stages;
+    return stages.filter(s => (byStage[s.key] || []).length > 0);
+  }, [stages, byStage, hideEmptyColumns]);
+
   return (
     <div className="overflow-x-auto pb-3">
       <div className="flex gap-4 min-w-max">
-        {stages.map((stage, index) => {
+        {visibleStages.map((stage, index) => {
           const items = byStage[stage.key] || [];
           const color = STAGE_COLORS[stage.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
           return (
@@ -348,7 +574,8 @@ function KanbanView({ stages, rows, onPick }) {
 function ApplicationCard({ card, onClick }) {
   const docPct = card.docs_total > 0 ? Math.round((card.docs_received / card.docs_total) * 100) : 0;
   const visaSoon = card.visa_deadline && (new Date(card.visa_deadline) - new Date() < 30 * 86400000);
-  const isAgent = card.source === 'Agent';
+  const isB2B = card.source === 'B2B' || card.source === 'Agent';
+  const isChina = card.source === 'China';
 
   return (
     <button onClick={onClick} className="w-full text-left bg-white rounded-xl p-3 shadow-sm hover:shadow-md border border-slate-100 hover:border-blue-200 transition-all">
@@ -359,7 +586,12 @@ function ApplicationCard({ card, onClick }) {
       <p className="text-[11px] text-slate-400 truncate">{card.lead_id}</p>
       <div className="flex items-center gap-1.5 flex-wrap mt-1">
         {card.source && (
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isAgent ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
+            ${isChina 
+              ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' 
+              : isB2B 
+              ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' 
+              : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
             {card.source}
           </span>
         )}
@@ -422,8 +654,12 @@ function TableView({ rows, onPick, stages }) {
               <tr key={r.id} onClick={() => onPick(r)} className="hover:bg-blue-50/40 cursor-pointer">
                 <Td>{i + 1}</Td>
                 <Td>{r.source && (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                    ${r.source === 'Agent' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
+                    ${r.source === 'China'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
+                      : (r.source === 'B2B' || r.source === 'Agent')
+                      ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
                     {r.source}
                   </span>
                 )}</Td>
@@ -567,7 +803,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
   const addUni = async () => {
     const name = prompt('University name? (e.g. NJTech)');
     if (!name?.trim()) return;
-    try { await api.addUniversityApp(leadId, { university: name.trim(), status: 'documents' });
+    try { await api.addUniversityApp(leadId, { university: name.trim(), status: 'ready' });
           load(); toast.success(`Added ${name.trim()}`); }
     catch (e) { toast.error(e.message); }
   };
@@ -652,7 +888,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
           <h4 className="font-semibold text-slate-700 text-sm">Student Details</h4>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Source (Remark)" type="select" value={form.source} onChange={v => updateField('source', v)}
-              options={['', ...SOURCES]} />
+              options={['', ...visibleSources]} />
             <Field label="Referrer (Referance)" value={form.referrer} onChange={v => updateField('referrer', v)}
               placeholder="e.g. BheUni, Mahmud, Office (M)" list="ref-list" />
             <datalist id="ref-list">{(referrers || []).map(r => <option key={r} value={r} />)}</datalist>

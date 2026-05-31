@@ -227,20 +227,40 @@ function getApplicationStages() {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
-  const list = getList('settings_fileStages', ['Documents Collecting','Documents Ready','Applied to University','Offer Letter Received','Visa Applied','Visa Approved','Visa Rejected','Enrolled','Cancelled']);
-  const standardKeys = ['documents', 'ready', 'submitted', 'admitted', 'visa_applied', 'visa_approved', 'departed', 'arrived'];
+  const list = getList('settings_fileStages', [
+    'Documents Collecting',
+    'Documents Ready',
+    'Applied to University',
+    'Interview',
+    'In-Review',
+    'Pre-Admission',
+    'Deposit',
+    'Admission Notice Received',
+    'JW202',
+    'Application Rejected',
+    'Visa Applied',
+    'Visa Approved',
+    'Payment Complete',
+    'Visa Rejected',
+    'Enrolled',
+    'Cancelled',
+    'Withdraw'
+  ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     if (key === 'documents_collecting') key = 'documents';
     if (key === 'documents_ready') key = 'ready';
     if (key === 'applied_to_university') key = 'submitted';
-    if (key === 'offer_letter_received') key = 'admitted';
+    if (key === 'admission_notice_received') key = 'admitted';
     return { key, label, order };
   });
 }
 
 // Per-university application status values.
-const UNI_APP_STATUSES = ['documents', 'ready', 'submitted', 'admitted', 'returned', 'rejected'];
+const UNI_APP_STATUSES = [
+  'ready', 'submitted', 'pending', 'processing', 'initial_review_pass',
+  'interview', 'pre_admission', 'admitted', 'returned', 'rejected'
+];
 
 // Default document checklists per destination. Used when an application opens.
 // Each entry has a `required` array of doc types. Easy to edit later.
@@ -267,10 +287,10 @@ function templateFor(destination) {
   return DOC_TEMPLATES[destination] || DEFAULT_DOCS;
 }
 
-// Consultant-scope helper used by every application endpoint.
-// Admins + Application Managers see everything; consultants only their own leads.
 function leadIsVisibleTo(lead, user) {
-  if (user?.role === 'admin' || user?.role === 'manager') return true;
+  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
+  if (lead.source === 'China' && !isAuthorized) return false;
+  if (isAuthorized) return true;
   const me = user?.consultant_name || user?.name || '';
   if (!me || !lead.assigned_consultant) return false;
   const leadC = lead.assigned_consultant.toLowerCase().trim();
@@ -287,9 +307,13 @@ app.get('/api/application/meta', (req, res) => {
 // All leads currently in the application pipeline (i.e. that have a stage set,
 // or are 'Enrolled'/'File Opened'). Returns one card-friendly row each.
 app.get('/api/applications', (req, res) => {
+  const isAuthorized = req.user?.role === 'admin' || req.user?.role === 'manager';
   const where = [
     "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
   ];
+  if (!isAuthorized) {
+    where.push("(l.source IS NULL OR l.source != 'China')");
+  }
   const params = {};
   if (req.user?.role === 'consultant') { // admins + managers see all
     const meName = req.user.consultant_name || req.user.name || '';
@@ -1023,6 +1047,28 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Payroll update failed:", e.message);
   }
+
+  // Dynamic self-healing migration to reset file stages default config if it's the old default list
+  try {
+    const oldStages = `["Documents Collecting","Documents Ready","Applied to University","Offer Letter Received","Visa Applied","Visa Approved","Visa Rejected","Enrolled","Cancelled"]`;
+    const current = db.prepare("SELECT value FROM meta_config WHERE key='settings_fileStages'").get()?.value;
+    if (!current || current === oldStages) {
+      db.prepare("DELETE FROM meta_config WHERE key='settings_fileStages'").run();
+      console.log("[migration] Reset settings_fileStages to dynamic China-centric default flow.");
+    }
+  } catch (e) {
+    console.error("[migration] settings_fileStages reset failed:", e.message);
+  }
+
+  // Self-healing migration to rename legacy source names in existing leads
+  try {
+    db.prepare("UPDATE leads SET source = 'China' WHERE source = 'China Agent'").run();
+    db.prepare("UPDATE leads SET source = 'B2B' WHERE source = 'Agent'").run();
+    db.prepare("UPDATE leads SET source = 'In-House' WHERE source = 'In-house'").run();
+    console.log("[migration] Migrated existing source names to China, B2B, and In-House.");
+  } catch (e) {
+    console.error("[migration] Remap source names failed:", e.message);
+  }
 }
 
 function seedData() {
@@ -1137,6 +1183,12 @@ function broadcastActivity(row) {
 function nextLeadId() {
   const row = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE 'L-%' ORDER BY CAST(SUBSTR(lead_id,3) AS INTEGER) DESC LIMIT 1").get();
   return 'L-' + String(parseInt((row?.lead_id || 'L-00000').replace('L-', '')) + 1).padStart(5, '0');
+}
+
+function nextChinaLeadId() {
+  const row = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE 'C-%' ORDER BY CAST(SUBSTR(lead_id,3) AS INTEGER) DESC LIMIT 1").get();
+  const nextNum = row ? parseInt(row.lead_id.replace('C-', '')) + 1 : 1;
+  return 'C-' + String(nextNum).padStart(5, '0');
 }
 
 function getConfig(key) {
@@ -1460,6 +1512,10 @@ app.get('/api/dashboard', (req, res) => {
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
+  const isAuthorized = req.user?.role === 'admin' || req.user?.role === 'manager';
+  if (!isAuthorized) {
+    where.push("(source IS NULL OR source != 'China')");
+  }
   if (search) { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
@@ -1483,12 +1539,8 @@ app.get('/api/leads', (req, res) => {
 app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
-  if (req.user?.role === 'consultant') {
-    const leadC = (lead.assigned_consultant || '').toLowerCase().trim();
-    const me = (req.user.consultant_name || req.user.name || '').toLowerCase().trim();
-    const meClean = me.split(' ')[0];
-    const visible = leadC === me || meClean === leadC || me.includes(leadC) || leadC.includes(meClean);
-    if (!visible) return res.status(403).json({ error: 'Not your lead' });
+  if (!leadIsVisibleTo(lead, req.user)) {
+    return res.status(403).json({ error: 'Access denied to this lead record' });
   }
   res.json(lead);
 });
@@ -1564,7 +1616,8 @@ WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
-  const lead_id = d.lead_id || nextLeadId();
+  const isChinaApp = d.isChinaApp || d.source === 'China';
+  const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, lead_id, balance);
   const info = db.prepare(LEAD_INSERT_SQL).run(params);
@@ -2264,9 +2317,9 @@ function logPayrollExpense(row) {
   const date = row.paid_on || new Date().toISOString().slice(0, 10);
   const expenseMonth = date.slice(0, 7);
 
-  // Check if expense already exists to prevent duplicate entries
-  const existing = db.prepare("SELECT * FROM expenses WHERE category='Salary' AND paid_to=? AND month=? AND reference=?")
-    .get(row.name, row.month, `Salary - ${row.month}`);
+  // Check if expense already exists to prevent duplicate entries by looking up the unique reference "Salary - YYYY-MM"
+  const existing = db.prepare("SELECT * FROM expenses WHERE category='Salary' AND paid_to=? AND reference=?")
+    .get(row.name, `Salary - ${row.month}`);
   
   if (existing) {
     db.prepare(`UPDATE expenses SET 
@@ -2367,8 +2420,8 @@ app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
   if (stat === 'paid') {
     logPayrollExpense(updated);
   } else {
-    db.prepare("DELETE FROM expenses WHERE category='Salary' AND paid_to=? AND month=? AND reference=?")
-      .run(updated.name, updated.month, `Salary - ${updated.month}`);
+    db.prepare("DELETE FROM expenses WHERE category='Salary' AND paid_to=? AND reference=?")
+      .run(updated.name, `Salary - ${updated.month}`);
   }
   res.json(updated);
 }));

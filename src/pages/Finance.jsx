@@ -846,6 +846,12 @@ function YearTab() {
 }
 
 /* ─────────────────────────── INVESTORS TAB ─────────────────────────── */
+const PROFIT_SHARES = {
+  'Abdullah Al Rakib': { pct: 45, short: 'Rakib', color: 'bg-blue-500', bar: 'bg-blue-500' },
+  'Tahmid Imam': { pct: 30, short: 'Tahmid', color: 'bg-violet-500', bar: 'bg-violet-500' },
+  'Sakib Al Jubaer': { pct: 25, short: 'Sakib', color: 'bg-amber-500', bar: 'bg-amber-500' }
+};
+
 function InvestorsTab() {
   const [data, setData] = useState(null);
   useEffect(() => { api.cashflowInvestors().then(setData).catch(() => setData({ total: 0, contributions: [], by_person: [] })); }, []);
@@ -855,9 +861,9 @@ function InvestorsTab() {
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-2xl p-5">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Total capital injected</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Total capital injected</p>
         <p className="text-3xl font-bold text-slate-800 mt-1">{cFmt(data.total)}</p>
-        <p className="text-xs text-slate-400">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
+        <p className="text-xs text-slate-400 mt-0.5">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
       </div>
 
       {data.by_person.length === 0 ? (
@@ -868,20 +874,66 @@ function InvestorsTab() {
         </div>
       ) : (
         <>
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <p className="font-semibold text-slate-700 text-sm mb-3">By person</p>
-            <div className="space-y-2.5">
-              {data.by_person.map(p => (
-                <div key={p.name}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-slate-700">{p.name}</span>
-                    <span className="font-bold text-slate-800 tabular-nums">{cFmt(p.amount)}</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-violet-400 rounded-full" style={{ width: `${(p.amount / max) * 100}%` }} />
-                  </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Contributions breakdown */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between">
+              <div>
+                <p className="font-semibold text-slate-700 text-sm mb-3">Capital Contributions</p>
+                <div className="space-y-3.5">
+                  {data.by_person.map(p => {
+                    const share = PROFIT_SHARES[p.name];
+                    const barColor = share ? share.bar : 'bg-slate-400';
+                    return (
+                      <div key={p.name}>
+                        <div className="flex justify-between items-center text-sm mb-1.5">
+                          <span className="font-medium text-slate-700 flex items-center gap-1.5">
+                            {p.name}
+                            {share && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200/40">
+                                {share.pct}% Share
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-bold text-slate-800 tabular-nums">{cFmt(p.amount)}</span>
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={`h-full ${barColor} rounded-full`} style={{ width: `${(p.amount / max) * 100}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              </div>
+            </div>
+
+            {/* Profit sharing policy split */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between">
+              <div>
+                <p className="font-semibold text-slate-700 text-sm mb-1">Partnership Profit Sharing</p>
+                <p className="text-[11px] text-slate-400 mb-4">Official profit distribution schedule splits net profits annually in **September**.</p>
+                
+                <div className="space-y-3">
+                  {Object.entries(PROFIT_SHARES).map(([name, val]) => (
+                    <div key={name} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-50 bg-slate-50/40">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-2.5 h-2.5 rounded-full ${val.color}`} />
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700">{name}</p>
+                          <p className="text-[10px] text-slate-400 font-medium">Partner</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-extrabold text-slate-800">{val.pct}%</span>
+                        <p className="text-[9px] text-slate-400 font-medium tracking-tight">Distribution</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-start gap-2 text-[10px] text-slate-400 leading-normal">
+                <span className="text-amber-500 font-bold">ℹ</span>
+                <span>Annual distributions are computed on net cash book balances at the end of the August financial ledger.</span>
+              </div>
             </div>
           </div>
 

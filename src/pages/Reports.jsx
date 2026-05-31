@@ -124,16 +124,29 @@ function ReportBody({ data, period }) {
       </div>
 
       {/* Trend chart */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
         <h3 className="font-semibold text-slate-700 text-sm mb-3">Daily trend — {data.period.label}</h3>
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data.trend} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="2 2" vertical={false} stroke="#e2e8f0"/>
-            <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(period === 'week' ? 8 : 5)} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} formatter={(v, k) => k === 'newLeads' ? v : fmt(v)} />
-            <Bar dataKey="newLeads" fill="#60a5fa" radius={[4,4,0,0]} name="New leads" />
-            <Bar dataKey="revenue"  fill="#34d399" radius={[4,4,0,0]} name="Revenue" />
+            <defs>
+              <linearGradient id="gradLeads" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.95}/>
+                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.3}/>
+              </linearGradient>
+              <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity={0.95}/>
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0.3}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} tickFormatter={d => d.slice(period === 'week' ? 8 : 5)} />
+            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
+            <Tooltip 
+              contentStyle={{ background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.05)', fontSize: 11 }} 
+              formatter={(v, k) => k === 'newLeads' ? [`${v} leads`, 'New leads'] : [`৳${Number(v).toLocaleString()}`, 'Revenue']} 
+            />
+            <Bar dataKey="newLeads" fill="url(#gradLeads)" radius={[4,4,0,0]} name="New leads" maxBarSize={30} />
+            <Bar dataKey="revenue"  fill="url(#gradRevenue)" radius={[4,4,0,0]} name="Revenue" maxBarSize={30} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -155,8 +168,8 @@ function ReportBody({ data, period }) {
           )}
         </Card>
 
-        <Card title="Cashflow">
-          <div className="grid grid-cols-3 gap-3 mb-3">
+        <Card title="Cashflow Overview">
+          <div className="grid grid-cols-5 gap-1.5 mb-3">
             <Mini label="Opening" value={fmt(data.cashflow.opening)} />
             <Mini label="In"      value={fmt(data.cashflow.in)}      color="emerald" />
             <Mini label="Out"     value={fmt(data.cashflow.out)}     color="rose" />
@@ -169,13 +182,39 @@ function ReportBody({ data, period }) {
             <KvList label="Top paying clients"   rows={data.cashflow.top_clients.map(r => ({ name: r.k, value: fmt(r.v) }))} />}
         </Card>
 
+        <Card title="Partnership September Distribution Targets">
+          <p className="text-[11px] text-slate-400 mb-3">Theoretical distribution of Closing Cash ({fmtFull(data.cashflow.closing)}) based on the official annual profit sharing splits:</p>
+          <div className="space-y-2">
+            {[
+              { name: 'Abdullah Al Rakib', pct: 45, val: data.cashflow.closing * 0.45, color: 'bg-blue-500' },
+              { name: 'Tahmid Imam', pct: 30, val: data.cashflow.closing * 0.30, color: 'bg-violet-500' },
+              { name: 'Sakib Al Jubaer', pct: 25, val: data.cashflow.closing * 0.25, color: 'bg-amber-500' }
+            ].map(p => (
+              <div key={p.name} className="flex justify-between items-center text-xs p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${p.color}`} />
+                  <div>
+                    <span className="font-semibold text-slate-700">{p.name}</span>
+                    <span className="text-[10px] text-slate-400 ml-1.5">{p.pct}% Share</span>
+                  </div>
+                </div>
+                <span className="font-bold text-slate-850 tabular-nums">{fmtFull(p.val)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="bg-amber-50/50 border border-amber-100/60 rounded-xl p-3 flex items-start gap-2 mt-3 text-[10px] text-slate-500 leading-normal">
+            <span className="text-amber-500 font-bold">ℹ</span>
+            <span>Annual profit distribution is executed in September every year, computed on net cash balances at the end of the August financial ledger.</span>
+          </div>
+        </Card>
+
         <Card title="Team performance">
           <div className="grid grid-cols-3 gap-3 mb-3">
             <Mini label="Attendance"  value={`${data.attendance.attendance_pct}%`} />
             <Mini label="Late entries" value={data.attendance.late_count} />
             <Mini label="Daily logs"   value={data.attendance.total_logs} />
           </div>
-          <p className="text-xs uppercase text-slate-400 font-medium mb-1.5">Top performers</p>
+          <p className="text-xs uppercase text-slate-400 font-semibold mb-1.5">Top performers</p>
           {data.top_performers.length === 0
             ? <p className="text-xs text-slate-400 italic">No activity recorded</p>
             : <div className="space-y-1.5">
@@ -211,31 +250,38 @@ function ReportBody({ data, period }) {
 
 function Headline({ icon, label, value, delta, color }) {
   const palette = {
-    blue:    'bg-blue-50 text-blue-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    violet:  'bg-violet-50 text-violet-600',
-    amber:   'bg-amber-50 text-amber-600',
-    rose:    'bg-rose-50 text-rose-600',
+    blue:    'bg-blue-50/80 text-blue-600 border border-blue-100/50',
+    emerald: 'bg-emerald-50/80 text-emerald-600 border border-emerald-100/50',
+    violet:  'bg-violet-50/80 text-violet-600 border border-violet-100/50',
+    amber:   'bg-amber-50/80 text-amber-600 border border-amber-100/50',
+    rose:    'bg-rose-50/80 text-rose-600 border border-rose-100/50',
   };
+
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4">
-      <div className={`p-2 rounded-lg w-fit ${palette[color]}`}>{icon}</div>
-      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mt-2">{label}</p>
-      <div className="flex items-baseline gap-2 mt-0.5">
-        <p className="text-xl font-bold text-slate-800">{value}</p>
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+      <div className="flex justify-between items-start">
+        <div className={`p-2 rounded-xl w-fit ${palette[color] || 'bg-slate-50 text-slate-600'}`}>{icon}</div>
         {delta != null && (
-          <span className={`text-[11px] font-semibold flex items-center ${delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {delta >= 0 ? <TrendingUp size={11}/> : <TrendingDown size={11}/>} {Math.abs(delta)}%
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5 tracking-tight
+            ${delta >= 0 
+              ? 'bg-emerald-50 text-emerald-750 border-emerald-200/55' 
+              : 'bg-rose-50 text-rose-750 border-rose-200/55'}`}>
+            {delta >= 0 ? <TrendingUp size={10}/> : <TrendingDown size={10}/>} {Math.abs(delta)}%
           </span>
         )}
+      </div>
+      <div className="mt-4">
+        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{label}</p>
+        <p className="text-xl font-extrabold text-slate-800 tracking-tight mt-1">{value}</p>
       </div>
     </div>
   );
 }
+
 function Card({ title, children }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
-      <h3 className="font-semibold text-slate-700 text-sm mb-3">{title}</h3>
+    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+      <h3 className="font-bold text-slate-700 text-sm mb-3.5">{title}</h3>
       <div className="space-y-2">{children}</div>
     </div>
   );
@@ -300,55 +346,314 @@ function buildSummaryText(d) {
 function buildPrintableHTML(d) {
   const h = d.headline;
   const css = `
-    *{box-sizing:border-box}
-    body{font-family:-apple-system,Arial,sans-serif;color:#0f172a;background:#fff;margin:0;padding:32px 40px;max-width:880px;margin:0 auto}
-    header{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1e3a8a;padding-bottom:14px;margin-bottom:18px}
-    .logo{display:flex;align-items:center;gap:10px}
-    .logo-mark{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#1e40af);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px}
-    .brand{font-weight:800;font-size:16px;letter-spacing:.2px}
-    .brand-sub{font-size:11px;color:#64748b}
-    .period{text-align:right}
-    .period h1{margin:0;font-size:18px;color:#1e40af}
-    .period p{margin:2px 0 0;font-size:11px;color:#64748b}
-    h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#1e3a8a;margin:22px 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px}
-    .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:8px}
-    .kpi{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
-    .kpi .lbl{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.6px}
-    .kpi .val{font-size:18px;font-weight:800;color:#0f172a;margin-top:2px}
-    .kpi .delta{font-size:10px;font-weight:700;margin-top:1px}
-    .delta.pos{color:#059669}.delta.neg{color:#e11d48}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-    .panel{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px}
-    .panel h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#475569}
-    .row{display:flex;justify-content:space-between;font-size:12px;padding:2px 0}
-    .row .v{font-weight:600;color:#1e293b}
-    .pill{display:inline-block;background:#eff6ff;color:#1e40af;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-right:4px}
-    ul{margin:4px 0 0 18px;padding:0;font-size:12px}
-    footer{margin-top:30px;font-size:10px;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;padding-top:8px}
-    @media print { body{padding:24px} }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #0f172a;
+      background: #f8fafc;
+      margin: 0;
+      padding: 40px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 40px;
+      border-radius: 16px;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+      border: 1px solid #e2e8f0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      box-shadow: 0 4px 6px -1px rgb(37 99 235 / 0.2);
+    }
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+    }
+    .brand {
+      font-weight: 800;
+      font-size: 18px;
+      color: #0f172a;
+      letter-spacing: -0.02em;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 500;
+    }
+    .report-meta {
+      text-align: right;
+    }
+    .report-meta h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+      color: #1e3a8a;
+      letter-spacing: -0.025em;
+    }
+    .report-meta p {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 600;
+    }
+    h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #1e3a8a;
+      margin: 28px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #e2e8f0;
+      font-weight: 800;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .kpi-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #ffffff;
+    }
+    .kpi-card .lbl {
+      font-size: 9px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+    .kpi-card .val {
+      font-size: 16px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-top: 4px;
+      letter-spacing: -0.025em;
+    }
+    .kpi-card .delta {
+      font-size: 9px;
+      font-weight: 700;
+      margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .delta.pos { color: #059669; }
+    .delta.neg { color: #e11d48; }
+    
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .panel {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      background: #ffffff;
+    }
+    .panel h3 {
+      margin: 0 0 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #475569;
+      border-bottom: 1px dashed #e2e8f0;
+      padding-bottom: 6px;
+      font-weight: 700;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11.5px;
+      padding: 5px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .row:last-child {
+      border-bottom: none;
+    }
+    .row span {
+      color: #475569;
+      font-weight: 500;
+    }
+    .row .v {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    
+    .partner-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #f1f5f9;
+      background: #f8fafc;
+      margin-bottom: 6px;
+      font-size: 11.5px;
+    }
+    .partner-card:last-child {
+      margin-bottom: 0;
+    }
+    .partner-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .partner-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .dot-rakib { background-color: #2563eb; }
+    .dot-tahmid { background-color: #7c3aed; }
+    .dot-sakib { background-color: #d97706; }
+    
+    .partner-name {
+      font-weight: 600;
+      color: #334155;
+    }
+    .partner-share {
+      font-size: 9px;
+      color: #64748b;
+      margin-left: 6px;
+      font-weight: 600;
+      background: #e2e8f0;
+      padding: 1px 5px;
+      border-radius: 9999px;
+    }
+    .partner-val {
+      font-weight: 850;
+      color: #0f172a;
+    }
+    .info-box {
+      background-color: #fffbeb;
+      border: 1px solid #fef3c7;
+      color: #b45309;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      font-size: 9.5px;
+      line-height: 1.4;
+      display: flex;
+      gap: 6px;
+    }
+    .info-icon { font-weight: 800; flex-shrink: 0; }
+    
+    ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+      font-size: 11.5px;
+      color: #334155;
+    }
+    li {
+      margin-bottom: 4px;
+    }
+    footer {
+      margin-top: 40px;
+      font-size: 10px;
+      color: #64748b;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 12px;
+      font-weight: 500;
+    }
+    
+    @media print {
+      body {
+        background: #ffffff;
+        padding: 0;
+      }
+      .container {
+        border: none;
+        box-shadow: none;
+        padding: 0;
+        max-width: 100%;
+      }
+      .panel {
+        page-break-inside: avoid;
+      }
+      .kpi-card {
+        page-break-inside: avoid;
+      }
+    }
   `;
+
   const deltaCls = (v) => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
   const arrow = (v) => v > 0 ? '↑' : v < 0 ? '↓' : '→';
-  const fmt = (n) => `৳${Number(n||0).toLocaleString()}`;
-  const kpi = (lbl, val, dlt) => `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div>${dlt != null ? `<div class="delta ${deltaCls(dlt)}">${arrow(dlt)} ${Math.abs(dlt)}% vs prev</div>` : ''}</div>`;
-  const rowList = (rows, formatVal) => (rows && rows.length) ? rows.map(r => `<div class="row"><span>${r.name||r.k}</span><span class="v">${formatVal ? formatVal(r.value ?? r.v ?? r.n) : (r.value ?? r.v ?? r.n)}</span></div>`).join('') : '<div class="row"><em style="color:#94a3b8">No data</em></div>';
+  const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
+  const fmtFull = (n) => `৳${Math.round(Number(n || 0)).toLocaleString()}`;
+  
+  const kpi = (lbl, val, dlt) => `
+    <div class="kpi-card">
+      <div class="lbl">${lbl}</div>
+      <div class="val">${val}</div>
+      ${dlt != null ? `<div class="delta ${deltaCls(dlt)}">${arrow(dlt)} ${Math.abs(dlt)}% vs prev</div>` : ''}
+    </div>
+  `;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>EduExpress Report — ${d.period.label}</title><style>${css}</style></head><body>
+  const rowList = (rows, formatVal) => (rows && rows.length) 
+    ? rows.map(r => `
+        <div class="row">
+          <span>${r.name || r.k}</span>
+          <span class="v">${formatVal ? formatVal(r.value ?? r.v ?? r.n) : (r.value ?? r.v ?? r.n)}</span>
+        </div>
+      `).join('') 
+    : '<div class="row"><em style="color:#94a3b8">No data available</em></div>';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>EduExpress Executive Digest — ${d.period.label}</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div class="container">
     <header>
-      <div class="logo">
+      <div class="logo-container">
         <div class="logo-mark">E</div>
-        <div>
+        <div class="logo-text">
           <div class="brand">EduExpress International</div>
-          <div class="brand-sub">Student Consultancy · Dhanmondi, Dhaka</div>
+          <div class="brand-sub">Student Consultancy & Recruitment · Dhaka, Bangladesh</div>
         </div>
       </div>
-      <div class="period">
-        <h1>${d.period.type === 'week' ? 'Weekly' : 'Monthly'} Report</h1>
-        <p>${d.period.label} &nbsp;|&nbsp; vs ${d.period.previousLabel}</p>
+      <div class="report-meta">
+        <h1>${d.period.type === 'week' ? 'Weekly' : 'Monthly'} Performance Digest</h1>
+        <p>${d.period.label} &nbsp;|&nbsp; Comparative Analytics</p>
       </div>
     </header>
 
-    <div class="kpis">
+    <div class="kpi-grid">
       ${kpi('New leads', h.new_leads.current, h.new_leads.delta)}
       ${kpi('Enrolments', h.enrolments.current, h.enrolments.delta)}
       ${kpi('Revenue', fmt(h.revenue.current), h.revenue.delta)}
@@ -356,47 +661,118 @@ function buildPrintableHTML(d) {
       ${kpi('Attendance', h.attendance.current + '%')}
     </div>
 
-    <h2>Leads</h2>
-    <div class="grid2">
-      <div class="panel"><h3>By source</h3>${rowList(d.leads.by_source)}</div>
-      <div class="panel"><h3>By destination</h3>${rowList(d.leads.by_destination)}</div>
-    </div>
-    <p style="font-size:12px;margin-top:8px;color:#475569">Conversion rate <strong>${d.leads.conversion_rate}%</strong> — ${d.leads.enrolled} enrolled out of ${d.leads.new}.</p>
-
-    <h2>Cashflow</h2>
-    <div class="kpis" style="grid-template-columns:repeat(5,1fr)">
-      ${kpi('Opening', fmt(d.cashflow.opening))}
-      ${kpi('Money in', fmt(d.cashflow.in))}
-      ${kpi('Money out', fmt(d.cashflow.out))}
-      ${kpi('Net', fmt(d.cashflow.net))}
-      ${kpi('Closing', fmt(d.cashflow.closing))}
-    </div>
-    <div class="grid2">
-      <div class="panel"><h3>Top income categories</h3>${rowList(d.cashflow.income_by_category.slice(0,6), fmt)}</div>
-      <div class="panel"><h3>Top spend categories</h3>${rowList(d.cashflow.expense_by_category.slice(0,6), fmt)}</div>
-    </div>
-    ${d.cashflow.top_clients.length ? `<div class="panel" style="margin-top:10px"><h3>Top paying clients</h3>${rowList(d.cashflow.top_clients, fmt)}</div>` : ''}
-
-    <h2>Team</h2>
-    <div class="grid2">
+    <h2>Leads & Conversions Analysis</h2>
+    <div class="grid-2col">
       <div class="panel">
-        <h3>Attendance & logs</h3>
-        <div class="row"><span>Attendance</span><span class="v">${d.attendance.attendance_pct}%</span></div>
-        <div class="row"><span>Late entries</span><span class="v">${d.attendance.late_count}</span></div>
-        <div class="row"><span>Daily logs submitted</span><span class="v">${d.attendance.total_logs}</span></div>
-        <div class="row"><span>Active employees</span><span class="v">${d.attendance.active_employees}</span></div>
+        <h3>By Source (Market Segment)</h3>
+        ${rowList(d.leads.by_source)}
       </div>
       <div class="panel">
-        <h3>Top performers (by activity score)</h3>
-        ${d.top_performers.length === 0 ? '<div class="row"><em style="color:#94a3b8">No activity recorded</em></div>'
-          : d.top_performers.map((p, i) => `<div class="row"><span>${i+1}. ${p.name}</span><span class="v">${p.points} pts · ${p.events} actions</span></div>`).join('')}
+        <h3>By Destination (University Target)</h3>
+        ${rowList(d.leads.by_destination)}
+      </div>
+    </div>
+    <p style="font-size:11px; margin-top:-6px; margin-bottom: 20px; color:#475569; text-align: right; font-weight: 500;">
+      Corporate Conversion Rate: <strong style="color: #0f172a;">${d.leads.conversion_rate}%</strong> · Enrolled: <strong>${d.leads.enrolled}</strong> out of ${d.leads.new} new acquisitions
+    </p>
+
+    <h2>Financial Position & Cashflow</h2>
+    <div class="kpi-grid">
+      ${kpi('Opening Bal', fmt(d.cashflow.opening))}
+      ${kpi('Money In', fmt(d.cashflow.in))}
+      ${kpi('Money Out', fmt(d.cashflow.out))}
+      ${kpi('Net Flow', fmt(d.cashflow.net))}
+      ${kpi('Closing Cash', fmt(d.cashflow.closing))}
+    </div>
+
+    <div class="grid-2col">
+      <div class="panel">
+        <h3>Top Revenue Streams</h3>
+        ${rowList(d.cashflow.income_by_category.slice(0, 5), fmt)}
+      </div>
+      <div class="panel">
+        <h3>Top Operating Expenses</h3>
+        ${rowList(d.cashflow.expense_by_category.slice(0, 5), fmt)}
       </div>
     </div>
 
-    ${d.highlights.length ? `<h2>Highlights</h2><div class="panel"><ul>${d.highlights.map(h => `<li>${h.icon} ${h.text}</li>`).join('')}</ul></div>` : ''}
+    <h2>Partnership Profit Projections & Distributions</h2>
+    <div class="grid-2col">
+      <div class="panel">
+        <h3>Partnership September Distribution Targets</h3>
+        <div class="partner-card">
+          <div class="partner-info">
+            <div class="partner-dot dot-rakib"></div>
+            <span class="partner-name">Abdullah Al Rakib</span>
+            <span class="partner-share">45% Split</span>
+          </div>
+          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.45)}</span>
+        </div>
+        <div class="partner-card">
+          <div class="partner-info">
+            <div class="partner-dot dot-tahmid"></div>
+            <span class="partner-name">Tahmid Imam</span>
+            <span class="partner-share">30% Split</span>
+          </div>
+          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.30)}</span>
+        </div>
+        <div class="partner-card">
+          <div class="partner-info">
+            <div class="partner-dot dot-sakib"></div>
+            <span class="partner-name">Sakib Al Jubaer</span>
+            <span class="partner-share">25% Split</span>
+          </div>
+          <span class="partner-val">${fmtFull(d.cashflow.closing * 0.25)}</span>
+        </div>
+        <div class="info-box">
+          <span class="info-icon">ℹ</span>
+          <span>Projections are computed dynamically on the current Closing Cash balance of ${fmtFull(d.cashflow.closing)}. Annual profit distributions are officially processed in September.</span>
+        </div>
+      </div>
+      
+      <div class="panel">
+        <h3>Top Direct Revenue Accounts</h3>
+        ${d.cashflow.top_clients.length 
+          ? rowList(d.cashflow.top_clients.slice(0, 5), fmt)
+          : '<div class="row"><em style="color:#94a3b8">No single-client records found</em></div>'}
+      </div>
+    </div>
+
+    <h2>Operations, Teams & Recruitment Advances</h2>
+    <div class="grid-2col">
+      <div class="panel">
+        <h3>Staff Attendance & Logs Activity</h3>
+        <div class="row"><span>Monthly Attendance Average</span><span class="v">${d.attendance.attendance_pct}%</span></div>
+        <div class="row"><span>Late Check-in Occurrences</span><span class="v">${d.attendance.late_count}</span></div>
+        <div class="row"><span>Daily Worklogs Submitted</span><span class="v">${d.attendance.total_logs}</span></div>
+        <div class="row"><span>Active Personnel in Period</span><span class="v">${d.attendance.active_employees}</span></div>
+      </div>
+      <div class="panel">
+        <h3>Top Performance Standings (by Work Score)</h3>
+        ${d.top_performers.length === 0 
+          ? '<div class="row"><em style="color:#94a3b8">No employee activity recorded in this period</em></div>'
+          : d.top_performers.map((p, i) => `
+              <div class="row">
+                <span>${i + 1}. ${p.name}</span>
+                <span class="v">${p.points} points · ${p.events} events completed</span>
+              </div>
+            `).join('')}
+      </div>
+    </div>
+
+    ${d.highlights.length ? `
+      <h2>Executive Summary Highlights</h2>
+      <div class="panel">
+        <ul style="margin: 0; padding-left: 20px;">
+          ${d.highlights.map(h => `<li style="margin-bottom: 6px;"><strong>${h.icon}</strong> &nbsp;${h.text}</li>`).join('')}
+        </ul>
+      </div>
+    ` : ''}
 
     <footer>
-      Generated ${new Date().toLocaleString('en-GB')} · EduExpress International Core
+      Generated electronically on ${new Date().toLocaleString('en-GB')} · Dhanmondi Office Ledger · Confidential Board Report
     </footer>
-  </body></html>`;
+  </div>
+</body>
+</html>`;
 }
