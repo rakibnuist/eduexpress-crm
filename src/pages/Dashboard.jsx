@@ -20,6 +20,8 @@ const PIPE_COLORS = {
 };
 
 export default function Dashboard({ user }) {
+  useEffect(() => { document.title = "Dashboard | EduExpress CRM"; }, []);
+
   const [data, setData] = useState(null);
   const [extraStats, setExtraStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);

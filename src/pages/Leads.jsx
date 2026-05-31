@@ -24,6 +24,8 @@ const STAGES = [
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 export default function Leads({ user }) {
+  useEffect(() => { document.title = "Leads & Pipeline | EduExpress CRM"; }, []);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ leads: [], total: 0, pages: 1 });
   const [settings, setSettings] = useState(null);

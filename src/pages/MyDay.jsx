@@ -18,6 +18,8 @@ const greeting = () => {
 };
 
 export default function MyDay({ user }) {
+  useEffect(() => { document.title = "Daily Workspace & Reflections | EduExpress CRM"; }, []);
+
   const [todayInfo, setTodayInfo] = useState(null);   // { linked, today, log, emp_name, emp_id }
   const [history, setHistory]     = useState([]);     // recent daily logs
   const [autoSummary, setAuto]    = useState({ total: 0, leads: 0, positive: 0, negative: 0, visited: 0, opened: 0, notes: 0, payments: 0 }); // best-effort auto activity summary

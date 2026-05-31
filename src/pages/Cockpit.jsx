@@ -32,6 +32,8 @@ const timeAgo = (iso) => {
 };
 
 export default function Cockpit() {
+  useEffect(() => { document.title = "Executive Cockpit | EduExpress CRM"; }, []);
+
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState(null);

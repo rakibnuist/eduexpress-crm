@@ -17,6 +17,8 @@ const curMonth = new Date().toISOString().slice(0, 7);
 const today = new Date().toISOString().slice(0, 10);
 
 export default function HR() {
+  useEffect(() => { document.title = "HR & Attendance Panel | EduExpress CRM"; }, []);
+
   const [tab, setTab] = useState('performance');
   const [employees, setEmployees] = useState([]);
   const [summary, setSummary] = useState([]);

@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
+
 export default function LegalNotice() {
+  useEffect(() => { document.title = "Privacy Policy & Legal Notice | EduExpress CRM"; }, []);
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}

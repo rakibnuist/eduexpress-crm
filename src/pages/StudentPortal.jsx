@@ -67,6 +67,14 @@ export default function StudentPortal() {
     return () => clearInterval(t);
   }, [token]);
 
+  useEffect(() => {
+    if (data?.student?.client_name) {
+      document.title = `${data.student.client_name} - Student Portal | EduExpress`;
+    } else {
+      document.title = "Student Portal | EduExpress CRM";
+    }
+  }, [data]);
+
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">

@@ -27,6 +27,8 @@ const shiftDate = (iso, days) => {
 };
 
 export default function Reports() {
+  useEffect(() => { document.title = "Analytics & Reports | EduExpress CRM"; }, []);
+
   const [period, setPeriod] = useState('week');
   const [date, setDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [data, setData]     = useState(null);

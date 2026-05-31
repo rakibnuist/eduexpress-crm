@@ -6,6 +6,8 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
 export default function Settings() {
+  useEffect(() => { document.title = "System Control Center & Settings | EduExpress CRM"; }, []);
+
   const [settings, setSettings] = useState(null);
 
   useEffect(() => { api.settings().then(setSettings); }, []);

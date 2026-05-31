@@ -71,6 +71,8 @@ const SOURCES = ['In-house', 'Agent'];
 const DEGREES = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'L+Bachelor', 'L+Diploma'];
 
 export default function Applications({ user }) {
+  useEffect(() => { document.title = "Application Hub | EduExpress CRM"; }, []);
+
   const [stages, setStages]   = useState([]);
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);

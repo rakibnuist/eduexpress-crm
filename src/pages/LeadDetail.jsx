@@ -49,6 +49,15 @@ export default function LeadDetail({ user }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [lead, setLead]         = useState(null);
+
+  useEffect(() => {
+    if (lead) {
+      document.title = `${lead.client_name} - Profile | EduExpress CRM`;
+    } else {
+      document.title = "Client Profile | EduExpress CRM";
+    }
+  }, [lead]);
+
   const [timeline, setTimeline] = useState([]);
   const [docs, setDocs]         = useState([]);
   const [unis, setUnis]         = useState([]);
