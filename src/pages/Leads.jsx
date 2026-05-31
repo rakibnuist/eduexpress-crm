@@ -311,7 +311,15 @@ export default function Leads({ user }) {
                         </Link>
                         {l.notes && <div className="text-xs text-slate-400 truncate max-w-[150px] font-medium" title={l.notes}>{l.notes}</div>}
                       </td>
-                      <td className="py-3 px-3.5 text-slate-500 whitespace-nowrap text-xs font-medium">{l.phone || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 whitespace-nowrap text-xs font-medium">
+                        {l.phone ? (
+                          <a href={`https://wa.me/${l.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                            className="inline-flex items-center gap-1 text-slate-600 hover:text-emerald-600 hover:underline transition-colors" title="Chat on WhatsApp">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
+                            {l.phone}
+                          </a>
+                        ) : '—'}
+                      </td>
                       <td className="py-3 px-3.5 text-slate-600 font-semibold">{l.destination || '—'}</td>
                       <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.last_education || '—'}</td>
                       <td className="py-3 px-3.5 text-slate-500 font-medium">{l.gpa ?? '—'}</td>
@@ -476,7 +484,12 @@ export default function Leads({ user }) {
                       <div className="mt-2 space-y-1">
                         {l.phone && (
                           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-                            <Phone size={11} className="text-slate-400 flex-shrink-0"/> {l.phone}
+                            <Phone size={11} className="text-slate-400 flex-shrink-0"/>
+                            <a href={`https://wa.me/${l.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                              className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1" title="Chat on WhatsApp">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
+                              {l.phone}
+                            </a>
                           </div>
                         )}
                         {l.destination && (

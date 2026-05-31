@@ -191,7 +191,15 @@ export default function LeadDetail({ user }) {
         {/* Left: snapshot panels */}
         <div className="lg:col-span-1 space-y-4">
           <Card title="Contact" icon={<User size={14}/>}>
-            <Row icon={<Phone size={12}/>}>{lead.phone || '—'}</Row>
+            <Row icon={<Phone size={12}/>}>
+              {lead.phone ? (
+                <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                  className="text-slate-700 hover:text-emerald-600 hover:underline inline-flex items-center gap-1.5 transition-colors font-medium" title="Chat on WhatsApp">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                  {lead.phone}
+                </a>
+              ) : '—'}
+            </Row>
             <Row icon={<Mail size={12}/>}>{lead.email || '—'}</Row>
             <Row icon={<Globe size={12}/>}>{lead.nationality || '—'}</Row>
             <Row icon={<Hash size={12}/>} mono>{lead.passport || '—'}</Row>
