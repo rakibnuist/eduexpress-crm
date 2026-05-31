@@ -88,13 +88,15 @@ export default function HR() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">HR Management</h2>
-          <p className="text-sm text-slate-500">Employees · Attendance · Performance</p>
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <Users size={24} className="text-blue-600" /> Human Resources & Team Payroll
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">Manage team directories, log employee attendance sheets, calculate monthly sales commissions, and process payroll</p>
         </div>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          className="px-3.5 py-2 border border-slate-200 rounded-xl text-sm font-semibold cursor-pointer bg-white" />
       </div>
 
       {/* Quick stats */}

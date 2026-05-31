@@ -143,10 +143,12 @@ export default function Dashboard() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Live Dashboard</h2>
-          <p className="text-sm text-slate-500 mt-0.5">EduExpress International CRM · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <TrendingUp size={24} className="text-blue-600" /> Operational Overview & Dashboard
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">Real-time performance indicators, key metrics, and activity recap · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
         <div className="flex items-center gap-3">
           <Link to="/reports" className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-blue-50">

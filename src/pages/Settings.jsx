@@ -14,9 +14,12 @@ export default function Settings() {
 
   return (
     <div className="space-y-5 max-w-3xl">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500">Users, access, and reference lists</p>
+      {/* Header */}
+      <div className="border-b border-slate-200/80 pb-4 mb-2">
+        <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+          <Shield size={24} className="text-blue-600" /> System Control Center & Settings
+        </h2>
+        <p className="text-sm text-slate-500 mt-1">Configure database reference lists, geofence check-in ranges, broadcast staff memos, and edit user access permissions</p>
       </div>
 
       {/* User Management */}

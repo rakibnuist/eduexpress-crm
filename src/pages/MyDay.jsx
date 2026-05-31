@@ -101,13 +101,20 @@ export default function MyDay({ user }) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <p className="text-sm text-slate-500">{greeting()}, {todayInfo.emp_name?.split(' ')[0]}</p>
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Sun size={22} className="text-amber-500"/> My Day</h2>
-        <p className="text-xs text-slate-400 mt-1">
-          <Calendar size={11} className="inline mr-1" />
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
+        <div>
+          <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">{greeting()}, {todayInfo.emp_name?.split(' ')[0]}</p>
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 mt-1">
+            <Sun size={24} className="text-amber-500" /> Daily Workspace & Reflections
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Log accomplishments, track auto-summarized activity, flag blockers, and organize tomorrow's goals
+          </p>
+        </div>
+        <div className="text-right text-xs text-slate-400 font-semibold bg-white border border-slate-200 rounded-xl px-3.5 py-2 shadow-sm">
+          <Calendar size={12} className="inline mr-1.5 text-slate-500" />
           {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

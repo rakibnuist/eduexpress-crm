@@ -58,13 +58,13 @@ export default function Reports() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
+      <div className="flex items-start justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <FileBarChart size={22} className="text-blue-600" /> Report
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <FileBarChart size={24} className="text-blue-600" /> Executive Digest & Performance Reports
           </h2>
-          <p className="text-sm text-slate-500">
-            {data ? `${data.period.label} (vs ${data.period.previousLabel})` : '…'}
+          <p className="text-sm text-slate-500 mt-1">
+            {data ? `${data.period.label} (vs ${data.period.previousLabel})` : 'Generating custom intelligence report...'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

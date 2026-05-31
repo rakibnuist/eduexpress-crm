@@ -69,14 +69,14 @@ export default function Cockpit() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <Eye size={22} className="text-blue-600" /> Owner's Cockpit
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <Eye size={24} className="text-blue-600" /> Executive Cockpit & Operations Monitoring
           </h2>
-          <p className="text-sm text-slate-500">
-            Live view · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
-            {' · '}<span className="text-emerald-600">Office time {new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })} Dhaka</span>
+          <p className="text-sm text-slate-500 mt-1">
+            Live metrics stream · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {' · '}<span className="text-emerald-600 font-semibold">Office time: {new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })} Dhaka</span>
           </p>
         </div>
         <button onClick={load} disabled={refreshing}

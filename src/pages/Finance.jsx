@@ -54,13 +54,16 @@ export default function Finance() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Finance</h2>
-          <p className="text-sm text-slate-500">Income, expenses & profit overview</p>
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+            <DollarSign size={24} className="text-blue-600" /> Financial Operations Ledger
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">Income ledger, operational spendings, custom cashflow statements, and investor sheets</p>
         </div>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          className="px-3.5 py-2 border border-slate-200 rounded-xl text-sm font-semibold cursor-pointer bg-white" />
       </div>
 
       {/* KPI row */}
