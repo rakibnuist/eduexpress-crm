@@ -95,10 +95,18 @@ app.use((req, res, next) => {
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
   const { email, password, lat, lng, ssid, device_id } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-  const user = db.prepare("SELECT * FROM users WHERE email=? AND active=1").get(String(email).toLowerCase().trim());
+  if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
+  
+  const queryVal = String(email).trim().toLowerCase();
+  // Find user matching email, name, consultant_name, or emp_id (case-insensitive lookup)
+  const user = db.prepare(`
+    SELECT * FROM users 
+    WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(consultant_name) = ? OR LOWER(emp_id) = ?) 
+      AND active = 1
+  `).get(queryVal, queryVal, queryVal, queryVal);
+
   if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Invalid email or password' });
+    return res.status(401).json({ error: 'Invalid username/email or password' });
   }
   db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
   const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });

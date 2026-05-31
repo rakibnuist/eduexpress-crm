@@ -66,10 +66,10 @@ export default function Login({ onSuccess }) {
 
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Email</label>
-              <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="you@eduexpressint.com" autoFocus autoComplete="username"
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Name, Email or Employee ID</label>
+              <input type="text" required value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="e.g. Rakib, E-02 or email" autoFocus autoComplete="username"
+                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50/50 focus:bg-white transition-all font-medium" />
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Password</label>
