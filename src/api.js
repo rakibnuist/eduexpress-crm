@@ -161,4 +161,15 @@ export const api = {
   createUser: (d)      => req('/users',       { method: 'POST', body: JSON.stringify(d) }),
   updateUser: (id, d)  => req(`/users/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteUser: (id)     => req(`/users/${id}`, { method: 'DELETE' }),
+
+  // Meta Config & Channels (automated lead capture configurations)
+  getMetaConfig:  ()  => req('/meta/config'),
+  saveMetaConfig: (d) => req('/meta/config', { method: 'POST', body: JSON.stringify(d) }),
+  getMetaStats:   ()  => req('/meta/stats'),
+
+  channels:       ()     => req('/channels'),
+  createChannel:  (d)    => req('/channels',       { method: 'POST', body: JSON.stringify(d) }),
+  updateChannel:  (id, d)=> req(`/channels/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
+  deleteChannel:  (id)   => req(`/channels/${id}`, { method: 'DELETE' }),
+  syncChannel:    (id)   => req(`/channels/${id}/sync`, { method: 'POST' }),
 };

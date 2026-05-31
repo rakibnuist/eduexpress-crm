@@ -1297,6 +1297,50 @@ function upsertConversation(contactId, channelId, channelType) {
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 
+function createLeadFromContact(contactId, source, initialMessage) {
+  try {
+    const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
+    if (!contact || contact.lead_id) return null;
+
+    const lead_id = nextLeadId();
+    const client_name = contact.name || (source === 'whatsapp' ? 'WhatsApp Inquiry' : source === 'messenger' ? 'Messenger Inquiry' : 'Instagram Inquiry');
+    const phone = contact.phone || null;
+    const email = contact.email || null;
+
+    const params = leadParams({
+      client_name,
+      phone,
+      email,
+      lead_source: source === 'whatsapp' ? 'WhatsApp' : source === 'messenger' ? 'Messenger' : 'Instagram',
+      lead_status: 'New Lead',
+      notes: initialMessage ? `Initial Inquiry: "${initialMessage}"` : `Auto-created from ${source} chat integration.`
+    }, lead_id, 0);
+
+    const info = db.prepare(LEAD_INSERT_SQL).run(params);
+    const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
+
+    if (lead) {
+      db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, contact.id);
+      db.prepare("UPDATE conversations SET lead_id=? WHERE contact_id=?").run(lead.id, contact.id);
+      
+      logActivity({
+        type: 'lead_created',
+        actor: { name: 'Meta Automation' },
+        lead,
+        details: { source: lead.lead_source, note: 'Automatically created from chat integration' }
+      });
+
+      broadcast('new_lead', { lead });
+      console.log(`✅ Auto-created Lead from ${source}: ${lead_id} — ${client_name}`);
+      return lead;
+    }
+  } catch(e) {
+    console.error('Error auto-creating lead from contact:', e.message);
+  }
+  return null;
+}
+
+
 function saveInboundMessage(convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
   try {
     const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,media_url,caption,status)
@@ -3099,6 +3143,7 @@ app.post('/webhook/meta', async (req, res) => {
           else { content = `[${msg.type}]`; }
 
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
+          createLeadFromContact(contact.id, 'whatsapp', content);
           console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
       }
@@ -3168,6 +3213,7 @@ app.post('/webhook/meta', async (req, res) => {
         }
         if (!text) text = '[message]';
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
+        createLeadFromContact(contact.id, 'messenger', text);
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
     }
@@ -3194,6 +3240,7 @@ app.post('/webhook/meta', async (req, res) => {
         const conv = upsertConversation(contact.id, channel.id, 'instagram');
         const text = msg.message.text || '[message]';
         saveInboundMessage(conv.id, text, 'text', msg.message.mid);
+        createLeadFromContact(contact.id, 'instagram', text);
         console.log(`📸 Instagram [${channel.name}]: ${text}`);
       }
     }

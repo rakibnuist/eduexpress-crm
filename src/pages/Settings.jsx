@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Upload, Megaphone, StickyNote } from 'lucide-react';
+import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Upload, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2 } from 'lucide-react';
 import ExcelImport from '../components/ExcelImport';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
@@ -24,6 +24,9 @@ export default function Settings() {
 
       {/* User Management */}
       <UserManagement consultants={settings.consultants || []} />
+
+      {/* Meta & WhatsApp Integrations */}
+      <MetaIntegrationSettings />
 
       {/* Office settings — drives auto check-in / check-out + geofence */}
       <OfficeSettings />
@@ -759,3 +762,431 @@ function BroadcastManager() {
     </div>
   );
 }
+
+/* ────────────────────────── META & WHATSAPP INTEGRATIONS ────────────────────────── */
+function MetaIntegrationSettings() {
+  const [config, setConfig] = useState({
+    page_access_token: '',
+    capi_token: '',
+    pixel_id: '',
+    app_secret: '',
+    verify_token: 'eduexpress_verify_2024',
+    test_event_code: '',
+  });
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [syncingId, setSyncingId] = useState(null);
+  const [modal, setModal] = useState(null); // null | { mode:'add' }
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const cfg = await api.getMetaConfig();
+      setConfig(c => ({
+        ...c,
+        page_access_token: cfg.page_access_token || '',
+        capi_token: cfg.capi_token || '',
+        pixel_id: cfg.pixel_id || '',
+        app_secret: cfg.app_secret || '',
+        verify_token: cfg.verify_token || 'eduexpress_verify_2024',
+        test_event_code: cfg.test_event_code || '',
+      }));
+      const chs = await api.channels();
+      setChannels(chs || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const saveConfig = async (e) => {
+    e.preventDefault();
+    setSavingConfig(true);
+    try {
+      await api.saveMetaConfig(config);
+      toast.success('Meta & Conversion API configuration saved successfully');
+      loadData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to save config');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const removeChannel = async (channel) => {
+    const ok = await confirm({
+      title: `Remove integration channel "${channel.name}"?`,
+      body: 'Incoming messages for this channel will no longer be captured. This cannot be undone.',
+      tone: 'danger',
+      confirmLabel: 'Remove Channel',
+    });
+    if (!ok) return;
+    try {
+      await api.deleteChannel(channel.id);
+      toast.success('Channel removed successfully');
+      loadData();
+    } catch (e) {
+      toast.error(e.message || 'Failed to remove channel');
+    }
+  };
+
+  const syncHistory = async (channel) => {
+    setSyncingId(channel.id);
+    toast.info(`Starting historic conversations sync for ${channel.name}…`);
+    try {
+      const res = await api.syncChannel(channel.id);
+      toast.success(`✓ Sync complete: Imported ${res.imported || 0} messages!`);
+      loadData();
+    } catch (e) {
+      toast.error(`Sync error: ${e.message}`);
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Channels List Card */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-emerald-50 text-emerald-800 border-emerald-100">
+          <Globe size={18} />
+          <span className="font-semibold text-sm flex-grow">Meta Integration Channels (WhatsApp & Messenger)</span>
+          <button
+            onClick={() => setModal({ mode: 'add' })}
+            className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Plus size={13} /> Add Channel
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-slate-400">
+            Configure integration channels to listen to WhatsApp Business Cloud API messages or Facebook Messenger DMs. 
+            All new conversation inquiries on these channels will automatically create a <strong>"New Lead"</strong> in the pipeline instantly!
+          </p>
+
+          {loading ? (
+            <div className="text-slate-400 text-sm py-6 text-center">Loading integration channels…</div>
+          ) : channels.length === 0 ? (
+            <div className="text-slate-400 text-sm py-8 text-center border-2 border-dashed border-slate-100 rounded-xl">
+              No messaging channels configured yet. Click "Add Channel" to connect your first WhatsApp or Messenger page!
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {channels.map(ch => (
+                <div key={ch.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
+                      ${ch.type === 'whatsapp' ? 'bg-emerald-500 shadow-emerald-100' 
+                        : ch.type === 'messenger' ? 'bg-blue-500 shadow-blue-100' 
+                        : 'bg-gradient-to-tr from-pink-500 via-purple-500 to-orange-500'}`}>
+                      {ch.type === 'whatsapp' ? <MessageCircle size={20} /> 
+                        : ch.type === 'messenger' ? <MessageSquare size={20} /> 
+                        : <Globe size={20} />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-800 text-sm">{ch.name}</p>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase
+                          ${ch.type === 'whatsapp' ? 'bg-emerald-100 text-emerald-700' 
+                            : ch.type === 'messenger' ? 'bg-blue-100 text-blue-700' 
+                            : 'bg-purple-100 text-purple-700'}`}>
+                          {ch.type}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        {ch.type === 'whatsapp' ? `Phone Number ID: ${ch.phone_number_id || 'N/A'}` : `Page ID: ${ch.page_id || 'N/A'}`}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {ch.type === 'messenger' && (
+                      <button
+                        onClick={() => syncHistory(ch)}
+                        disabled={syncingId !== null}
+                        className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1"
+                      >
+                        {syncingId === ch.id ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" /> Syncing…
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw size={13} /> Sync History
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeChannel(ch)}
+                      className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                      title="Remove Channel"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Meta Config Card */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-indigo-50 text-indigo-800 border-indigo-100">
+          <Settings2 size={18} />
+          <span className="font-semibold text-sm">Global Meta & Conversion API Configurations</span>
+        </div>
+        <form onSubmit={saveConfig} className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block flex items-center gap-1">
+                <Key size={12} className="text-slate-400" /> Page Access Token
+              </label>
+              <input
+                type="password"
+                value={config.page_access_token}
+                onChange={e => setConfig(c => ({ ...c, page_access_token: e.target.value }))}
+                placeholder="EAAGz..."
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Used to pull Lead Ads and sync Facebook Messenger history.</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Webhook Verify Token</label>
+              <input
+                type="text"
+                value={config.verify_token}
+                onChange={e => setConfig(c => ({ ...c, verify_token: e.target.value }))}
+                placeholder="eduexpress_verify_2024"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Match this in the Facebook Developer App Webhook setup.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-50 pt-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Facebook Pixel ID</label>
+              <input
+                type="text"
+                value={config.pixel_id}
+                onChange={e => setConfig(c => ({ ...c, pixel_id: e.target.value }))}
+                placeholder="e.g. 1234567890"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Conversion API Token</label>
+              <input
+                type="password"
+                value={config.capi_token}
+                onChange={e => setConfig(c => ({ ...c, capi_token: e.target.value }))}
+                placeholder="CAPI Access Token"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Pixel Test Event Code</label>
+              <input
+                type="text"
+                value={config.test_event_code}
+                onChange={e => setConfig(c => ({ ...c, test_event_code: e.target.value }))}
+                placeholder="TEST12345"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono uppercase"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-slate-100">
+            <button
+              type="submit"
+              disabled={savingConfig}
+              className="text-sm px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+            >
+              {savingConfig ? 'Saving…' : 'Save Meta Configuration'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Add Channel Modal */}
+      {modal && (
+        <ChannelModal
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); loadData(); }}
+          verifyToken={config.verify_token}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChannelModal({ onClose, onSaved, verifyToken }) {
+  const [form, setForm] = useState({
+    type: 'whatsapp',
+    name: '',
+    phone_number_id: '',
+    waba_id: '',
+    page_id: '',
+    ig_account_id: '',
+    access_token: '',
+    webhook_verify_token: verifyToken || 'eduexpress_verify_2024',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const toast = useToast();
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      await api.createChannel(form);
+      toast.success(`Channel "${form.name}" created successfully`);
+      onSaved();
+    } catch (err) {
+      setError(err.message || 'Failed to create channel');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
+          <h3 className="font-bold text-slate-800">Add Messaging Channel</h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={18} /></button>
+        </div>
+        <form onSubmit={save} className="p-5 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Channel Type</label>
+              <select
+                value={form.type}
+                onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
+              >
+                <option value="whatsapp">WhatsApp Cloud API</option>
+                <option value="messenger">Facebook Messenger</option>
+                <option value="instagram">Instagram Direct</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Friendly Name</label>
+              <input
+                type="text"
+                required
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Primary WhatsApp Support"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          {form.type === 'whatsapp' && (
+            <div className="grid grid-cols-2 gap-3 border-t border-slate-50 pt-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Phone Number ID</label>
+                <input
+                  type="text"
+                  required
+                  value={form.phone_number_id}
+                  onChange={e => setForm(f => ({ ...f, phone_number_id: e.target.value }))}
+                  placeholder="e.g. 1045763..."
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">WhatsApp Business Account (WABA) ID</label>
+                <input
+                  type="text"
+                  required
+                  value={form.waba_id}
+                  onChange={e => setForm(f => ({ ...f, waba_id: e.target.value }))}
+                  placeholder="e.g. 1018590..."
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+                />
+              </div>
+            </div>
+          )}
+
+          {form.type === 'messenger' && (
+            <div className="border-t border-slate-50 pt-2">
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Facebook Page ID</label>
+              <input
+                type="text"
+                required
+                value={form.page_id}
+                onChange={e => setForm(f => ({ ...f, page_id: e.target.value }))}
+                placeholder="e.g. 10928374..."
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+              />
+            </div>
+          )}
+
+          {form.type === 'instagram' && (
+            <div className="grid grid-cols-2 gap-3 border-t border-slate-50 pt-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Instagram Professional Account ID</label>
+                <input
+                  type="text"
+                  required
+                  value={form.ig_account_id}
+                  onChange={e => setForm(f => ({ ...f, ig_account_id: e.target.value }))}
+                  placeholder="e.g. 178414..."
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Linked Facebook Page ID</label>
+                <input
+                  type="text"
+                  required
+                  value={form.page_id}
+                  onChange={e => setForm(f => ({ ...f, page_id: e.target.value }))}
+                  placeholder="e.g. 10928374..."
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-slate-50 pt-2">
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Channel Access Token (leave blank to use Global Token)</label>
+            <input
+              type="password"
+              value={form.access_token}
+              onChange={e => setForm(f => ({ ...f, access_token: e.target.value }))}
+              placeholder="Defaults to Global Page Access Token if empty"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+            />
+          </div>
+
+          {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 bg-slate-50/50 -mx-5 -mb-5 px-5 py-3">
+            <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 bg-white">Cancel</button>
+            <button type="submit" disabled={saving}
+              className="text-sm px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60 flex items-center gap-2">
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {saving ? 'Creating…' : 'Create Channel'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
