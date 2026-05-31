@@ -820,7 +820,7 @@ function setupSchema() { db.exec(`
     status TEXT DEFAULT 'pending',
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(month, emp_id)
+    UNIQUE(month, emp_id, name)
   );
 
   -- ── MESSAGING ──────────────────────────────────────────
@@ -944,6 +944,40 @@ function runMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
+
+  // Custom migration for payroll UNIQUE constraint
+  try {
+    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='payroll'").get()?.sql || "";
+    if (sql.includes("UNIQUE(month, emp_id)") && !sql.includes("UNIQUE(month, emp_id, name)")) {
+      console.log("[migration] Updating payroll unique constraint to UNIQUE(month, emp_id, name)...");
+      db.exec(`
+        CREATE TABLE payroll_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          month TEXT NOT NULL,
+          emp_id TEXT NOT NULL,
+          name TEXT,
+          base_salary REAL DEFAULT 0,
+          days_worked INTEGER DEFAULT 0,
+          working_days INTEGER DEFAULT 0,
+          bonus REAL DEFAULT 0,
+          deductions REAL DEFAULT 0,
+          net_pay REAL DEFAULT 0,
+          paid_on TEXT,
+          status TEXT DEFAULT 'pending',
+          notes TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(month, emp_id, name)
+        );
+        INSERT INTO payroll_new (id, month, emp_id, name, base_salary, days_worked, working_days, bonus, deductions, net_pay, paid_on, status, notes, created_at)
+        SELECT id, month, emp_id, name, base_salary, days_worked, working_days, bonus, deductions, net_pay, paid_on, status, notes, created_at FROM payroll;
+        DROP TABLE payroll;
+        ALTER TABLE payroll_new RENAME TO payroll;
+      `);
+      console.log("[migration] Payroll unique constraint updated successfully!");
+    }
+  } catch (e) {
+    console.error("[migration] Payroll update failed:", e.message);
+  }
 }
 
 function seedData() {
@@ -2078,6 +2112,35 @@ function workingDaysInMonth(month) {
   return wd;
 }
 
+// Auto-record payroll payment as an expense in Finance
+function logPayrollExpense(row) {
+  if (!row || row.status !== 'paid') return;
+  // Check if expense already exists to prevent duplicate entries
+  const existing = db.prepare("SELECT * FROM expenses WHERE category='Salary' AND paid_to=? AND month=? AND reference=?")
+    .get(row.name, row.month, `Salary - ${row.month}`);
+  if (existing) return;
+
+  db.prepare(`INSERT INTO expenses (date, month, category, paid_to, reference, amount, notes)
+              VALUES (?, ?, 'Salary', ?, ?, ?, ?)`)
+    .run(
+      row.paid_on || new Date().toISOString().slice(0, 10),
+      row.month,
+      row.name,
+      `Salary - ${row.month}`,
+      row.net_pay || 0,
+      row.notes || `Salary payment for ${row.month}`
+    );
+  
+  // Log activity
+  logActivity({
+    type: 'expense_recorded',
+    actor: { name: 'System' },
+    amount: row.net_pay,
+    to: row.name,
+    details: `Auto-recorded salary expense for ${row.month}`
+  });
+}
+
 // List payroll entries for a month (auto-creates rows for active employees if missing)
 app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
@@ -2086,13 +2149,13 @@ app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
   const ensure = db.prepare(`INSERT OR IGNORE INTO payroll
     (month, emp_id, name, base_salary, working_days, days_worked, net_pay)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  const recalc = db.prepare("UPDATE payroll SET days_worked=?, working_days=? WHERE month=? AND emp_id=?");
+  const recalc = db.prepare("UPDATE payroll SET days_worked=?, working_days=? WHERE month=? AND emp_id=? AND name=?");
 
   for (const emp of employees) {
     const present = db.prepare("SELECT COUNT(*) as n FROM attendance WHERE emp_id=? AND date LIKE ? AND (status='Present' OR status='Late')")
       .get(emp.emp_id, `${month}%`).n;
     ensure.run(month, emp.emp_id, emp.name, emp.salary || 0, wd, present, emp.salary || 0);
-    recalc.run(present, wd, month, emp.emp_id);
+    recalc.run(present, wd, month, emp.emp_id, emp.name);
   }
 
   const rows = db.prepare("SELECT * FROM payroll WHERE month=? ORDER BY name").all(month);
@@ -2121,13 +2184,23 @@ app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
   const paidOn = (stat === 'paid') ? (paid_on || cur.paid_on || new Date().toISOString().slice(0, 10)) : null;
   db.prepare(`UPDATE payroll SET base_salary=?, bonus=?, deductions=?, net_pay=?, status=?, paid_on=?, notes=? WHERE id=?`)
     .run(base, b, d, net, stat, paidOn, notes ?? cur.notes ?? null, req.params.id);
-  res.json(db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id));
+  
+  const updated = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
+  if (stat === 'paid' && cur.status !== 'paid') {
+    logPayrollExpense(updated);
+  }
+  res.json(updated);
 }));
 
 app.post('/api/payroll/:id/mark-paid', (req, res, next) => requireAdmin(req, res, () => {
+  const cur = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
   db.prepare("UPDATE payroll SET status='paid', paid_on=COALESCE(paid_on, ?) WHERE id=?")
     .run(new Date().toISOString().slice(0, 10), req.params.id);
-  res.json(db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id));
+  
+  const updated = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
+  logPayrollExpense(updated);
+  res.json(updated);
 }));
 
 // ─────────────────────────────────────────────────────────
@@ -2291,6 +2364,7 @@ app.get('/api/employee-kpi', (req, res, next) => requireManagerOrAdmin(req, res,
     const score = Math.round(attendanceScore + logsScore + activityScore);
 
     return {
+      id: emp.id,
       emp_id: emp.emp_id, name: emp.name, role: emp.role,
       attendance: { present, late, absent, workingDays: effWorking, totalHours: +hours.toFixed(1), avgCheckIn: avgIn, attendancePct },
       office_work: { logsSubmitted, logPct, streak, effWorking },
@@ -3076,15 +3150,44 @@ app.get('/api/meta/stats', (req, res) => {
 // ─────────────────────────────────────────────────────────
 // SETTINGS
 // ─────────────────────────────────────────────────────────
-app.get('/api/settings', (req, res) => res.json({
-  consultants: ['Ema','Afsana','Sakib','Mukta','Rafi','Admin'],
-  leadSources: ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad'],
-  destinations: ['China','Georgia','Malta'],
-  leadStatuses: ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested'],
-  fileStages: ['Documents Collecting','Documents Ready','Applied to University','Offer Letter Received','Visa Applied','Visa Approved','Visa Rejected','Enrolled','Cancelled'],
-  paymentStatuses: ['Pending','Partial','Paid','Refunded'],
-  incomeCategories: ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income'],
-  expenseCategories: ['Salary','Office Rent','Marketing','Air Ticket','Airport Pickup','App Fee','Visa Fee','Medical','Mobile Recharge','Client Lunch+Snacks','Transport','Bua Bill','Tissue+Room Spray','Letterhead','Logo','Job Post','Testimonial Video','Review','Yearly Fee','Electrician+Sign Board','Mata Support','Other Expense'],
+app.get('/api/settings', (req, res) => {
+  const getList = (key, defaults) => {
+    const val = getConfig(key);
+    try { if (val) return JSON.parse(val); } catch {}
+    return defaults;
+  };
+  res.json({
+    consultants: getList('settings_consultants', ['Ema','Afsana','Sakib','Mukta','Rafi','Admin']),
+    leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
+    destinations: getList('settings_destinations', ['China','Georgia','Malta']),
+    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
+    fileStages: getList('settings_fileStages', ['Documents Collecting','Documents Ready','Applied to University','Offer Letter Received','Visa Applied','Visa Approved','Visa Rejected','Enrolled','Cancelled']),
+    paymentStatuses: getList('settings_paymentStatuses', ['Pending','Partial','Paid','Refunded']),
+    incomeCategories: getList('settings_incomeCategories', ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income']),
+    expenseCategories: getList('settings_expenseCategories', ['Salary','Office Rent','Marketing','Air Ticket','Airport Pickup','App Fee','Visa Fee','Medical','Mobile Recharge','Client Lunch+Snacks','Transport','Bua Bill','Tissue+Room Spray','Letterhead','Logo','Job Post','Testimonial Video','Review','Yearly Fee','Electrician+Sign Board','Mata Support','Other Expense']),
+  });
+});
+
+app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
+  const { key, value } = req.body || {};
+  if (!key || !Array.isArray(value)) {
+    return res.status(400).json({ error: 'key and array value are required' });
+  }
+  const allowedKeys = [
+    'settings_consultants',
+    'settings_leadSources',
+    'settings_destinations',
+    'settings_leadStatuses',
+    'settings_fileStages',
+    'settings_paymentStatuses',
+    'settings_incomeCategories',
+    'settings_expenseCategories'
+  ];
+  if (!allowedKeys.includes(key)) {
+    return res.status(400).json({ error: 'invalid settings key' });
+  }
+  setConfig(key, JSON.stringify(value));
+  res.json({ ok: true });
 }));
 
 // Catch-all: serve React app for any non-API route (production)

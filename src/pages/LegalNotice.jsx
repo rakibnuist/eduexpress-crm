@@ -1,4 +1,4 @@
-export default function PrivacyPolicy() {
+export default function LegalNotice() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}

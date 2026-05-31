@@ -976,7 +976,7 @@ function Performance({ month }) {
       {/* Grid of employee cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {data.employees.map(e => (
-          <PerfCard key={e.emp_id} e={e} onClick={() => setPicked(e.emp_id)} />
+          <PerfCard key={e.id || e.emp_id} e={e} onClick={() => setPicked(e.emp_id)} />
         ))}
       </div>
 

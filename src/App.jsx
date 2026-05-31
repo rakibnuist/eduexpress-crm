@@ -12,7 +12,7 @@ import Pipeline from './pages/Pipeline';
 import Finance from './pages/Finance';
 import HR from './pages/HR';
 import Settings from './pages/Settings';
-import PrivacyPolicy from './pages/PrivacyPolicy';
+import LegalNotice from './pages/LegalNotice';
 import Login from './pages/Login';
 import StudentPortal from './pages/StudentPortal';
 import CommandPalette from './components/CommandPalette';
@@ -44,7 +44,7 @@ export default function App() {
         <ConfirmProvider>
           <Routes>
             {/* Public pages */}
-            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/privacy" element={<LegalNotice />} />
             <Route path="/s/:token" element={<StudentPortal />} />
             <Route path="/login" element={
               user ? <Navigate to="/" replace /> : <Login onSuccess={setUser} />

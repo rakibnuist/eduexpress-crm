@@ -61,6 +61,7 @@ export const api = {
   // Dashboard / settings
   dashboard: () => req('/dashboard'),
   settings:  () => req('/settings'),
+  saveSettings: (key, value) => req('/settings', { method: 'POST', body: JSON.stringify({ key, value }) }),
 
   // Leads
   leads:        (p = {}) => req('/leads?' + new URLSearchParams(p)),

@@ -50,37 +50,87 @@ export default function Settings() {
       </Card>
 
       {/* Consultants */}
-      <Card icon={<Users size={18} />} title="Consultants" color="violet">
-        <TagList items={settings.consultants} color="violet" />
-      </Card>
+      <EditableCard
+        icon={<Users size={18} />}
+        title="Consultants"
+        color="violet"
+        listKey="settings_consultants"
+        items={settings.consultants || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       {/* Lead Statuses */}
-      <Card icon={<Tag size={18} />} title="Lead Statuses" color="sky">
-        <TagList items={settings.leadStatuses} color="sky" />
-      </Card>
+      <EditableCard
+        icon={<Tag size={18} />}
+        title="Lead Statuses"
+        color="sky"
+        listKey="settings_leadStatuses"
+        items={settings.leadStatuses || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       {/* Destinations */}
-      <Card icon={<Globe size={18} />} title="Destinations" color="emerald">
-        <TagList items={settings.destinations} color="emerald" />
-      </Card>
+      <EditableCard
+        icon={<Globe size={18} />}
+        title="Destinations"
+        color="emerald"
+        listKey="settings_destinations"
+        items={settings.destinations || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       {/* Lead Sources */}
-      <Card icon={<Wifi size={18} />} title="Lead Sources" color="orange">
-        <TagList items={settings.leadSources} color="orange" />
-      </Card>
+      <EditableCard
+        icon={<Wifi size={18} />}
+        title="Lead Sources"
+        color="orange"
+        listKey="settings_leadSources"
+        items={settings.leadSources || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       {/* Payment Statuses */}
-      <Card icon={<CreditCard size={18} />} title="Payment Statuses" color="rose">
-        <TagList items={settings.paymentStatuses} color="rose" />
-      </Card>
+      <EditableCard
+        icon={<CreditCard size={18} />}
+        title="Payment Statuses"
+        color="rose"
+        listKey="settings_paymentStatuses"
+        items={settings.paymentStatuses || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       {/* File Stages */}
-      <Card icon={<Clock size={18} />} title="File Stages" color="amber">
-        <TagList items={settings.fileStages} color="amber" />
-      </Card>
+      <EditableCard
+        icon={<Clock size={18} />}
+        title="File Stages"
+        color="amber"
+        listKey="settings_fileStages"
+        items={settings.fileStages || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
+
+      {/* Income Categories */}
+      <EditableCard
+        icon={<CreditCard size={18} />}
+        title="Income Categories"
+        color="blue"
+        listKey="settings_incomeCategories"
+        items={settings.incomeCategories || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
+
+      {/* Expense Categories */}
+      <EditableCard
+        icon={<CreditCard size={18} />}
+        title="Expense Categories"
+        color="rose"
+        listKey="settings_expenseCategories"
+        items={settings.expenseCategories || []}
+        onSaved={() => api.settings().then(setSettings)}
+      />
 
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-700">
-        <strong>Note:</strong> To modify these lists, edit the <code className="bg-blue-100 px-1 rounded">settings</code> object in <code className="bg-blue-100 px-1 rounded">server.js</code> and restart the server.
+        💡 <strong>Note:</strong> These lists are dynamically saved to the database. Edits instantly apply to all drop-downs in the CRM.
       </div>
     </div>
   );
@@ -116,19 +166,140 @@ function InfoRow({ label, value }) {
   );
 }
 
-function TagList({ items, color }) {
-  const bg = {
-    violet: 'bg-violet-100 text-violet-700', sky: 'bg-sky-100 text-sky-700',
-    emerald: 'bg-emerald-100 text-emerald-700', orange: 'bg-orange-100 text-orange-700',
-    rose: 'bg-rose-100 text-rose-700', amber: 'bg-amber-100 text-amber-700',
+function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [list, setList] = useState(items);
+  const [input, setInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    setList(items);
+  }, [items]);
+
+  const add = (e) => {
+    e.preventDefault();
+    const val = input.trim();
+    if (!val) return;
+    if (list.includes(val)) {
+      toast.error('Item already exists in the list');
+      return;
+    }
+    setList([...list, val]);
+    setInput('');
   };
+
+  const remove = (index) => {
+    setList(list.filter((_, i) => i !== index));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveSettings(listKey, list);
+      toast.success(`${title} list saved`);
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      toast.error(e.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancel = () => {
+    setList(items);
+    setInput('');
+    setEditing(false);
+  };
+
+  const colors = {
+    blue: { header: 'bg-blue-50 text-blue-600 border-blue-100', tag: 'bg-blue-50 text-blue-700 hover:bg-blue-100' },
+    violet: { header: 'bg-violet-50 text-violet-600 border-violet-100', tag: 'bg-violet-50 text-violet-700 hover:bg-violet-100' },
+    sky: { header: 'bg-sky-50 text-sky-600 border-sky-100', tag: 'bg-sky-50 text-sky-700 hover:bg-sky-100' },
+    emerald: { header: 'bg-emerald-50 text-emerald-600 border-emerald-100', tag: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' },
+    orange: { header: 'bg-orange-50 text-orange-600 border-orange-100', tag: 'bg-orange-50 text-orange-700 hover:bg-orange-100' },
+    rose: { header: 'bg-rose-50 text-rose-600 border-rose-100', tag: 'bg-rose-50 text-rose-700 hover:bg-rose-100' },
+    amber: { header: 'bg-amber-50 text-amber-600 border-amber-100', tag: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
+  };
+
+  const c = colors[color] || colors.blue;
+
   return (
-    <div className="flex flex-wrap gap-2">
-      {items.map(item => (
-        <span key={item} className={`px-3 py-1 rounded-full text-sm font-medium ${bg[color] || 'bg-slate-100 text-slate-600'}`}>
-          {item}
-        </span>
-      ))}
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+      <div className={`flex items-center gap-2.5 px-5 py-3.5 border-b ${c.header}`}>
+        {icon}
+        <span className="font-semibold text-sm flex-grow">{title}</span>
+        {!editing ? (
+          <button
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-current hover:bg-white/30 transition-colors"
+          >
+            <Pencil size={11} /> Edit List
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={cancel}
+              disabled={saving}
+              className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-white bg-white font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold flex items-center gap-1"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="p-5 space-y-4">
+        {editing && (
+          <form onSubmit={add} className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={`Add new item…`}
+              className="flex-grow border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+            />
+            <button
+              type="submit"
+              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1"
+            >
+              <Plus size={13} /> Add
+            </button>
+          </form>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {list.length === 0 ? (
+            <p className="text-slate-400 text-xs italic py-2">No items in the list</p>
+          ) : (
+            list.map((item, idx) => (
+              <span
+                key={item}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-all ${c.tag}`}
+              >
+                {item}
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={() => remove(idx)}
+                    className="p-0.5 rounded-full hover:bg-black/10 text-current/70 hover:text-current transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </span>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
