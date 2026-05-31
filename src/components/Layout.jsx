@@ -12,7 +12,7 @@ const baseNav = [
   { to: '/',             icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     staffOnly: true },
   { to: '/reports',      icon: FileBarChart,    label: 'Reports',     staffOnly: true },
-  { to: '/my-day',       icon: Sun,             label: 'My Day' },
+  { to: '/my-day',       icon: Sun,             label: 'Daily Workspace & Reflections' },
   { to: '/leads',        icon: Users,           label: 'All Leads' },
   { to: '/pipeline',     icon: Kanban,          label: 'Sales Pipeline' },
   { to: '/applications', icon: Plane,           label: 'Applications' },

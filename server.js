@@ -135,7 +135,7 @@ app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ o
 app.get('/api/auth/me', (req, res) => {
   const payload = verifyToken(getCookie(req, AUTH_COOKIE));
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-  const user = db.prepare("SELECT id,email,name,role,consultant_name,active FROM users WHERE id=? AND active=1").get(payload.id);
+  const user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
   res.json(user);
 });
@@ -271,8 +271,12 @@ function templateFor(destination) {
 // Admins + Application Managers see everything; consultants only their own leads.
 function leadIsVisibleTo(lead, user) {
   if (user?.role === 'admin' || user?.role === 'manager') return true;
-  const me = user?.consultant_name || user?.name;
-  return !!me && lead.assigned_consultant === me;
+  const me = user?.consultant_name || user?.name || '';
+  if (!me || !lead.assigned_consultant) return false;
+  const leadC = lead.assigned_consultant.toLowerCase().trim();
+  const meC = me.toLowerCase().trim();
+  const meClean = meC.split(' ')[0];
+  return leadC === meC || meClean === leadC || meC.includes(leadC) || leadC.includes(meClean);
 }
 
 // Reference: list of stages + doc templates (for the UI).
@@ -288,8 +292,11 @@ app.get('/api/applications', (req, res) => {
   ];
   const params = {};
   if (req.user?.role === 'consultant') { // admins + managers see all
-    where.push("l.assigned_consultant = @me");
-    params.me = req.user.consultant_name || req.user.name || '';
+    const meName = req.user.consultant_name || req.user.name || '';
+    const meClean = meName.split(' ')[0];
+    where.push("(TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(l.assigned_consultant)) || '%' OR TRIM(LOWER(l.assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
+    params.me = meName;
+    params.meClean = meClean;
   }
   if (req.query.destination) { where.push("l.destination = @destination"); params.destination = req.query.destination; }
   if (req.query.consultant)  { where.push("l.assigned_consultant = @consultant"); params.consultant = req.query.consultant; }
@@ -1365,13 +1372,25 @@ async function sendCAPIEvent(eventName, leadData) {
 // DASHBOARD
 // ─────────────────────────────────────────────────────────
 app.get('/api/dashboard', (req, res) => {
-  const pipeline     = db.prepare("SELECT lead_status, COUNT(*) as count FROM leads GROUP BY lead_status").all();
-  const total        = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
+  const isConsultant = req.user?.role === 'consultant';
+  const meName = req.user?.consultant_name || req.user?.name || '';
+  const meClean = meName.split(' ')[0];
+  
+  let ws = '';
+  const params = {};
+  if (isConsultant) {
+    ws = "WHERE (TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')";
+    params.me = meName;
+    params.meClean = meClean;
+  }
+
+  const pipeline     = db.prepare(`SELECT lead_status, COUNT(*) as count FROM leads ${ws} GROUP BY lead_status`).all(params);
+  const total        = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
   const today        = new Date().toISOString().slice(0, 10);
-  const followupToday= db.prepare("SELECT COUNT(*) as c FROM leads WHERE next_followup=?").get(today).c;
-  const recentLeads  = db.prepare("SELECT * FROM leads ORDER BY id DESC LIMIT 5").all();
-  const totalPaid    = db.prepare("SELECT SUM(paid) as s FROM leads").get().s || 0;
-  const metaLeads    = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
+  const followupToday= db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + ' AND' : 'WHERE'} next_followup=@today`).get({ ...params, today }).c;
+  const recentLeads  = db.prepare(`SELECT * FROM leads ${ws} ORDER BY id DESC LIMIT 5`).all(params);
+  const totalPaid    = db.prepare(`SELECT SUM(paid) as s FROM leads ${ws}`).get(params).s || 0;
+  const metaLeads    = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + ' AND' : 'WHERE'} meta_lead_id IS NOT NULL`).get(params).c;
   const openConvs    = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='open'").get().c;
   const unreadMsgs   = db.prepare("SELECT SUM(unread_count) as s FROM conversations").get().s || 0;
   res.json({ pipeline, total, followupToday, recentLeads, totalPaid, metaLeads, openConvs, unreadMsgs });
@@ -1391,8 +1410,11 @@ app.get('/api/leads', (req, res) => {
   // Consultants are scoped to their own assigned leads — enforced server-side.
   // Admins and Application Managers see everything.
   if (req.user?.role === 'consultant') {
-    where.push("assigned_consultant=@me");
-    params.me = req.user.consultant_name || req.user.name || '';
+    const meName = req.user.consultant_name || req.user.name || '';
+    const meClean = meName.split(' ')[0];
+    where.push("(TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
+    params.me = meName;
+    params.meClean = meClean;
   }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -1403,8 +1425,12 @@ app.get('/api/leads', (req, res) => {
 app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
-  if (req.user?.role === 'consultant' && lead.assigned_consultant !== (req.user.consultant_name || req.user.name)) {
-    return res.status(403).json({ error: 'Not your lead' });
+  if (req.user?.role === 'consultant') {
+    const leadC = (lead.assigned_consultant || '').toLowerCase().trim();
+    const me = (req.user.consultant_name || req.user.name || '').toLowerCase().trim();
+    const meClean = me.split(' ')[0];
+    const visible = leadC === me || meClean === leadC || me.includes(leadC) || leadC.includes(meClean);
+    if (!visible) return res.status(403).json({ error: 'Not your lead' });
   }
   res.json(lead);
 });

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X, Sun, FileBarChart } from 'lucide-react';
+import { useToast } from '../components/Toast';
+import { Users, DollarSign, Bell, TrendingUp, ArrowRight, Calendar, Trophy, Medal, Award, Megaphone, X, Sun, FileBarChart, LogIn, LogOut, Wifi, Clock } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -18,13 +19,58 @@ const PIPE_COLORS = {
   'Not Interested': '#f87171',
 };
 
-export default function Dashboard() {
+export default function Dashboard({ user }) {
   const [data, setData] = useState(null);
   const [extraStats, setExtraStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [broadcasts, setBroadcasts] = useState([]);
   const [dailyLog, setDailyLog]     = useState(null); // { linked, log }
+  const [attnLog, setAttnLog]       = useState(null); // today's attendance record
+  const toast = useToast();
   const month = new Date().toISOString().slice(0, 7);
+
+  const loadAttn = () => {
+    if (!user?.emp_id) return;
+    const today = new Date().toISOString().slice(0, 10);
+    api.attendance({ emp_id: user.emp_id, date: today }).then(rows => {
+      const todayLog = (rows || []).find(r => r.date === today);
+      setAttnLog(todayLog || null);
+    }).catch(err => console.log('Failed to fetch attendance:', err));
+  };
+
+  useEffect(() => { loadAttn(); }, [user]);
+
+  const handleManualCheckIn = async () => {
+    if (!user?.emp_id) return;
+    const timeStr = new Date().toTimeString().slice(0, 5);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    try {
+      const res = await api.checkIn({
+        emp_id: user.emp_id,
+        date: todayStr,
+        time: timeStr,
+        source: 'manual'
+      });
+      toast.success(`Checked in successfully at ${timeStr}`);
+      setAttnLog(res);
+      localStorage.setItem('simulated_wifi', 'true');
+      window.dispatchEvent(new Event('storage')); // trigger update in shell
+    } catch (err) {
+      toast.error(err.message.includes('Already') ? 'Already checked in today' : err.message);
+    }
+  };
+
+  const handleManualCheckOut = async () => {
+    if (!attnLog) return;
+    const timeStr = new Date().toTimeString().slice(0, 5);
+    try {
+      const res = await api.checkOut(attnLog.id, timeStr);
+      toast.success(`Checked out successfully at ${timeStr}`);
+      setAttnLog(res);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
 
   // Daily-log status — used for the end-of-day banner
   useEffect(() => { api.dailyLogsToday().then(setDailyLog).catch(() => setDailyLog(null)); }, []);
@@ -101,6 +147,52 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Quick Attendance Check-in Banner */}
+      {user?.emp_id && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`p-2.5 rounded-xl ${attnLog ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+              <Clock size={20} className={attnLog && !attnLog.check_out ? 'animate-pulse' : ''} />
+            </div>
+            <div>
+              <p className="font-semibold text-slate-800 text-sm">
+                {attnLog 
+                  ? (attnLog.check_out ? 'Today\'s Attendance Completed ✓' : `On Duty (Checked in at ${attnLog.check_in})`)
+                  : 'Attendance Status: Shift Not Started'}
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {attnLog 
+                  ? `Logged via ${attnLog.source === 'wifi' ? `Wi-Fi Router ("${attnLog.ssid}")` : 'Manual Portal Check-in'}`
+                  : 'Keep your records active by clocking in manually below or connecting to office Wi-Fi.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {!attnLog && (
+              <button
+                onClick={handleManualCheckIn}
+                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer select-none"
+              >
+                <LogIn size={13} /> Manual Check In
+              </button>
+            )}
+            {attnLog && !attnLog.check_out && (
+              <button
+                onClick={handleManualCheckOut}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer select-none"
+              >
+                <LogOut size={13} /> Check Out & End Shift
+              </button>
+            )}
+            {attnLog && attnLog.check_out && (
+              <span className="text-xs font-bold text-slate-450 bg-slate-100 border border-slate-200 px-3.5 py-2 rounded-xl">
+                Shift Logged Successfully
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* End-of-day reminder for staff who haven't logged */}
       {showDailyLogNudge && (
         <Link to="/my-day"

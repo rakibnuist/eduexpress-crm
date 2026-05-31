@@ -25,6 +25,9 @@ export default function MyDay({ user }) {
   const [saving, setSaving]       = useState(false);
   const [saved, setSaved]         = useState(false);
   const [attnLog, setAttnLog]     = useState(null);   // today's attendance record
+  
+  // Custom metrics explicitly editable by the employee
+  const [metrics, setMetrics]     = useState({ contacted: 0, followup: 0, positive: 0, negative: 0, visited: 0, opened: 0 });
   const toast = useToast();
 
   const loadAttn = () => {
@@ -39,11 +42,28 @@ export default function MyDay({ user }) {
   const load = () => {
     api.dailyLogsToday().then(r => {
       setTodayInfo(r);
-      if (r.log) setForm({
-        accomplishments: r.log.accomplishments || '',
-        challenges: r.log.challenges || '',
-        tomorrow_plan: r.log.tomorrow_plan || '',
-      });
+      if (r.log) {
+        setForm({
+          accomplishments: r.log.accomplishments || '',
+          challenges: r.log.challenges || '',
+          tomorrow_plan: r.log.tomorrow_plan || '',
+        });
+        if (r.log.metrics_json) {
+          try {
+            const m = JSON.parse(r.log.metrics_json);
+            setMetrics({
+              contacted: m.contacted ?? 0,
+              followup: m.followup ?? 0,
+              positive: m.positive ?? 0,
+              negative: m.negative ?? 0,
+              visited: m.visited ?? 0,
+              opened: m.opened ?? 0
+            });
+          } catch (e) {
+            console.error('Failed to parse saved metrics:', e);
+          }
+        }
+      }
     });
     loadAttn();
   };
@@ -91,6 +111,66 @@ export default function MyDay({ user }) {
       .catch(() => setAuto({ total: 0, leads: 0, positive: 0, negative: 0, visited: 0, opened: 0, notes: 0, payments: 0 }));
   }, [user]);
 
+  const generateAutoAccomplishments = (summary) => {
+    if (!summary || summary.total === 0) return '';
+    const parts = [];
+    parts.push(`Today, I followed up with and nurtured ${summary.leads} lead${summary.leads === 1 ? '' : 's'}.`);
+    
+    const changes = [];
+    if (summary.positive > 0) changes.push(`marked ${summary.positive} prospect${summary.positive === 1 ? '' : 's'} as Positive`);
+    if (summary.visited > 0) changes.push(`conducted ${summary.visited} face-to-face office consultation${summary.visited === 1 ? '' : 's'}`);
+    if (summary.opened > 0) changes.push(`initiated application files for ${summary.opened} candidate${summary.opened === 1 ? '' : 's'}`);
+    if (summary.notes > 0) changes.push(`logged ${summary.notes} progress notes`);
+    
+    if (changes.length > 0) {
+      parts.push(`Specifically, I ${changes.join(', ')}.`);
+    }
+    
+    if (summary.payments > 0) {
+      parts.push(`I successfully collected ৳${Number(summary.payments).toLocaleString()} in student payments.`);
+    }
+    
+    return parts.join(' ');
+  };
+
+  const autoFillLog = () => {
+    setMetrics({
+      contacted: autoSummary.leads || 0,
+      followup: autoSummary.total || 0,
+      positive: autoSummary.positive || 0,
+      negative: autoSummary.negative || 0,
+      visited: autoSummary.visited || 0,
+      opened: autoSummary.opened || 0
+    });
+    const generated = generateAutoAccomplishments(autoSummary);
+    if (generated) {
+      setForm(f => ({ ...f, accomplishments: generated }));
+      toast.success('Reflection form pre-populated from your today\'s activity! ⚡');
+    } else {
+      toast.info('No recorded activity today to auto-populate from.');
+    }
+  };
+
+  // Auto pre-populate on feed load if no saved log exists yet
+  useEffect(() => {
+    if (todayInfo && !todayInfo.log && autoSummary && autoSummary.total > 0 && !form.accomplishments.trim()) {
+      setMetrics({
+        contacted: autoSummary.leads || 0,
+        followup: autoSummary.total || 0,
+        positive: autoSummary.positive || 0,
+        negative: autoSummary.negative || 0,
+        visited: autoSummary.visited || 0,
+        opened: autoSummary.opened || 0
+      });
+      const generated = generateAutoAccomplishments(autoSummary);
+      if (generated) {
+        setForm(f => ({ ...f, accomplishments: generated }));
+      }
+    }
+  }, [autoSummary, todayInfo]);
+
+  const updateMetric = (k, v) => setMetrics(m => ({ ...m, [k]: v }));
+
   const handleManualCheckIn = async () => {
     if (!user?.emp_id) return;
     const timeStr = new Date().toTimeString().slice(0, 5);
@@ -104,7 +184,6 @@ export default function MyDay({ user }) {
       });
       toast.success(`Checked in successfully at ${timeStr}`);
       setAttnLog(res);
-      // set local storage to active simulated wifi as well if they wish to keep matching
       localStorage.setItem('simulated_wifi', 'true');
       window.dispatchEvent(new Event('storage')); // trigger update in shell
     } catch (err) {
@@ -129,7 +208,7 @@ export default function MyDay({ user }) {
     if (!form.accomplishments.trim()) return;
     setSaving(true);
     try {
-      await api.submitDailyLog({ ...form, date: todayISO() });
+      await api.submitDailyLog({ ...form, date: todayISO(), metrics });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       load();
@@ -258,9 +337,18 @@ export default function MyDay({ user }) {
 
           {/* Log form */}
           <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">{alreadyLogged ? 'Update today\'s log' : 'Log your day before you leave'}</h3>
-              {alreadyLogged && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">SUBMITTED</span>}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={autoFillLog}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer select-none"
+                >
+                  <Sparkles size={12} /> Auto-Fill reflections
+                </button>
+                {alreadyLogged && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">SUBMITTED</span>}
+              </div>
             </div>
 
             <div>
@@ -269,6 +357,23 @@ export default function MyDay({ user }) {
                 onChange={e => setForm(f => ({ ...f, accomplishments: e.target.value }))}
                 placeholder="e.g. Followed up with 8 China leads, sent docs to NJTech for 2 students, met Md Sarwar in office to verify SSC/HSC…"
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+
+            {/* Premium Metrics Grid */}
+            <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Today's CRM Performance Metrics</p>
+                <span className="text-[9px] text-slate-400 font-medium">Verify or manually adjust these numbers</span>
+              </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <MetricInput label="Leads Contacted" value={metrics.contacted} onChange={v => updateMetric('contacted', v)} icon={<PhoneCall size={13} className="text-blue-500" />} />
+                <MetricInput label="Follow-ups" value={metrics.followup} onChange={v => updateMetric('followup', v)} icon={<Clock size={13} className="text-slate-500" />} />
+                <MetricInput label="Marked Positive" value={metrics.positive} onChange={v => updateMetric('positive', v)} icon={<CheckCircle2 size={13} className="text-emerald-500" />} />
+                <MetricInput label="Marked Negative" value={metrics.negative} onChange={v => updateMetric('negative', v)} icon={<XCircle size={13} className="text-rose-505 text-rose-500" />} />
+                <MetricInput label="Office Visits" value={metrics.visited} onChange={v => updateMetric('visited', v)} icon={<Building2 size={13} className="text-amber-500" />} />
+                <MetricInput label="Files Opened" value={metrics.opened} onChange={v => updateMetric('opened', v)} icon={<FolderOpen size={13} className="text-indigo-500" />} />
+              </div>
             </div>
 
             <div>
@@ -290,7 +395,7 @@ export default function MyDay({ user }) {
             <div className="flex items-center justify-end gap-3 pt-1">
               {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 size={13}/> Saved</span>}
               <button type="submit" disabled={saving || !form.accomplishments.trim()}
-                className="text-sm bg-blue-600 text-white px-5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
+                className="text-sm bg-blue-600 text-white px-5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2 select-none cursor-pointer">
                 <Send size={14}/> {saving ? 'Saving…' : (alreadyLogged ? 'Update log' : 'Submit & end day')}
               </button>
             </div>
@@ -413,4 +518,38 @@ export default function MyDay({ user }) {
 
 function Badge({ children }) {
   return <span className="bg-white border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full">{children}</span>;
+}
+
+function MetricInput({ label, value, onChange, icon }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex flex-col justify-between shadow-sm hover:border-slate-350 hover:shadow-md transition-all duration-200">
+      <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[9px] uppercase tracking-wider truncate">
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="flex items-center justify-between mt-2.5">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, value - 1))}
+          className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 hover:text-blue-600 active:scale-95 text-slate-650 rounded-lg text-xs font-black transition-all select-none cursor-pointer"
+        >
+          -
+        </button>
+        <input
+          type="number"
+          min="0"
+          value={value}
+          onChange={e => onChange(Math.max(0, parseInt(e.target.value) || 0))}
+          className="w-12 text-center font-mono font-bold text-sm text-slate-800 focus:outline-none focus:text-blue-600 bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(value + 1)}
+          className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 hover:text-blue-600 active:scale-95 text-slate-650 rounded-lg text-xs font-black transition-all select-none cursor-pointer"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
 }
