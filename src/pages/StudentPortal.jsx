@@ -35,6 +35,11 @@ const DOC_STATUS_LABEL = {
   rejected:     'Needs to be re-sent',
   not_required: 'Not required',
 };
+const ensureAbsoluteUrl = (url) => {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return 'https://' + url;
+};
 
 export default function StudentPortal() {
   const { token } = useParams();
@@ -128,7 +133,7 @@ export default function StudentPortal() {
               </div>
             </div>
             {student.drive_link && (
-              <a href={student.drive_link} target="_blank" rel="noreferrer"
+              <a href={ensureAbsoluteUrl(student.drive_link)} target="_blank" rel="noreferrer"
                 className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
                 <ExternalLink size={13} /> Your file folder
               </a>
@@ -227,7 +232,7 @@ export default function StudentPortal() {
                     <FileText size={14} className="text-slate-400 flex-shrink-0" />
                     <span className="text-slate-700 truncate">{d.doc_type}</span>
                     {d.student_uploaded_url && (
-                      <a href={d.student_uploaded_url} target="_blank" rel="noreferrer"
+                      <a href={ensureAbsoluteUrl(d.student_uploaded_url)} target="_blank" rel="noreferrer"
                         className="text-blue-600 hover:underline text-xs flex items-center gap-0.5">
                         <ExternalLink size={11} /> link
                       </a>

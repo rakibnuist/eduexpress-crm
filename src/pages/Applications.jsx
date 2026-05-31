@@ -15,7 +15,14 @@ import {
   GraduationCap, RefreshCw, X, CheckCircle2, AlertTriangle, ExternalLink,
   CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
   LayoutGrid, Table as TableIcon, Filter, Building2, User, ChevronDown,
+  Share2, Copy, QrCode, RotateCw,
 } from 'lucide-react';
+
+const ensureAbsoluteUrl = (url) => {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return 'https://' + url;
+};
 
 const STAGE_COLORS = {
   documents:     { bg: 'bg-slate-50',  border: 'border-slate-200',  pill: 'bg-slate-200 text-slate-700' },
@@ -344,7 +351,7 @@ function TableView({ rows, onPick, stages }) {
                 <Td className="max-w-[200px] truncate" title={r.uni_list}>{r.uni_list || '—'}</Td>
                 <Td>{r.referrer || r.assigned_consultant || '—'}</Td>
                 <Td>{r.drive_link
-                  ? <a href={r.drive_link} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                  ? <a href={ensureAbsoluteUrl(r.drive_link)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                       className="inline-flex items-center gap-1 text-blue-600 hover:underline text-xs">
                       Open <ExternalLink size={11} />
                     </a>
@@ -511,7 +518,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
           </div>
           <div className="flex items-center gap-2">
             {form.drive_link && (
-              <a href={form.drive_link} target="_blank" rel="noreferrer"
+              <a href={ensureAbsoluteUrl(form.drive_link)} target="_blank" rel="noreferrer"
                 className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
                 <ExternalLink size={12} /> Drive folder
               </a>
@@ -617,6 +624,9 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
             </button>
           </div>
         </div>
+
+        {/* Share with student portal */}
+        <ShareCard lead={lead} onChanged={load} />
 
         {/* University applications */}
         <div className="px-6 py-5 border-b border-slate-100">
@@ -767,6 +777,110 @@ function UniRow({ uni, onStatus, onRemove }) {
           <div className="flex justify-end">
             <button onClick={save} className="text-[11px] font-medium bg-blue-600 text-white px-2.5 py-1 rounded-lg hover:bg-blue-700">Save</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Share-with-student card ─── */
+function ShareCard({ lead, onChanged }) {
+  const [token, setToken] = useState(lead.public_token);
+  const [enabled, setEnabled] = useState(!!lead.public_enabled);
+  const [showQR, setShowQR] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
+
+  const url = token ? `${window.location.origin}/s/${token}` : null;
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const r = await api.regenerateToken(lead.id);
+      setToken(r.public_token); setEnabled(true);
+      onChanged?.();
+      toast.success('New share link generated');
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const toggle = async () => {
+    setBusy(true);
+    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.();
+          toast.info(enabled ? 'Student link disabled' : 'Student link enabled'); }
+    catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const copy = async () => {
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+
+  return (
+    <div className="px-6 py-5 border-b border-slate-100">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="font-semibold text-slate-700 text-sm flex items-center gap-2">
+            <Share2 size={14} className="text-slate-400" /> Student portal
+          </p>
+          <p className="text-xs text-slate-400">Give the student access to their progress tracker</p>
+        </div>
+      </div>
+      
+      {!token ? (
+        <div className="text-center py-2 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-4">
+          <p className="text-xs text-slate-500 mb-3">No share link yet. Generate one to give the student access to their progress.</p>
+          <button onClick={generate} disabled={busy}
+            className="text-xs font-semibold bg-blue-600 text-white px-3.5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer">
+            <Share2 size={12} /> {busy ? 'Generating…' : 'Generate share link'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+              {enabled ? 'Active' : 'Disabled'}
+            </span>
+            <button onClick={toggle} disabled={busy}
+              className="text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer">
+              {enabled ? 'Disable link' : 'Enable link'}
+            </button>
+          </div>
+          
+          <div className="bg-white border border-slate-200 rounded-xl p-2 flex items-center gap-2">
+            <code className="text-[11px] flex-1 truncate text-slate-600 font-mono">{url}</code>
+            <button onClick={copy} title="Copy"
+              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+              {copied ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
+            </button>
+          </div>
+          
+          <div className="flex gap-1.5">
+            <a href={url} target="_blank" rel="noreferrer"
+              className="flex-1 text-xs font-medium text-center text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all">
+              <ExternalLink size={12} /> Open
+            </a>
+            <button onClick={() => setShowQR(s => !s)}
+              className="flex-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+              <QrCode size={12} /> {showQR ? 'Hide QR' : 'Show QR'}
+            </button>
+            <button onClick={generate} disabled={busy} title="Regenerate (invalidates old link)"
+              className="text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+              <RotateCw size={12} />
+            </button>
+          </div>
+          
+          {showQR && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center mt-2 shadow-sm">
+              <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={200} height={200}
+                className="rounded" loading="lazy" />
+              <p className="text-[10px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>
+            </div>
+          )}
         </div>
       )}
     </div>
