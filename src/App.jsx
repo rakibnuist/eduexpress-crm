@@ -8,7 +8,6 @@ import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
 import MyDay from './pages/MyDay';
 import Reports from './pages/Reports';
-import Pipeline from './pages/Pipeline';
 import Finance from './pages/Finance';
 import HR from './pages/HR';
 import Settings from './pages/Settings';
@@ -63,7 +62,7 @@ export default function App() {
                     <Route path="/leads" element={<Leads user={user} />} />
                     <Route path="/leads/:id" element={<LeadDetail user={user} />} />
                     <Route path="/my-day" element={<MyDay user={user} />} />
-                    <Route path="/pipeline" element={<Pipeline user={user} />} />
+                    <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
                     <Route path="/applications" element={<Applications user={user} />} />
                     {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
                     {user.role === 'admin' && <Route path="/hr" element={<HR />} />}
