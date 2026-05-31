@@ -94,7 +94,7 @@ app.use((req, res, next) => {
 
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
-  const { email, password, lat, lng } = req.body || {};
+  const { email, password, lat, lng, ssid, device_id } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   const user = db.prepare("SELECT * FROM users WHERE email=? AND active=1").get(String(email).toLowerCase().trim());
   if (!user || !verifyPassword(password, user.password_hash)) {
@@ -110,6 +110,8 @@ app.post('/api/auth/login', (req, res) => {
     attendance = autoCheckIn(user, {
       lat: Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : undefined,
       lng: Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : undefined,
+      ssid,
+      device_id,
     });
   } catch (e) { console.error('[auto-attendance]', e.message); }
 
@@ -197,7 +199,7 @@ app.delete('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
 }));
 
 // ─── OFFICE CONFIG (open/close hours + geofence) ────────────────────────────
-const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m'];
+const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m', 'office_wifi_ssid'];
 app.get('/api/office-config', (req, res) => {
   const cfg = Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)]));
   res.json(cfg);
@@ -1190,21 +1192,33 @@ function autoCheckIn(user, opts = {}) {
   const today = new Date().toISOString().slice(0, 10);
   autoCloseStaleAttendance(emp, today);
 
-  // Geofence (if office_lat/lng configured). Otherwise — always allow.
-  const olat = parseFloat(getConfig('office_lat'));
-  const olng = parseFloat(getConfig('office_lng'));
-  const radius = parseInt(getConfig('office_radius_m')) || 200;
-  if (Number.isFinite(olat) && Number.isFinite(olng)) {
-    if (!Number.isFinite(opts.lat) || !Number.isFinite(opts.lng)) {
-      return { ok: false, reason: 'no_location' };
-    }
-    const d = haversineMeters(olat, olng, opts.lat, opts.lng);
-    if (d > radius) return { ok: false, reason: 'outside_office', distance: Math.round(d) };
-  }
+  // Office Wi-Fi SSID Verification
+  const officeSSID = getConfig('office_wifi_ssid');
+  const onOfficeWifi = officeSSID && opts.ssid && String(opts.ssid).toLowerCase().trim() === String(officeSSID).toLowerCase().trim();
 
   // Already checked in today?
   const existing = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date=?").get(emp.emp_id, today);
-  if (existing) return { ok: true, alreadyIn: true, id: existing.id };
+  
+  if (existing) {
+    if (onOfficeWifi && existing.source !== 'wifi') {
+      db.prepare("UPDATE attendance SET source='wifi', ssid=? WHERE id=?").run(opts.ssid, existing.id);
+    }
+    return { ok: true, alreadyIn: true, id: existing.id };
+  }
+
+  // Geofence Check (bypass if they are verified on Office Wi-Fi)
+  if (!onOfficeWifi) {
+    const olat = parseFloat(getConfig('office_lat'));
+    const olng = parseFloat(getConfig('office_lng'));
+    const radius = parseInt(getConfig('office_radius_m')) || 200;
+    if (Number.isFinite(olat) && Number.isFinite(olng)) {
+      if (!Number.isFinite(opts.lat) || !Number.isFinite(opts.lng)) {
+        return { ok: false, reason: 'no_location' };
+      }
+      const d = haversineMeters(olat, olng, opts.lat, opts.lng);
+      if (d > radius) return { ok: false, reason: 'outside_office', distance: Math.round(d) };
+    }
+  }
 
   const now = new Date();
   const time = now.toTimeString().slice(0, 5);
@@ -1212,10 +1226,20 @@ function autoCheckIn(user, opts = {}) {
   const lateAfter = openTime != null ? openTime + 0.25 : 9.75; // 15-min grace
   const status = timeToHours(time) > lateAfter ? 'Late' : 'Present';
 
-  const info = db.prepare("INSERT INTO attendance (emp_id, name, date, check_in, status, source) VALUES (?,?,?,?,?,'auto-login')")
-    .run(emp.emp_id, emp.name, today, time, status);
-  logActivity({ type: 'attendance_in', actor: { id: user.id, name: user.name || emp.name }, to: time, details: { emp_id: emp.emp_id, status } });
-  return { ok: true, created: info.lastInsertRowid, status, time };
+  const source = onOfficeWifi ? 'wifi' : 'auto-login';
+  const ssid = onOfficeWifi ? opts.ssid : '';
+
+  const info = db.prepare("INSERT INTO attendance (emp_id, name, date, check_in, status, source, ssid) VALUES (?,?,?,?,?,?,?)")
+    .run(emp.emp_id, emp.name, today, time, status, source, ssid);
+    
+  logActivity({ 
+    type: 'attendance_in', 
+    actor: { id: user.id, name: user.name || emp.name }, 
+    to: time, 
+    details: { emp_id: emp.emp_id, status, source, ssid } 
+  });
+  
+  return { ok: true, created: info.lastInsertRowid, status, time, source, ssid };
 }
 
 function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email, avatar_url }) {

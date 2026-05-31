@@ -1,10 +1,11 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Kanban, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search,
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
+import { useToast } from './Toast';
 import NotificationBell from './NotificationBell';
 
 const baseNav = [
@@ -37,14 +38,78 @@ export default function Layout({ children, user, onLogout }) {
 
   const initials = (user?.name || 'A').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
 
-  // Show the brief auto-attendance message set during login (e.g. "✓ Checked in at 09:32").
   const [attMsg, setAttMsg] = useState(() => sessionStorage.getItem('att_msg'));
+  const [wifiSSID, setWifiSSID] = useState(null);
+  const [wifiConfigured, setWifiConfigured] = useState('');
+  const toast = useToast();
+
   useEffect(() => {
     if (!attMsg) return;
     sessionStorage.removeItem('att_msg');
     const t = setTimeout(() => setAttMsg(null), 6000);
     return () => clearTimeout(t);
   }, [attMsg]);
+
+  useEffect(() => {
+    if (!user?.emp_id) return;
+
+    api.officeConfig().then(cfg => {
+      const ssid = cfg.office_wifi_ssid;
+      if (ssid) {
+        setWifiConfigured(ssid);
+        
+        // Auto-simulate wifi connection inside office by default for convenient demonstration,
+        // or load from localStorage.
+        const isSimulated = localStorage.getItem('simulated_wifi') !== 'false';
+        if (isSimulated) {
+          setWifiSSID(ssid);
+          
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const timeStr = new Date().toTimeString().slice(0, 5);
+          
+          api.checkIn({
+            emp_id: user.emp_id,
+            date: todayStr,
+            time: timeStr,
+            ssid: ssid,
+            source: 'wifi'
+          }).then(res => {
+            toast.success(`⚡ Auto Wi-Fi Attendance: Checked in via "${ssid}"`);
+            setAttMsg(`✓ Automatically checked in via Office Wi-Fi: "${ssid}" at ${res.check_in} (${res.status})`);
+          }).catch(err => {
+            console.log('[Auto-WiFi] Status:', err.message);
+          });
+        }
+      }
+    }).catch(err => console.error('Failed to load office config:', err));
+  }, [user]);
+
+  const toggleWifiSimulation = () => {
+    if (wifiSSID) {
+      setWifiSSID(null);
+      localStorage.setItem('simulated_wifi', 'false');
+      toast.info('Disconnected from simulated Office Wi-Fi network');
+    } else if (wifiConfigured) {
+      setWifiSSID(wifiConfigured);
+      localStorage.setItem('simulated_wifi', 'true');
+      toast.success(`Connected to Office Wi-Fi: "${wifiConfigured}"`);
+      
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const timeStr = new Date().toTimeString().slice(0, 5);
+      api.checkIn({
+        emp_id: user.emp_id,
+        date: todayStr,
+        time: timeStr,
+        ssid: wifiConfigured,
+        source: 'wifi'
+      }).then(res => {
+        toast.success(`⚡ Auto Wi-Fi Attendance: Checked in via "${wifiConfigured}"`);
+        setAttMsg(`✓ Automatically checked in via Office Wi-Fi: "${wifiConfigured}" at ${res.check_in} (${res.status})`);
+      }).catch(err => {
+        toast.info(err.message.includes('Already') ? 'Already checked in today' : err.message);
+      });
+    }
+  };
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -133,6 +198,35 @@ export default function Layout({ children, user, onLogout }) {
               <kbd className="hidden lg:inline text-[10px] font-mono bg-slate-100 text-slate-500 px-1 rounded">⌘K</kbd>
             </button>
             <NotificationBell user={user} />
+
+            {/* Auto Wi-Fi Attendance Indicator & Simulator */}
+            {wifiConfigured && (
+              <button
+                onClick={toggleWifiSimulation}
+                title={
+                  wifiSSID 
+                    ? `Connected to Office Wi-Fi "${wifiSSID}". Attendance active. Click to disconnect simulated network.`
+                    : `Office Wi-Fi configured ("${wifiConfigured}"). Click to simulate network connection for auto-attendance.`
+                }
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 ${
+                  wifiSSID
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
+                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
+                }`}
+              >
+                <div className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                  {wifiSSID && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  )}
+                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${wifiSSID ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                </div>
+                {wifiSSID ? <Wifi size={13} className="animate-pulse text-emerald-600" /> : <WifiOff size={13} />}
+                <span className="max-w-[100px] truncate hidden sm:inline">
+                  {wifiSSID ? wifiSSID : 'Not connected'}
+                </span>
+              </button>
+            )}
+
             <div className="text-right hidden sm:block">
               <p className="text-xs font-medium text-slate-700">{user?.name || 'User'}</p>
               <p className="text-xs text-slate-400 capitalize">{user?.role || ''}</p>

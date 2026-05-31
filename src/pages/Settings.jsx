@@ -536,6 +536,7 @@ function OfficeSettings() {
       office_lat:        d.office_lat || '',
       office_lng:        d.office_lng || '',
       office_radius_m:   d.office_radius_m || '200',
+      office_wifi_ssid:  d.office_wifi_ssid || '',
     }); });
   }, []);
 
@@ -565,7 +566,7 @@ function OfficeSettings() {
     setSaving(true);
     try {
       await api.saveOfficeConfig(form);
-      setMsg('✓ Saved');
+      setMsg('✓ Saved successfully');
       setTimeout(() => setMsg(''), 2500);
     } catch (err) { setMsg('Error: ' + err.message); }
     setSaving(false);
@@ -578,9 +579,10 @@ function OfficeSettings() {
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
       <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-amber-50 text-amber-700 border-amber-100">
         <MapPin size={18} />
-        <span className="font-semibold text-sm flex-1">Office Hours & Auto-Attendance</span>
+        <span className="font-semibold text-sm flex-1">Office Hours, Geofencing & Wi-Fi Attendance</span>
       </div>
-      <form onSubmit={save} className="p-5 space-y-4">
+      <form onSubmit={save} className="p-5 space-y-5">
+        {/* Office Hours */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Office opens at</label>
@@ -596,6 +598,30 @@ function OfficeSettings() {
           </div>
         </div>
 
+        {/* Wi-Fi SSID Config */}
+        <div className="border-t border-slate-100 pt-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Wifi size={16} className="text-blue-500 animate-pulse" />
+            <label className="text-sm font-semibold text-slate-700">Office Wi-Fi Auto-Attendance</label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Office Wi-Fi SSID</label>
+              <input value={form.office_wifi_ssid || ''} onChange={e => update('office_wifi_ssid', e.target.value)}
+                placeholder="e.g. EduExpress_Office_5G" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" />
+              <p className="text-[11px] text-slate-400 mt-1">Employees opening the CRM on this network will be automatically checked in.</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Auto Wi-Fi Attendance Status</label>
+              <div className="flex items-center gap-2.5 h-[38px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-600">
+                <span className={`w-2 h-2 rounded-full ${form.office_wifi_ssid ? 'bg-emerald-500 animate-pulse shadow-sm shadow-emerald-400' : 'bg-slate-300'}`}></span>
+                {form.office_wifi_ssid ? 'Active (Auto-checking on office connection)' : 'Inactive (Configure SSID to enable)'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Geofence */}
         <div className="border-t border-slate-100 pt-4">
           <div className="flex items-center justify-between mb-2">
             <div>
