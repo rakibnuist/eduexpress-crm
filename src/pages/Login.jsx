@@ -43,16 +43,26 @@ export default function Login({ onSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
-          <div className="flex items-center justify-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-md">
-              <GraduationCap size={28} className="text-white" />
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Decorative blurred shapes */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-100px] left-[-80px] w-[400px] h-[400px] bg-blue-300/30 rounded-full blur-3xl" />
+        <div className="absolute bottom-[-100px] right-[-80px] w-[400px] h-[400px] bg-indigo-300/30 rounded-full blur-3xl" />
+      </div>
+
+      <div className="w-full max-w-md relative">
+        {/* Brand mark above the card */}
+        <div className="flex flex-col items-center mb-5">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <GraduationCap size={32} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 text-center mb-1">EduExpress CRM</h1>
-          <p className="text-sm text-slate-400 text-center mb-8">Sign in to your consultant dashboard</p>
+          <h1 className="text-2xl font-bold text-slate-900 mt-3">EduExpress International</h1>
+          <p className="text-xs text-slate-500">Student Consultancy CRM · Dhanmondi, Dhaka</p>
+        </div>
+
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/60 p-8">
+          <h2 className="text-lg font-semibold text-slate-800 text-center mb-1">Welcome back</h2>
+          <p className="text-xs text-slate-500 text-center mb-6">Sign in to continue to your dashboard</p>
 
           <form onSubmit={submit} className="space-y-4">
             <div>
@@ -73,16 +83,20 @@ export default function Login({ onSuccess }) {
             )}
 
             <button type="submit" disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl shadow-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl shadow-md shadow-blue-500/20 transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
               {loading && <Loader2 size={16} className="animate-spin" />}
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
 
-          <p className="text-center text-xs text-slate-400 mt-6">
-            EduExpress International · Student Consultancy
+          <p className="text-center text-[11px] text-slate-400 mt-6">
+            Allow location for automatic check-in when you sign in from the office.
           </p>
         </div>
+
+        <p className="text-center text-[11px] text-slate-400 mt-4">
+          © {new Date().getFullYear()} EduExpress International. All rights reserved.
+        </p>
       </div>
     </div>
   );

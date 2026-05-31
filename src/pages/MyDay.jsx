@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { useToast } from '../components/Toast';
 import {
   Sun, Send, Clock, CheckCircle2, AlertCircle, ChevronRight, Loader2,
   Calendar, History, Sparkles, Pencil,
@@ -55,6 +56,7 @@ export default function MyDay({ user }) {
       .catch(() => setAuto({ total: 0 }));
   }, [user]);
 
+  const toast = useToast();
   const submit = async (e) => {
     e.preventDefault();
     if (!form.accomplishments.trim()) return;
@@ -64,7 +66,8 @@ export default function MyDay({ user }) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       load();
-    } catch (err) { alert(err.message); }
+      toast.success(todayInfo?.log ? "Today's log updated" : 'End-of-day log submitted ✓');
+    } catch (err) { toast.error(err.message); }
     setSaving(false);
   };
 

@@ -4,6 +4,7 @@
    nationality, intake, drive link, deposit) + medical/emergency block. */
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
+import { useToast } from '../components/Toast';
 import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
 const SOURCES   = ['In-house', 'Agent'];
@@ -14,6 +15,7 @@ export default function LeadForm({ lead, settings, onSave }) {
   const [form, setForm] = useState(initial(lead));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
+  const toast = useToast();
 
   // Pre-populate the referrer autocomplete from values already in use.
   // Saves consultants from typo'ing existing names.
@@ -45,11 +47,11 @@ export default function LeadForm({ lead, settings, onSave }) {
         paid:        form.paid        === '' ? 0 : Number(form.paid),
         deposit:     form.deposit     === '' ? 0 : Number(form.deposit),
       };
-      if (lead) await api.updateLead(lead.id, payload);
-      else      await api.createLead(payload);
+      if (lead) { await api.updateLead(lead.id, payload); toast.success(`${form.client_name} updated`); }
+      else      { await api.createLead(payload); toast.success(`${form.client_name} added`); }
       onSave?.();
     } catch (err) {
-      alert(err.message || 'Save failed');
+      toast.error(err.message || 'Could not save');
     } finally { setSaving(false); }
   };
 

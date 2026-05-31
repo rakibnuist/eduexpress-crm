@@ -299,12 +299,13 @@ function ConversationThread({ token, consultant, studentName, thread, onSent }) 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
+  const [error, setError] = useState('');
   const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
-    setSending(true);
+    setSending(true); setError('');
     try { await api.studentMessage(token, text.trim()); setText(''); onSent?.(); }
-    catch (err) { alert(err.message); }
+    catch (err) { setError(err.message || 'Could not send. Please try again.'); }
     setSending(false);
   };
 
@@ -349,6 +350,7 @@ function ConversationThread({ token, consultant, studentName, thread, onSent }) 
         <textarea rows={2} value={text} onChange={e => setText(e.target.value)}
           placeholder="Type a message…"
           className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        {error && <p className="text-xs text-rose-600">{error}</p>}
         <div className="flex justify-end">
           <button type="submit" disabled={sending || !text.trim()}
             className="text-xs font-medium bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">

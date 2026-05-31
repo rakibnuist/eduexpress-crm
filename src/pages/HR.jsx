@@ -6,6 +6,8 @@ import {
   LogIn, LogOut, Target, TrendingUp, Award, AlertCircle, Calendar,
   DollarSign, Printer, CircleCheck, CircleDot
 } from 'lucide-react';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   RadialBarChart, RadialBar, Legend, Cell,
@@ -41,10 +43,14 @@ export default function HR() {
     }
   }, [selectedEmp, month]);
 
+  const toast = useToast();
+  const confirm = useConfirm();
+
   async function handleDelete(id) {
-    if (!confirm('Delete this employee?')) return;
-    await api.deleteEmployee(id);
-    load();
+    const ok = await confirm({ title: 'Delete this employee?', tone: 'danger', confirmLabel: 'Delete' });
+    if (!ok) return;
+    try { await api.deleteEmployee(id); load(); toast.success('Employee removed'); }
+    catch (e) { toast.error(e.message); }
   }
 
   async function handleCheckIn(emp) {
@@ -53,18 +59,19 @@ export default function HR() {
     try {
       await api.checkIn({ emp_id: emp.emp_id, date: today, time, source: 'manual' });
       load();
+      toast.success(`${emp.name} checked in at ${time}`);
     } catch (e) {
-      alert(e.message.includes('Already') ? `${emp.name} already checked in today` : e.message);
+      toast.error(e.message.includes('Already') ? `${emp.name} already checked in today` : e.message);
     }
   }
 
   async function handleCheckOut(emp) {
     const log = todayLogs.find(l => l.emp_id === emp.emp_id);
-    if (!log) return alert('No check-in found for today');
+    if (!log) { toast.error('No check-in found for today'); return; }
     const now = new Date();
     const time = now.toTimeString().slice(0, 5);
-    await api.checkOut(log.id, time);
-    load();
+    try { await api.checkOut(log.id, time); load(); toast.success(`${emp.name} checked out at ${time}`); }
+    catch (e) { toast.error(e.message); }
   }
 
   const totalPayroll = employees.filter(e => e.active === 'Yes').reduce((s, e) => s + (e.salary || 0), 0);
@@ -716,6 +723,8 @@ function Payroll({ month }) {
   const [loading, setLoading] = useState(true);
   const [edits, setEdits] = useState({}); // { id: { bonus, deductions, ... } }
   const [saving, setSaving] = useState(null);
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -736,16 +745,21 @@ function Payroll({ month }) {
     const patch = edits[row.id];
     if (!patch) return;
     setSaving(row.id);
-    try { await api.updatePayroll(row.id, patch); await load(); }
-    catch (e) { alert(e.message); }
+    try { await api.updatePayroll(row.id, patch); await load(); toast.success(`${row.name}'s payroll saved`); }
+    catch (e) { toast.error(e.message); }
     setSaving(null);
   };
 
   const markPaid = async (row) => {
-    if (!confirm(`Mark ${row.name}'s ${month} payroll as paid?`)) return;
+    const ok = await confirm({
+      title: `Mark ${row.name}'s payroll as paid?`,
+      body: `${month} payroll · Net ${fmt(row.net_pay)}. This will lock the row.`,
+      confirmLabel: 'Mark paid',
+    });
+    if (!ok) return;
     setSaving(row.id);
-    try { await api.markPayrollPaid(row.id); await load(); }
-    catch (e) { alert(e.message); }
+    try { await api.markPayrollPaid(row.id); await load(); toast.success(`${row.name}'s payroll marked paid`); }
+    catch (e) { toast.error(e.message); }
     setSaving(null);
   };
 

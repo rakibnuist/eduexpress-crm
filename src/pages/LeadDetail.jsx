@@ -539,6 +539,7 @@ function ShareCard({ lead, onChanged }) {
   const [showQR, setShowQR] = useState(false);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
 
@@ -550,14 +551,16 @@ function ShareCard({ lead, onChanged }) {
       const r = await api.regenerateToken(lead.id);
       setToken(r.public_token); setEnabled(true);
       onChanged?.();
-    } catch (e) { alert(e.message); }
+      toast.success('New share link generated');
+    } catch (e) { toast.error(e.message); }
     setBusy(false);
   };
 
   const toggle = async () => {
     setBusy(true);
-    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.(); }
-    catch (e) { alert(e.message); }
+    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.();
+          toast.info(enabled ? 'Student link disabled' : 'Student link enabled'); }
+    catch (e) { toast.error(e.message); }
     setBusy(false);
   };
 

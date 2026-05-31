@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '../api';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 import Modal from '../components/Modal';
 import {
   Plus, Trash2, Pencil, TrendingUp, TrendingDown, DollarSign,
@@ -567,6 +569,8 @@ function CashflowEntryModal({ side, row, month, categories, onClose, onSaved }) 
     notes: row?.notes || '',
   });
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const submit = async (e) => {
     e.preventDefault();
@@ -588,17 +592,20 @@ function CashflowEntryModal({ side, row, month, categories, onClose, onSaved }) 
         else         await api.createExpense(payload);
       }
       onSaved();
-    } catch (err) { alert(err.message); }
+      toast.success(editing ? 'Entry updated' : `${side === 'in' ? 'Income' : 'Spend'} added`);
+    } catch (err) { toast.error(err.message || 'Could not save'); }
     setSaving(false);
   };
 
   const del = async () => {
-    if (!confirm('Delete this entry?')) return;
+    const ok = await confirm({ title: 'Delete this entry?', tone: 'danger', confirmLabel: 'Delete' });
+    if (!ok) return;
     try {
       if (side === 'in') await api.deleteIncome(row.id);
       else               await api.deleteExpense(row.id);
       onSaved();
-    } catch (e) { alert(e.message); }
+      toast.info('Entry deleted');
+    } catch (e) { toast.error(e.message); }
   };
 
   return (
@@ -672,11 +679,12 @@ function CashflowEntryModal({ side, row, month, categories, onClose, onSaved }) 
 function InitialCashModal({ current, onClose, onSaved }) {
   const [val, setVal] = useState('');
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    try { await api.setInitialCash(Number(val) || 0); onSaved(); }
-    catch (err) { alert(err.message); }
+    try { await api.setInitialCash(Number(val) || 0); onSaved(); toast.success('Opening cash updated'); }
+    catch (err) { toast.error(err.message); }
     setSaving(false);
   };
   return (

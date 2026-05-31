@@ -130,7 +130,7 @@ export default function Leads() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {data.leads.map(l => (
-                <tr key={l.id} className="hover:bg-blue-50/30 transition-colors group">
+                <tr key={l.id} className="hover:bg-blue-50/50 transition-colors group cursor-pointer">
                   <td className="py-2.5 px-3 font-mono text-xs">
                     <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-semibold">
                       {l.lead_id}
@@ -165,9 +165,20 @@ export default function Leads() {
               ))}
               {data.leads.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="py-16 text-center">
-                    <p className="text-slate-400">No leads found</p>
-                    <p className="text-xs text-slate-300 mt-1">Try adjusting your search or filters</p>
+                  <td colSpan={14} className="py-12">
+                    <div className="text-center">
+                      <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2">
+                        <Search size={20} />
+                      </div>
+                      <p className="text-slate-600 font-semibold">No leads match these filters</p>
+                      <p className="text-xs text-slate-400 mt-1">Try clearing the search, status or destination filters.</p>
+                      {activeFilters > 0 && (
+                        <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', page: 1 })}
+                          className="text-xs font-medium text-blue-600 hover:underline mt-2">
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )}

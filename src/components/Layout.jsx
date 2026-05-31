@@ -81,11 +81,26 @@ export default function Layout({ children, user, onLogout }) {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-100 flex-shrink-0">
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-3">
-            <p className="text-xs font-semibold text-blue-700">EduExpress International</p>
-            <p className="text-xs text-blue-400 mt-0.5">Student Consultancy CRM</p>
+        {/* Footer — current user pill */}
+        <div className="p-3 border-t border-slate-100 flex-shrink-0">
+          <div className="bg-slate-50 hover:bg-slate-100 rounded-xl p-2.5 flex items-center gap-2.5 transition-colors">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-slate-800 truncate">{user?.name || 'User'}</p>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full
+                  ${user?.role === 'admin' ? 'bg-purple-100 text-purple-700'
+                  : user?.role === 'manager' ? 'bg-amber-100 text-amber-700'
+                  : 'bg-blue-100 text-blue-700'}`}>{user?.role || 'user'}</span>
+                <span className="text-[10px] text-slate-400 truncate">{user?.email}</span>
+              </div>
+            </div>
+            <button onClick={logout} title="Log out"
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+              <LogOut size={14} />
+            </button>
           </div>
         </div>
       </aside>

@@ -651,9 +651,11 @@ function UniRow({ uni, onStatus, onRemove }) {
   const [appId, setAppId]     = useState(uni.application_id || '');
   const [notes, setNotes]     = useState(uni.notes || '');
 
+  const toast = useToast();
   const save = async () => {
-    try { await api.updateUniversityApp(uni.id, { program, application_id: appId, notes }); setEditing(false); }
-    catch (e) { alert(e.message); }
+    try { await api.updateUniversityApp(uni.id, { program, application_id: appId, notes });
+          setEditing(false); toast.success(`${uni.university} updated`); }
+    catch (e) { toast.error(e.message); }
   };
 
   return (
