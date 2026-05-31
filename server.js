@@ -1167,12 +1167,23 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 }
 function findEmployeeForUser(user) {
   if (!user) return null;
-  if (user.emp_id) {
-    const e = db.prepare("SELECT * FROM employees WHERE emp_id=? AND active='Yes'").get(user.emp_id);
+  // Match by email first (most precise, unique identifier)
+  if (user.email) {
+    const e = db.prepare("SELECT * FROM employees WHERE LOWER(email)=LOWER(?) AND active='Yes'").get(user.email);
     if (e) return e;
   }
-  if (user.email) {
-    return db.prepare("SELECT * FROM employees WHERE LOWER(email)=LOWER(?) AND active='Yes'").get(user.email) || null;
+  // If no email match, search by Employee ID and resolve duplicates by name
+  if (user.emp_id) {
+    const list = db.prepare("SELECT * FROM employees WHERE emp_id=? AND active='Yes'").all(user.emp_id);
+    if (list.length === 1) return list[0];
+    if (list.length > 1 && user.name) {
+      const exact = list.find(e => 
+        e.name.toLowerCase().includes(user.name.toLowerCase()) || 
+        user.name.toLowerCase().includes(e.name.toLowerCase())
+      );
+      if (exact) return exact;
+    }
+    if (list.length > 0) return list[0];
   }
   return null;
 }
