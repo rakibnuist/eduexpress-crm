@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDatabase } from './sqldb.js';
+import { initDatabase, isDead } from './sqldb.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -73,12 +73,21 @@ let db = null;
 let dbReady = false;
 
 // Health check — always responds (lets Hostinger know we're alive)
-app.get('/health', (_req, res) => res.json({ status: dbReady ? 'ready' : 'starting' }));
+app.get('/health', (_req, res) => {
+  if (isDead()) return res.status(503).json({ status: 'restarting', reason: 'DB OOM — process is being recycled' });
+  res.json({ status: dbReady ? 'ready' : 'starting' });
+});
 
-// Block all API calls until DB is ready
+// Block all API calls until DB is ready, and return 503 cleanly if the WASM
+// instance died from OOM (the process is restarting itself in the background).
 app.use((req, res, next) => {
-  if (!dbReady && req.path.startsWith('/api')) {
-    return res.status(503).json({ error: 'Server is starting up, please retry in a few seconds.' });
+  if (req.path.startsWith('/api')) {
+    if (isDead()) {
+      return res.status(503).json({ error: 'Server is restarting — please retry in a few seconds.' });
+    }
+    if (!dbReady) {
+      return res.status(503).json({ error: 'Server is starting up, please retry in a few seconds.' });
+    }
   }
   next();
 });

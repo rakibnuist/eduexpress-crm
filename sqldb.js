@@ -18,6 +18,34 @@ let _dbPath = null;
 let _saveTimer = null;
 let _savePaused = false;   // when true, writes are NOT exported to disk (used during bulk sync)
 let _saveDirty = false;    // tracks whether a write happened while paused
+let _dead = false;         // set to true when sql.js WASM OOM's — process must restart
+
+/*
+   When sql.js hits Aborted(OOM), the WASM heap is unrecoverable: every
+   subsequent query throws "no such table" even though the on-disk file is
+   still valid. The only way out is to restart the Node process so a fresh
+   WASM instance is created and the disk file is reloaded.
+
+   handleFatalError() detects OOM, marks the DB dead, and schedules a graceful
+   process exit so Hostinger relaunches the app automatically.
+*/
+function handleFatalError(error, context) {
+  const msg = String(error?.message || error || '');
+  const isOOM = msg.includes('Aborted(OOM)') || /\bOOM\b/.test(msg) || msg.startsWith('Aborted');
+  if (!isOOM) return false;
+  if (_dead) return true; // already handling
+  _dead = true;
+  console.error('=============================================================');
+  console.error('  🚨 SQL.JS WASM OOM — instance is unrecoverable.');
+  console.error('  Context:', context);
+  console.error('  Scheduling process exit so Hostinger restarts the app.');
+  console.error('=============================================================');
+  // Give in-flight requests a chance to send their response before we exit.
+  setTimeout(() => process.exit(1), 1500);
+  return true;
+}
+
+export function isDead() { return _dead; }
 
 // Atomic save: export to a temp file, then rename. A crash mid-write can never
 // leave a half-written (corrupt) crm.db on disk.
@@ -77,6 +105,7 @@ function makeStatement(rawSql) {
 
   return {
     get(...args) {
+      if (_dead) throw new Error('[sqldb] DB is restarting — please retry in a few seconds');
       // Support both .get(obj) and .get(val1, val2, ...)
       const params = args.length === 1 ? convertParams(args[0]) : args;
       try {
@@ -86,11 +115,13 @@ function makeStatement(rawSql) {
         stmt.free();
         return row || undefined;
       } catch (e) {
+        if (handleFatalError(e, `get ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
         throw new Error(`[sqldb] get failed: ${e.message}\nSQL: ${sql}`);
       }
     },
 
     all(...args) {
+      if (_dead) throw new Error('[sqldb] DB is restarting — please retry in a few seconds');
       const params = args.length === 0 ? {} : args.length === 1 ? convertParams(args[0]) : args;
       try {
         const stmt = _db.prepare(sql);
@@ -100,11 +131,13 @@ function makeStatement(rawSql) {
         stmt.free();
         return rows;
       } catch (e) {
+        if (handleFatalError(e, `all ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
         throw new Error(`[sqldb] all failed: ${e.message}\nSQL: ${sql}`);
       }
     },
 
     run(...args) {
+      if (_dead) throw new Error('[sqldb] DB is restarting — please retry in a few seconds');
       const params = args.length === 0 ? {} : args.length === 1 ? convertParams(args[0]) : args;
       try {
         const stmt = _db.prepare(sql);
@@ -116,6 +149,7 @@ function makeStatement(rawSql) {
         if (write) scheduleSave();
         return { changes, lastInsertRowid };
       } catch (e) {
+        if (handleFatalError(e, `run ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
         throw new Error(`[sqldb] run failed: ${e.message}\nSQL: ${sql}`);
       }
     },
@@ -151,18 +185,25 @@ export async function initDatabase(dbPath) {
   const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-asm.js'));
   _SQL = await initSqlJs();
 
-  // Load existing DB file or create new — with corruption recovery
+  // Load existing DB file or create new — with corruption recovery.
+  // Three integrity gates: (1) buffer loads, (2) sqlite_master readable,
+  // (3) PRAGMA integrity_check returns 'ok'. If any fail we back up the file
+  // and start fresh; the schema rebuilder in setupSchema() then recreates
+  // every required table.
   if (existsSync(dbPath)) {
     const buf = readFileSync(dbPath);
     try {
       _db = new _SQL.Database(buf);
-      // Integrity probe: a corrupt buffer often loads but fails the first real query.
       _db.exec("SELECT count(*) FROM sqlite_master");
       const integrity = _db.exec("PRAGMA integrity_check")?.[0]?.values?.[0]?.[0];
-      if (integrity && integrity !== 'ok') throw new Error(`integrity_check: ${integrity}`);
+      if (integrity && integrity !== 'ok') throw new Error(`integrity_check returned: ${integrity}`);
+      // Verify at least one well-known table is queryable. If sqlite_master is
+      // good but a known table fails (e.g. partially-truncated B-tree pages),
+      // treat the whole file as corrupt.
+      try { _db.exec("SELECT count(*) FROM sqlite_master WHERE type='table'"); }
+      catch (e2) { throw new Error(`master query failed: ${e2.message}`); }
       console.log(`[sqldb] Loaded existing DB from ${dbPath}`);
     } catch (e) {
-      // DB file is corrupt — back it up and start fresh so the app can recover.
       console.error(`[sqldb] ⚠️  DB corrupt (${e.message}). Backing up and recreating.`);
       try { renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`); } catch {}
       _db = new _SQL.Database();

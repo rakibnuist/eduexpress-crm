@@ -1,6 +1,8 @@
 const BASE = '/api';
 
-async function req(path, opts = {}) {
+// Auto-retry on 503 (server restarting) so a transient OOM recovery is
+// invisible to the user. Up to 3 retries with exponential backoff.
+async function req(path, opts = {}, attempt = 1) {
   const r = await fetch(BASE + path, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -12,7 +14,18 @@ async function req(path, opts = {}) {
     }
     throw new Error('Unauthorized');
   }
-  if (!r.ok) throw new Error(await r.text());
+  // Server is restarting or warming up — wait and retry transparently.
+  if (r.status === 503 && attempt <= 3) {
+    await new Promise(res => setTimeout(res, 800 * attempt));
+    return req(path, opts, attempt + 1);
+  }
+  if (!r.ok) {
+    // Try to extract a friendlier error message from a JSON body
+    let msg = '';
+    try { const j = await r.clone().json(); msg = j.error || j.message || ''; } catch {}
+    if (!msg) { try { msg = await r.text(); } catch {} }
+    throw new Error(msg || `Request failed (${r.status})`);
+  }
   return r.json();
 }
 
