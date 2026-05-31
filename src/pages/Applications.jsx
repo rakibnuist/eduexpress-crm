@@ -71,7 +71,7 @@ const SOURCES = ['In-house', 'Agent'];
 const DEGREES = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'L+Bachelor', 'L+Diploma'];
 
 export default function Applications({ user }) {
-  useEffect(() => { document.title = "Application Hub | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Application Hub | EduExpress Core"; }, []);
 
   const [stages, setStages]   = useState([]);
   const [rows, setRows]       = useState([]);
@@ -94,7 +94,8 @@ export default function Applications({ user }) {
   useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
 
   const filtered = useMemo(() => rows.filter(r => {
-    if (filterStage    !== 'all' && (r.application_stage || 'documents') !== filterStage) return false;
+    const defaultStage = stages[0]?.key || 'documents';
+    if (filterStage    !== 'all' && (r.application_stage || defaultStage) !== filterStage) return false;
     if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
     if (filterSource   !== 'all' && r.source !== filterSource)        return false;
     if (filterReferrer !== 'all' && r.referrer !== filterReferrer)    return false;
@@ -111,13 +112,14 @@ export default function Applications({ user }) {
       if (!nameMatch && !idMatch && !destMatch && !majorMatch && !universityMatch && !consultantMatch && !degreeMatch && !referrerMatch) return false;
     }
     return true;
-  }), [rows, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+  }), [rows, stages, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
 
   // Per-stage counts (across all rows, not filtered, so the strip is stable)
   const stageCounts = useMemo(() => {
     const m = Object.fromEntries(stages.map(s => [s.key, 0]));
+    const defaultStage = stages[0]?.key || 'documents';
     rows.forEach(r => {
-      const k = stages.some(s => s.key === r.application_stage) ? r.application_stage : 'documents';
+      const k = stages.some(s => s.key === r.application_stage) ? r.application_stage : defaultStage;
       m[k] = (m[k] || 0) + 1;
     });
     return m;
@@ -301,8 +303,9 @@ function EmptyState() {
 function KanbanView({ stages, rows, onPick }) {
   const byStage = useMemo(() => {
     const map = Object.fromEntries(stages.map(s => [s.key, []]));
+    const defaultStage = stages[0]?.key || 'documents';
     for (const r of rows) {
-      const key = stages.some(s => s.key === r.application_stage) ? r.application_stage : 'documents';
+      const key = stages.some(s => s.key === r.application_stage) ? r.application_stage : defaultStage;
       (map[key] ||= []).push(r);
     }
     return map;
@@ -471,7 +474,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
     ]);
     setLead(l); setDocs(d); setUnis(u);
     setForm({
-      application_stage: l.application_stage || 'documents',
+      application_stage: l.application_stage || (stages[0]?.key || 'documents'),
       source:            l.source || '',
       referrer:          l.referrer || '',
       nationality:       l.nationality || '',
@@ -524,7 +527,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
   };
 
   const advance = () => {
-    const idx = stages.findIndex(s => s.key === (form.application_stage || 'documents'));
+    const idx = stages.findIndex(s => s.key === (form.application_stage || stages[0]?.key || 'documents'));
     if (idx === -1 || idx >= stages.length - 1) return;
     return changeStage(stages[idx + 1].key);
   };
@@ -587,7 +590,7 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
     </div>;
   }
 
-  const currentIdx = stages.findIndex(s => s.key === (form.application_stage || 'documents'));
+  const currentIdx = stages.findIndex(s => s.key === (form.application_stage || stages[0]?.key || 'documents'));
   const received = docs.filter(d => ['received','verified'].includes(d.status)).length;
 
   return (

@@ -27,7 +27,7 @@ export default function Layout({ children, user, onLogout }) {
   const isAdmin = user?.role === 'admin';
   const isStaff = user?.role === 'admin' || user?.role === 'manager';
   const nav = baseNav.filter(n => (!n.adminOnly || isAdmin) && (!n.staffOnly || isStaff));
-  const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'CRM';
+  const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'Core';
 
   const logout = async () => {
     try { await api.logout(); } catch {}
@@ -124,7 +124,7 @@ export default function Layout({ children, user, onLogout }) {
           </div>
           <div className="min-w-0">
             <p className="font-bold text-slate-800 text-sm leading-tight">EduExpress</p>
-            <p className="text-xs text-slate-400 truncate">International CRM</p>
+            <p className="text-xs text-slate-400 truncate">International Core</p>
           </div>
         </div>
 

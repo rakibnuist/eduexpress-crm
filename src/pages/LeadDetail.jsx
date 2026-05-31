@@ -52,9 +52,9 @@ export default function LeadDetail({ user }) {
 
   useEffect(() => {
     if (lead) {
-      document.title = `${lead.client_name} - Profile | EduExpress CRM`;
+      document.title = `${lead.client_name} - Profile | EduExpress Core`;
     } else {
-      document.title = "Client Profile | EduExpress CRM";
+      document.title = "Client Profile | EduExpress Core";
     }
   }, [lead]);
 
@@ -65,6 +65,7 @@ export default function LeadDetail({ user }) {
   const [error, setError]       = useState(null);
   const [editing, setEditing]   = useState(false);
   const [settings, setSettings] = useState(null);
+  const [stages, setStages]     = useState([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -87,7 +88,10 @@ export default function LeadDetail({ user }) {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.settings().then(setSettings).catch(() => {}); }, []);
+  useEffect(() => {
+    api.settings().then(setSettings).catch(() => {});
+    api.applicationMeta().then(d => setStages(d.stages)).catch(() => {});
+  }, []);
 
   // Real-time: prepend any new activity for this lead as it happens
   useEffect(() => {
@@ -144,6 +148,21 @@ export default function LeadDetail({ user }) {
               <h2 className="text-2xl font-bold text-slate-800 truncate">{lead.client_name}</h2>
               <span className="font-mono text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{lead.lead_id}</span>
               <StatusBadge status={lead.lead_status} />
+              {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') && (
+                <InlineStageSelect
+                  value={lead.application_stage}
+                  stages={stages}
+                  onChange={async (newStage) => {
+                    try {
+                      await api.updateStage(lead.id, { stage: newStage });
+                      toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
+                      load();
+                    } catch (e) {
+                      toast.error(e.message || 'Could not change stage');
+                    }
+                  }}
+                />
+              )}
               {lead.source && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase
                   ${lead.source === 'Agent' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>
@@ -227,9 +246,23 @@ export default function LeadDetail({ user }) {
 
           <Card title="Application" icon={<Plane size={14}/>}>
             <Row label="Stage">
-              {lead.application_stage
-                ? <span className="text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full capitalize">{lead.application_stage.replace(/_/g, ' ')}</span>
-                : <span className="text-slate-400">Not started</span>}
+              {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') ? (
+                <InlineStageSelect
+                  value={lead.application_stage}
+                  stages={stages}
+                  onChange={async (newStage) => {
+                    try {
+                      await api.updateStage(lead.id, { stage: newStage });
+                      toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
+                      load();
+                    } catch (e) {
+                      toast.error(e.message || 'Could not change stage');
+                    }
+                  }}
+                />
+              ) : (
+                <span className="text-slate-400">Not started</span>
+              )}
             </Row>
             <Row label="Visa deadline">{lead.visa_deadline || '—'}</Row>
             <Row label="Departure">{lead.departure_date || '—'}</Row>
@@ -549,4 +582,39 @@ function describe(a) {
       return { icon: <Activity size={14}/>, bg: 'bg-slate-100 text-slate-500',
                text: <>{a.type.replace(/_/g, ' ')}</> };
   }
+}
+
+const STAGE_COLORS_LIST = [
+  { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-700 hover:bg-slate-100' },
+  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-805 text-blue-800 hover:bg-blue-100' },
+  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-850 text-violet-800 hover:bg-violet-100' },
+  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-850 text-amber-800 hover:bg-amber-100' },
+  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-850 text-orange-800 hover:bg-orange-100' },
+  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-850 text-teal-800 hover:bg-teal-100' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-850 text-emerald-800 hover:bg-emerald-100' },
+  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-850 text-green-800 hover:bg-green-100' },
+  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-850 text-indigo-800 hover:bg-indigo-100' },
+  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-850 text-fuchsia-800 hover:bg-fuchsia-100' },
+  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-850 text-pink-800 hover:bg-pink-100' },
+  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-850 text-sky-800 hover:bg-sky-100' },
+];
+
+function InlineStageSelect({ value, onChange, stages }) {
+  if (!stages || stages.length === 0) return null;
+  const idx = stages.findIndex(s => s.key === value);
+  const color = STAGE_COLORS_LIST[idx !== -1 ? idx % STAGE_COLORS_LIST.length : 0];
+  const selectValue = value || stages[0]?.key || '';
+  
+  return (
+    <select
+      value={selectValue}
+      onClick={e => e.stopPropagation()} // prevent click
+      onChange={e => onChange(e.target.value)}
+      className={`px-3 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 ${color.bg} ${color.text} ${color.border}`}
+    >
+      {stages.map(s => (
+        <option key={s.key} value={s.key} className="bg-white text-slate-800 font-semibold">{s.label}</option>
+      ))}
+    </select>
+  );
 }

@@ -6,7 +6,7 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
 export default function Settings() {
-  useEffect(() => { document.title = "System Control Center & Settings | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "System Control Center & Settings | EduExpress Core"; }, []);
 
   const [settings, setSettings] = useState(null);
 
@@ -51,7 +51,7 @@ export default function Settings() {
       <Card icon={<Info size={18} />} title="Office Info" color="blue">
         <div className="grid grid-cols-2 gap-4 text-sm">
           <InfoRow label="Organisation" value="EduExpress International" />
-          <InfoRow label="CRM Version" value="1.0 · Web Edition" />
+          <InfoRow label="Core Version" value="1.0 · Web Edition" />
           <InfoRow label="Office SSID" value="EduExpress International" />
           <InfoRow label="Currency" value="BDT (৳)" />
         </div>
@@ -138,7 +138,7 @@ export default function Settings() {
       />
 
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-700">
-        💡 <strong>Note:</strong> These lists are dynamically saved to the database. Edits instantly apply to all drop-downs in the CRM.
+        💡 <strong>Note:</strong> These lists are dynamically saved to the database. Edits instantly apply to all drop-downs in the Core.
       </div>
     </div>
   );

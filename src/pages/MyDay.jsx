@@ -18,7 +18,7 @@ const greeting = () => {
 };
 
 export default function MyDay({ user }) {
-  useEffect(() => { document.title = "Daily Workspace & Reflections | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Daily Workspace & Reflections | EduExpress Core"; }, []);
 
   const [todayInfo, setTodayInfo] = useState(null);   // { linked, today, log, emp_name, emp_id }
   const [history, setHistory]     = useState([]);     // recent daily logs
@@ -364,7 +364,7 @@ export default function MyDay({ user }) {
             {/* Premium Metrics Grid */}
             <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Today's CRM Performance Metrics</p>
+                <p className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Today's Performance Metrics</p>
                 <span className="text-[9px] text-slate-400 font-medium">Verify or manually adjust these numbers</span>
               </div>
               

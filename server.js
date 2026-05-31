@@ -320,10 +320,11 @@ app.get('/api/applications', (req, res) => {
     ORDER BY l.id DESC`).all(params);
 
   const stages = getApplicationStages();
+  const defaultStageKey = stages[0]?.key || 'documents';
   // Sort rows dynamically in memory based on the order of stages from Settings list
   rows.sort((a, b) => {
-    const stageA = a.application_stage || 'documents';
-    const stageB = b.application_stage || 'documents';
+    const stageA = a.application_stage || defaultStageKey;
+    const stageB = b.application_stage || defaultStageKey;
     const orderA = stages.find(s => s.key === stageA)?.order ?? 0;
     const orderB = stages.find(s => s.key === stageB)?.order ?? 0;
     if (orderA !== orderB) return orderA - orderB;
@@ -618,18 +619,31 @@ app.get('/api/cockpit', (req, res, next) => requireManagerOrAdmin(req, res, () =
   res.json({ today, yesterday, alerts, feed, trend });
 }));
 
-app.get('/api/activity', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/activity', (req, res) => {
   const { type, actor, lead_id, since, before, limit = 100 } = req.query;
   const where = []; const params = [];
+  
+  // Consultants are strictly locked to their own activities
+  if (req.user?.role === 'consultant') {
+    where.push("actor_user_id=?");
+    params.push(req.user.id);
+  } else {
+    // Admins and managers can filter by actor
+    if (actor) {
+      where.push("actor_user_id=?");
+      params.push(actor);
+    }
+  }
+  
   if (type)    { where.push("type=?");          params.push(type); }
-  if (actor)   { where.push("actor_user_id=?"); params.push(actor); }
   if (lead_id) { where.push("lead_id=?");       params.push(lead_id); }
   if (since)   { where.push("created_at >= ?"); params.push(since); }
   if (before)  { where.push("id < ?");          params.push(parseInt(before)); }
+  
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const rows = db.prepare(`SELECT * FROM activity_log ${ws} ORDER BY id DESC LIMIT ${Math.min(parseInt(limit) || 100, 500)}`).all(...params);
   res.json(rows);
-}));
+});
 
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
@@ -1512,6 +1526,8 @@ function leadParams(d, lead_id, balance) {
     // Medical
     blood_group: txt(d.blood_group), date_of_birth: txt(d.date_of_birth),
     medical_notes: txt(d.medical_notes), emergency_contact: txt(d.emergency_contact),
+    // Active application stage
+    application_stage: txt(d.application_stage),
   };
 }
 
@@ -1521,14 +1537,16 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   service_fee, paid, balance, payment_status, next_followup, notes,
   meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
   source, referrer, nationality, passport, degree, major, intake_term, university,
-  drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact
+  drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
+  application_stage
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant,
   @service_fee, @paid, @balance, @payment_status, @next_followup, @notes,
   @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
-  @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact
+  @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
+  @application_stage
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -1540,7 +1558,8 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   degree=@degree, major=@major, intake_term=@intake_term, university=@university,
   drive_link=@drive_link, deposit=@deposit,
   blood_group=@blood_group, date_of_birth=@date_of_birth, medical_notes=@medical_notes,
-  emergency_contact=@emergency_contact
+  emergency_contact=@emergency_contact,
+  application_stage=@application_stage
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
@@ -2242,21 +2261,39 @@ function workingDaysInMonth(month) {
 // Auto-record payroll payment as an expense in Finance
 function logPayrollExpense(row) {
   if (!row || row.status !== 'paid') return;
+  const date = row.paid_on || new Date().toISOString().slice(0, 10);
+  const expenseMonth = date.slice(0, 7);
+
   // Check if expense already exists to prevent duplicate entries
   const existing = db.prepare("SELECT * FROM expenses WHERE category='Salary' AND paid_to=? AND month=? AND reference=?")
     .get(row.name, row.month, `Salary - ${row.month}`);
-  if (existing) return;
-
-  db.prepare(`INSERT INTO expenses (date, month, category, paid_to, reference, amount, notes)
-              VALUES (?, ?, 'Salary', ?, ?, ?, ?)`)
-    .run(
-      row.paid_on || new Date().toISOString().slice(0, 10),
-      row.month,
-      row.name,
-      `Salary - ${row.month}`,
-      row.net_pay || 0,
-      row.notes || `Salary payment for ${row.month}`
-    );
+  
+  if (existing) {
+    db.prepare(`UPDATE expenses SET 
+                  date = ?, 
+                  month = ?, 
+                  amount = ?, 
+                  notes = ? 
+                WHERE id = ?`)
+      .run(
+        date,
+        expenseMonth,
+        row.net_pay || 0,
+        row.notes || `Salary payment for ${row.month}`,
+        existing.id
+      );
+  } else {
+    db.prepare(`INSERT INTO expenses (date, month, category, paid_to, reference, amount, notes)
+                VALUES (?, ?, 'Salary', ?, ?, ?, ?)`)
+      .run(
+        date,
+        expenseMonth,
+        row.name,
+        `Salary - ${row.month}`,
+        row.net_pay || 0,
+        row.notes || `Salary payment for ${row.month}`
+      );
+  }
   
   // Log activity
   logActivity({
@@ -2286,7 +2323,21 @@ app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
   }
 
   const rows = db.prepare("SELECT * FROM payroll WHERE month=? ORDER BY name").all(month);
-  const totals = rows.reduce((a, r) => ({
+  
+  // Defensive deduplication to ensure same name is never shown twice in payroll
+  const seen = new Set();
+  const uniqueRows = [];
+  for (const r of rows) {
+    const key = `${r.month}-${r.name}`;
+    if (seen.has(key)) {
+      db.prepare("DELETE FROM payroll WHERE id=?").run(r.id);
+    } else {
+      seen.add(key);
+      uniqueRows.push(r);
+    }
+  }
+
+  const totals = uniqueRows.reduce((a, r) => ({
     base: a.base + (r.base_salary || 0),
     bonus: a.bonus + (r.bonus || 0),
     deductions: a.deductions + (r.deductions || 0),
@@ -2295,7 +2346,7 @@ app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
     pending: a.pending + (r.status !== 'paid' ? (r.net_pay || 0) : 0),
   }), { base: 0, bonus: 0, deductions: 0, net: 0, paid: 0, pending: 0 });
 
-  res.json({ month, workingDays: wd, rows, totals });
+  res.json({ month, workingDays: wd, rows: uniqueRows, totals });
 }));
 
 // Adjust a single payroll line (bonus, deductions, status, paid_on, notes)
@@ -2313,8 +2364,11 @@ app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
     .run(base, b, d, net, stat, paidOn, notes ?? cur.notes ?? null, req.params.id);
   
   const updated = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
-  if (stat === 'paid' && cur.status !== 'paid') {
+  if (stat === 'paid') {
     logPayrollExpense(updated);
+  } else {
+    db.prepare("DELETE FROM expenses WHERE category='Salary' AND paid_to=? AND month=? AND reference=?")
+      .run(updated.name, updated.month, `Salary - ${updated.month}`);
   }
   res.json(updated);
 }));

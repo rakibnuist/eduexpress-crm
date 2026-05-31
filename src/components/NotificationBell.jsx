@@ -89,7 +89,7 @@ export default function NotificationBell({ user }) {
             const meta = describe(a);
             // Strip JSX → plain string body
             const body = typeof meta.text === 'string' ? meta.text : `${a.actor_name} · ${a.type.replace(/_/g, ' ')}${a.lead_name ? ` · ${a.lead_name}` : ''}`;
-            try { new Notification('EduExpress CRM', { body, icon: '/favicon.ico', tag: `act-${a.id}`, silent: !meta.important }); }
+            try { new Notification('EduExpress Core', { body, icon: '/favicon.ico', tag: `act-${a.id}`, silent: !meta.important }); }
             catch {}
           }
         } catch {}

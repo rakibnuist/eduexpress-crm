@@ -32,7 +32,7 @@ const timeAgo = (iso) => {
 };
 
 export default function Cockpit() {
-  useEffect(() => { document.title = "Executive Cockpit | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Executive Cockpit | EduExpress Core"; }, []);
 
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);

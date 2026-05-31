@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 
 export default function Finance() {
-  useEffect(() => { document.title = "Finance & Ledger Control | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Finance & Ledger Control | EduExpress Core"; }, []);
 
   const [tab, setTab] = useState('cashflow');
   const [income, setIncome] = useState({ rows: [], total: 0, sum: 0 });

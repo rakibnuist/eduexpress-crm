@@ -3,7 +3,7 @@ import { GraduationCap, Loader2 } from 'lucide-react';
 import { api } from '../api';
 
 export default function Login({ onSuccess }) {
-  useEffect(() => { document.title = "Employee Login | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Employee Login | EduExpress Core"; }, []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -59,7 +59,7 @@ export default function Login({ onSuccess }) {
             <GraduationCap size={32} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 mt-3">EduExpress International</h1>
-          <p className="text-xs text-slate-500">Student Consultancy CRM · Dhanmondi, Dhaka</p>
+          <p className="text-xs text-slate-500">Consultancy Operations Core · Dhanmondi, Dhaka</p>
         </div>
 
         <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/60 p-8">

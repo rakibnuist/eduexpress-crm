@@ -17,7 +17,7 @@ const curMonth = new Date().toISOString().slice(0, 7);
 const today = new Date().toISOString().slice(0, 10);
 
 export default function HR() {
-  useEffect(() => { document.title = "HR & Attendance Panel | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "HR & Attendance Panel | EduExpress Core"; }, []);
 
   const [tab, setTab] = useState('performance');
   const [employees, setEmployees] = useState([]);
@@ -1129,7 +1129,7 @@ function PerfDrilldown({ emp_id, month, onClose }) {
           <div>
             <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><TrendingUp size={14}/> Activity ({activity.length})</p>
             {activity.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No CRM activity recorded for this employee.</p>
+              <p className="text-xs text-slate-400 italic">No activity recorded for this employee.</p>
             ) : (
               <div className="space-y-1 max-h-96 overflow-y-auto">
                 {activity.map(a => (

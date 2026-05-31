@@ -24,11 +24,12 @@ const STAGES = [
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 export default function Leads({ user }) {
-  useEffect(() => { document.title = "Leads & Pipeline | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Leads & Pipeline | EduExpress Core"; }, []);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ leads: [], total: 0, pages: 1 });
   const [settings, setSettings] = useState(null);
+  const [stages, setStages] = useState([]);
   
   // Kanban board state
   const [byStatus, setByStatus] = useState({});
@@ -102,7 +103,10 @@ export default function Leads({ user }) {
   }, [filters, view]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.settings().then(setSettings).catch(() => {}); }, []);
+  useEffect(() => {
+    api.settings().then(setSettings).catch(() => {});
+    api.applicationMeta().then(d => setStages(d.stages)).catch(() => {});
+  }, []);
 
   const handleSetView = (v) => {
     setView(v);
@@ -311,7 +315,24 @@ export default function Leads({ user }) {
                         <Link to={`/leads/${l.id}`} className="font-bold text-slate-800 hover:text-blue-600 transition-colors truncate max-w-[150px] block">
                           {l.client_name}
                         </Link>
-                        {l.notes && <div className="text-xs text-slate-400 truncate max-w-[150px] font-medium" title={l.notes}>{l.notes}</div>}
+                        {(l.lead_status === 'File Opened' || l.lead_status === 'Enrolled') && (
+                          <div className="mt-1" onClick={e => e.stopPropagation()}>
+                            <InlineStageSelect
+                              value={l.application_stage}
+                              stages={stages}
+                              onChange={async (newStage) => {
+                                try {
+                                  await api.updateStage(l.id, { stage: newStage });
+                                  toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
+                                  load();
+                                } catch (err) {
+                                  toast.error(`Failed to update stage: ${err.message}`);
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                        {l.notes && <div className="text-xs text-slate-400 truncate max-w-[150px] font-medium mt-0.5" title={l.notes}>{l.notes}</div>}
                       </td>
                       <td className="py-3 px-3.5 text-slate-500 whitespace-nowrap text-xs font-medium">
                         {l.phone ? (
@@ -507,6 +528,23 @@ export default function Leads({ user }) {
                             <User size={10} className="flex-shrink-0"/> {l.assigned_consultant}
                           </div>
                         )}
+                        {(l.lead_status === 'File Opened' || l.lead_status === 'Enrolled') && (
+                          <div className="mt-2" onClick={e => e.stopPropagation()}>
+                            <InlineStageSelect
+                              value={l.application_stage}
+                              stages={stages}
+                              onChange={async (newStage) => {
+                                try {
+                                  await api.updateStage(l.id, { stage: newStage });
+                                  toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
+                                  load();
+                                } catch (err) {
+                                  toast.error(`Failed to update stage: ${err.message}`);
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {l.service_fee > 0 && (
@@ -621,7 +659,7 @@ function InlineStatusSelect({ value, onChange, options }) {
     'Positive': 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
     'Office Visited': 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
     'File Opened': 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
-    'Enrolled': 'bg-green-50 text-green-705 text-green-700 border-green-200 hover:bg-green-100',
+    'Enrolled': 'bg-green-50 text-green-755 text-green-700 border-green-200 hover:bg-green-100',
     'Not Interested': 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
   };
   const cls = colors[value] || 'bg-slate-50 text-slate-650 border-slate-200 hover:bg-slate-100';
@@ -634,6 +672,41 @@ function InlineStatusSelect({ value, onChange, options }) {
     >
       {options.map(o => (
         <option key={o} value={o} className="bg-white text-slate-800 font-semibold">{o}</option>
+      ))}
+    </select>
+  );
+}
+
+const STAGE_COLORS_LIST = [
+  { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-700 hover:bg-slate-100' },
+  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-805 text-blue-800 hover:bg-blue-100' },
+  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-850 text-violet-800 hover:bg-violet-100' },
+  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-850 text-amber-800 hover:bg-amber-100' },
+  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-850 text-orange-800 hover:bg-orange-100' },
+  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-850 text-teal-800 hover:bg-teal-100' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-850 text-emerald-800 hover:bg-emerald-100' },
+  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-850 text-green-800 hover:bg-green-100' },
+  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-850 text-indigo-800 hover:bg-indigo-100' },
+  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-850 text-fuchsia-800 hover:bg-fuchsia-100' },
+  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-850 text-pink-800 hover:bg-pink-100' },
+  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-850 text-sky-800 hover:bg-sky-100' },
+];
+
+function InlineStageSelect({ value, onChange, stages }) {
+  if (!stages || stages.length === 0) return null;
+  const idx = stages.findIndex(s => s.key === value);
+  const color = STAGE_COLORS_LIST[idx !== -1 ? idx % STAGE_COLORS_LIST.length : 0];
+  const selectValue = value || stages[0]?.key || '';
+  
+  return (
+    <select
+      value={selectValue}
+      onClick={e => e.stopPropagation()} // prevent row click
+      onChange={e => onChange(e.target.value)}
+      className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 ${color.bg} ${color.text} ${color.border}`}
+    >
+      {stages.map(s => (
+        <option key={s.key} value={s.key} className="bg-white text-slate-800 font-semibold">{s.label}</option>
       ))}
     </select>
   );

@@ -27,7 +27,7 @@ const shiftDate = (iso, days) => {
 };
 
 export default function Reports() {
-  useEffect(() => { document.title = "Analytics & Reports | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Analytics & Reports | EduExpress Core"; }, []);
 
   const [period, setPeriod] = useState('week');
   const [date, setDate]     = useState(() => new Date().toISOString().slice(0, 10));
@@ -292,7 +292,7 @@ function buildSummaryText(d) {
     lines.push(``, `Highlights:`);
     d.highlights.slice(0, 5).forEach(h => lines.push(`  ${h.icon} ${h.text}`));
   }
-  lines.push(``, `— EduExpress International CRM`);
+  lines.push(``, `— EduExpress International Core`);
   return lines.join('\n');
 }
 
@@ -396,7 +396,7 @@ function buildPrintableHTML(d) {
     ${d.highlights.length ? `<h2>Highlights</h2><div class="panel"><ul>${d.highlights.map(h => `<li>${h.icon} ${h.text}</li>`).join('')}</ul></div>` : ''}
 
     <footer>
-      Generated ${new Date().toLocaleString('en-GB')} · EduExpress International CRM
+      Generated ${new Date().toLocaleString('en-GB')} · EduExpress International Core
     </footer>
   </body></html>`;
 }

@@ -11,11 +11,24 @@ const SOURCES   = ['In-house', 'Agent'];
 const DEGREES   = ['Diploma', 'Bachelor', 'L+Bachelor', 'L+Diploma', 'Masters', 'PhD'];
 const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
+const mapStages = (stagesArray) => {
+  return (stagesArray || []).map(label => {
+    let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (key === 'documents_collecting') key = 'documents';
+    if (key === 'documents_ready') key = 'ready';
+    if (key === 'applied_to_university') key = 'submitted';
+    if (key === 'offer_letter_received') key = 'admitted';
+    return { key, label };
+  });
+};
+
 export default function LeadForm({ lead, settings, onSave }) {
   const [form, setForm] = useState(initial(lead));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
   const toast = useToast();
+
+  const mappedStages = useMemo(() => mapStages(settings?.fileStages), [settings?.fileStages]);
 
   // Pre-populate the referrer autocomplete from values already in use.
   // Saves consultants from typo'ing existing names.
@@ -122,6 +135,25 @@ export default function LeadForm({ lead, settings, onSave }) {
             options={settings?.consultants || []} placeholder="— pick —" />
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
+        {(form.lead_status === 'File Opened' || form.lead_status === 'Enrolled') && (
+          <Row cols={1}>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                File Stage (Active Student Profile)
+              </label>
+              <select
+                value={form.application_stage || mappedStages[0]?.key || ''}
+                onChange={e => set('application_stage', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white font-semibold text-slate-700 cursor-pointer"
+              >
+                <option value="">— pick file stage —</option>
+                {mappedStages.map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          </Row>
+        )}
       </Section>
 
       {/* ── Financial ── */}

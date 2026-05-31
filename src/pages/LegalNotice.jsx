@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 export default function LegalNotice() {
-  useEffect(() => { document.title = "Privacy Policy & Legal Notice | EduExpress CRM"; }, []);
+  useEffect(() => { document.title = "Privacy Policy & Legal Notice | EduExpress Core"; }, []);
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -29,7 +29,7 @@ export default function LegalNotice() {
             <section>
               <h2 className="text-lg font-bold text-slate-800 mb-3">1. Introduction</h2>
               <p>
-                EduExpress International ("we", "us", or "our") operates a CRM and messaging platform
+                EduExpress International ("we", "us", or "our") operates a Core ERP and messaging platform
                 to communicate with prospective and current students regarding educational consultancy
                 services. This Privacy Policy explains how we collect, use, store, and protect your
                 personal information when you interact with us through WhatsApp, Facebook Messenger,
@@ -128,7 +128,7 @@ export default function LegalNotice() {
             <section>
               <h2 className="text-lg font-bold text-slate-800 mb-3">9. Cookies</h2>
               <p>
-                Our web-based CRM application uses essential session cookies to maintain login state.
+                Our web-based Core application uses essential session cookies to maintain login state.
                 We do not use third-party advertising or tracking cookies on this platform.
               </p>
             </section>

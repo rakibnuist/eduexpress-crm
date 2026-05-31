@@ -69,9 +69,9 @@ export default function StudentPortal() {
 
   useEffect(() => {
     if (data?.student?.client_name) {
-      document.title = `${data.student.client_name} - Student Portal | EduExpress`;
+      document.title = `${data.student.client_name} - Student Portal | EduExpress Core`;
     } else {
-      document.title = "Student Portal | EduExpress CRM";
+      document.title = "Student Portal | EduExpress Core";
     }
   }, [data]);
 
