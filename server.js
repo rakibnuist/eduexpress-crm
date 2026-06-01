@@ -251,15 +251,11 @@ function getApplicationStages() {
     'Documents Ready',
     'Applied to University',
     'Interview',
-    'In-Review',
     'Pre-Admission',
     'Deposit',
-    'Admission Notice Received',
-    'JW202',
-    'Application Rejected',
+    'Admission/JW Received',
     'Visa Applied',
     'Visa Approved',
-    'Payment Complete',
     'Visa Rejected',
     'Enrolled',
     'Cancelled',
@@ -270,7 +266,7 @@ function getApplicationStages() {
     if (key === 'documents_collecting') key = 'documents';
     if (key === 'documents_ready') key = 'ready';
     if (key === 'applied_to_university') key = 'submitted';
-    if (key === 'admission_notice_received') key = 'admitted';
+    if (key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
     return { key, label, order };
   });
 }
@@ -1068,16 +1064,34 @@ function runMigrations() {
     console.error("[migration] Payroll update failed:", e.message);
   }
 
-  // Dynamic self-healing migration to reset file stages default config if it's the old default list
+  // Dynamic self-healing migration to reset and force file stages config to the updated user pipeline
   try {
-    const oldStages = `["Documents Collecting","Documents Ready","Applied to University","Offer Letter Received","Visa Applied","Visa Approved","Visa Rejected","Enrolled","Cancelled"]`;
-    const current = db.prepare("SELECT value FROM meta_config WHERE key='settings_fileStages'").get()?.value;
-    if (!current || current === oldStages) {
-      db.prepare("DELETE FROM meta_config WHERE key='settings_fileStages'").run();
-      console.log("[migration] Reset settings_fileStages to dynamic China-centric default flow.");
-    }
+    const newStages = [
+      'Documents Collecting',
+      'Documents Ready',
+      'Applied to University',
+      'Interview',
+      'Pre-Admission',
+      'Deposit',
+      'Admission/JW Received',
+      'Visa Applied',
+      'Visa Approved',
+      'Visa Rejected',
+      'Enrolled',
+      'Cancelled',
+      'Withdraw'
+    ];
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
+    console.log("[migration] Updated settings_fileStages in database to user requested default flow.");
+
+    // Migrate any existing legacy application stages in leads table to their closest new counterparts
+    db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'in_review'").run();
+    db.prepare("UPDATE leads SET application_stage = 'admitted' WHERE application_stage = 'jw202'").run();
+    db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'rejected'").run();
+    db.prepare("UPDATE leads SET application_stage = 'visa_approved' WHERE application_stage = 'payment_complete'").run();
+    console.log("[migration] Successfully remapped legacy lead stages.");
   } catch (e) {
-    console.error("[migration] settings_fileStages reset failed:", e.message);
+    console.error("[migration] settings_fileStages reset/remap failed:", e.message);
   }
 
   // Self-healing migration to rename legacy source names in existing leads
@@ -3470,7 +3484,21 @@ app.get('/api/settings', (req, res) => {
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
     destinations: getList('settings_destinations', ['China','Georgia','Malta']),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
-    fileStages: getList('settings_fileStages', ['Documents Collecting','Documents Ready','Applied to University','Offer Letter Received','Visa Applied','Visa Approved','Visa Rejected','Enrolled','Cancelled']),
+    fileStages: getList('settings_fileStages', [
+      'Documents Collecting',
+      'Documents Ready',
+      'Applied to University',
+      'Interview',
+      'Pre-Admission',
+      'Deposit',
+      'Admission/JW Received',
+      'Visa Applied',
+      'Visa Approved',
+      'Visa Rejected',
+      'Enrolled',
+      'Cancelled',
+      'Withdraw'
+    ]),
     paymentStatuses: getList('settings_paymentStatuses', ['Pending','Partial','Paid','Refunded']),
     incomeCategories: getList('settings_incomeCategories', ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income']),
     expenseCategories: getList('settings_expenseCategories', ['Salary','Office Rent','Marketing','Air Ticket','Airport Pickup','App Fee','Visa Fee','Medical','Mobile Recharge','Client Lunch+Snacks','Transport','Bua Bill','Tissue+Room Spray','Letterhead','Logo','Job Post','Testimonial Video','Review','Yearly Fee','Electrician+Sign Board','Mata Support','Other Expense']),

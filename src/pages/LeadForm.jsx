@@ -17,7 +17,7 @@ const mapStages = (stagesArray) => {
     if (key === 'documents_collecting') key = 'documents';
     if (key === 'documents_ready') key = 'ready';
     if (key === 'applied_to_university') key = 'submitted';
-    if (key === 'offer_letter_received') key = 'admitted';
+    if (key === 'admission_jw_received' || key === 'admission_notice_received' || key === 'offer_letter_received') key = 'admitted';
     return { key, label };
   });
 };
