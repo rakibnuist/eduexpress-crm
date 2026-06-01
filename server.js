@@ -1885,8 +1885,8 @@ function importApplicationRows(rows, actor) {
     (lead_id, date_added, client_name, phone, email, destination, last_education, gpa, english_score,
      program, lead_source, lead_status, assigned_consultant, service_fee, paid, balance,
      source, referrer, nationality, passport, degree, major, intake_term, university,
-     drive_link, deposit)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+     drive_link, deposit, application_stage)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const upd = db.prepare(`UPDATE leads SET
      source=COALESCE(?, source), referrer=COALESCE(?, referrer),
      nationality=COALESCE(?, nationality), passport=COALESCE(?, passport),
@@ -1902,15 +1902,23 @@ function importApplicationRows(rows, actor) {
   const byName = new Map(db.prepare("SELECT id, client_name FROM leads").all().map(r => [String(r.client_name || '').toLowerCase().trim(), r.id]));
 
   const STATUS_MAP = {
-    documents: 'documents', ready: 'ready', submitted: 'submitted',
-    admitted: 'admitted', return: 'submitted', returned: 'submitted',
-    reject: 'documents', rejected: 'documents',
+    'documents': 'documents', 'documents collecting': 'documents',
+    'ready': 'ready', 'documents ready': 'ready',
+    'submitted': 'submitted', 'applied to university': 'submitted',
+    'interview': 'interview',
+    'pre_admission': 'pre_admission', 'pre-admission': 'pre_admission',
+    'deposit': 'deposit',
+    'admitted': 'admitted', 'admission/jw received': 'admitted', 'jw received': 'admitted',
+    'visa_applied': 'visa_applied', 'visa applied': 'visa_applied',
+    'visa_approved': 'visa_approved', 'visa approved': 'visa_approved',
+    'visa_rejected': 'visa_rejected', 'visa rejected': 'visa_rejected',
+    'enrolled': 'enrolled',
+    'cancelled': 'cancelled',
+    'withdraw': 'withdraw', 'withdrawn': 'withdraw',
+    'return': 'submitted', 'returned': 'submitted',
+    'reject': 'documents', 'rejected': 'documents'
   };
-  const APP_STAGE_FROM_STATUS = {
-    documents: 'documents', ready: 'ready', submitted: 'submitted',
-    admitted: 'admitted', return: 'submitted', returned: 'submitted',
-    reject: 'documents', rejected: 'documents',
-  };
+  const APP_STAGE_FROM_STATUS = { ...STATUS_MAP };
 
   const txn = db.transaction(() => {
     for (const r of rows) {
@@ -1922,13 +1930,20 @@ function importApplicationRows(rows, actor) {
       else if (byName.has(name.toLowerCase())) existingId = byName.get(name.toLowerCase());
 
       const statusKey = (r.status || '').toLowerCase().trim();
-      const appStage = APP_STAGE_FROM_STATUS[statusKey] || null;
+      const appStage = APP_STAGE_FROM_STATUS[statusKey] || 'documents';
+      const firstUni = r.universities ? String(r.universities).split(/[,/;]/)[0]?.trim() : (r.university || null);
 
       if (existingId) {
+        const lead = db.prepare("SELECT lead_status, application_stage FROM leads WHERE id=?").get(existingId);
+        const nextStage = APP_STAGE_FROM_STATUS[statusKey] || lead?.application_stage || 'documents';
+        const nextStatus = (lead?.lead_status && lead.lead_status !== 'New Lead') ? lead.lead_status : 'File Opened';
+        
+        db.prepare("UPDATE leads SET lead_status=? WHERE id=?").run(nextStatus, existingId);
+
         upd.run(
           r.source || null, r.referrer || null, r.nationality || null, r.passport || null,
-          r.degree || null, r.major || null, r.intake_term || null, r.primary_university || null,
-          r.drive_link || null, r.destination || null, appStage, existingId);
+          r.degree || null, r.major || null, r.intake_term || null, firstUni,
+          r.drive_link || null, r.destination || null, nextStage, existingId);
         updated++;
       } else {
         const lead_id = newLeadId();
@@ -1937,11 +1952,13 @@ function importApplicationRows(rows, actor) {
           name, r.phone || null, r.email || null, r.destination || null,
           r.last_education || null, r.gpa || null, r.english_score || null,
           r.program || r.major || null, r.lead_source || 'Excel import',
-          appStage ? 'File Opened' : 'New Lead',
+          'File Opened',
           r.assigned_consultant || null, r.service_fee || 0, r.paid || 0, (r.service_fee || 0) - (r.paid || 0),
           r.source || null, r.referrer || null, r.nationality || null, r.passport || null,
-          r.degree || null, r.major || null, r.intake_term || null, r.primary_university || null,
-          r.drive_link || null, r.deposit || 0);
+          r.degree || null, r.major || null, r.intake_term || null, firstUni,
+          r.drive_link || null, r.deposit || 0,
+          appStage
+        );
         existingId = info.lastInsertRowid;
         if (passportKey) byPassport.set(passportKey, existingId);
         byName.set(name.toLowerCase(), existingId);
