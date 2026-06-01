@@ -23,6 +23,7 @@ export default function Finance() {
   const [settings, setSettings] = useState(null);
   const [modal, setModal] = useState(null);
   const [month, setMonth] = useState('');
+  const [liveBalance, setLiveBalance] = useState(0);
 
   function load() {
     const p = month ? { month } : {};
@@ -30,6 +31,14 @@ export default function Finance() {
     api.expenses(p).then(setExpenses);
     api.pnl().then(setPnl);
     api.settings().then(setSettings);
+    
+    // Fetch cashflow for the selected month to get the live remaining balance
+    const activeMonth = month || new Date().toISOString().slice(0, 7);
+    api.cashflow(activeMonth).then(d => {
+      if (d && d.totals) {
+        setLiveBalance(d.totals.closing);
+      }
+    });
   }
 
   useEffect(() => { load(); }, [month]);
@@ -72,7 +81,7 @@ export default function Finance() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <FinKpi icon={<TrendingUp size={20} />} label="Total Income" value={income.sum} color="emerald" symbol="৳" />
         <FinKpi icon={<TrendingDown size={20} />} label="Total Expenses" value={expenses.sum} color="red" symbol="৳" />
-        <FinKpi icon={<DollarSign size={20} />} label={`Net Profit${margin > 0 ? ` (${margin}% margin)` : ''}`} value={profit} color={profit >= 0 ? 'blue' : 'red'} symbol="৳" />
+        <FinKpi icon={<DollarSign size={20} />} label="Remaining Balance" value={liveBalance} color={liveBalance >= 0 ? 'blue' : 'red'} symbol="৳" />
       </div>
 
       {/* Tabs */}
@@ -125,7 +134,7 @@ export default function Finance() {
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={v => '৳' + v.toLocaleString()} contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)' }} />
                     <Line type="monotone" dataKey="cumulative" stroke="#6366f1" strokeWidth={2.5} dot={false} name="Cumulative" />
-                    <Line type="monotone" dataKey="profit" stroke="#34d399" strokeWidth={2} dot={false} name="Monthly Profit" />
+                    <Line type="monotone" dataKey="profit" stroke="#34d399" strokeWidth={2} dot={false} name="Monthly Net" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -137,7 +146,7 @@ export default function Finance() {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-100">
                       <tr>
-                        {['Month', 'Income', 'Expense', 'Net Profit', 'Margin', 'Cumulative'].map(h => (
+                        {['Month', 'Income', 'Expense', 'Net Balance', 'Margin', 'Cumulative'].map(h => (
                           <th key={h} className="text-left py-2.5 px-4 text-xs text-slate-500 font-medium">{h}</th>
                         ))}
                       </tr>

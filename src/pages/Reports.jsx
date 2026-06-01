@@ -119,7 +119,7 @@ function ReportBody({ data, period }) {
         <Headline icon={<Users size={16}/>}        label="New leads"   value={h.new_leads.current}   delta={h.new_leads.delta}   color="blue" />
         <Headline icon={<GraduationCap size={16}/>} label="Enrolments"  value={h.enrolments.current}  delta={h.enrolments.delta}  color="emerald" />
         <Headline icon={<Wallet size={16}/>}        label="Revenue"     value={fmt(h.revenue.current)} delta={h.revenue.delta}    color="violet" />
-        <Headline icon={<TrendingUp size={16}/>}    label="Net cash"    value={fmt(h.net_cash.current)} delta={h.net_cash.delta}  color={h.net_cash.current >= 0 ? 'blue' : 'rose'} />
+        <Headline icon={<TrendingUp size={16}/>}    label="Remaining Balance" value={fmt(data.cashflow.closing)} color="blue" />
         <Headline icon={<Calendar size={16}/>}      label="Attendance"  value={`${h.attendance.current}%`} color="amber" />
       </div>
 
@@ -290,7 +290,7 @@ function buildSummaryText(d) {
     `🧑‍🎓 New leads: ${h.new_leads.current} ${arrow(h.new_leads.delta)}`,
     `🎓 Enrolments: ${h.enrolments.current} ${arrow(h.enrolments.delta)}`,
     `💵 Revenue: ৳${Number(h.revenue.current).toLocaleString()} ${arrow(h.revenue.delta)}`,
-    `💰 Net cash: ৳${Number(h.net_cash.current).toLocaleString()} ${arrow(h.net_cash.delta)}`,
+    `💰 Remaining Balance: ৳${Number(d.cashflow.closing).toLocaleString()}`,
     `🕘 Attendance: ${h.attendance.current}%`,
     ``,
     `Top performers:`,
@@ -548,7 +548,7 @@ function buildPrintableHTML(d) {
       ${kpi('New leads', h.new_leads.current, h.new_leads.delta)}
       ${kpi('Enrolments', h.enrolments.current, h.enrolments.delta)}
       ${kpi('Revenue', fmt(h.revenue.current), h.revenue.delta)}
-      ${kpi('Net cash', fmt(h.net_cash.current), h.net_cash.delta)}
+      ${kpi('Remaining Balance', fmt(d.cashflow.closing))}
       ${kpi('Attendance', h.attendance.current + '%')}
     </div>
 
