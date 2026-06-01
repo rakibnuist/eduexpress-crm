@@ -51,6 +51,10 @@ export function isDead() { return _dead; }
 // leave a half-written (corrupt) crm.db on disk.
 function doSave() {
   const data = _db.export();
+  const dir = dirname(_dbPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
   const tmp = _dbPath + '.tmp';
   writeFileSync(tmp, Buffer.from(data));
   renameSync(tmp, _dbPath);

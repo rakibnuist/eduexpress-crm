@@ -27,3 +27,4 @@ dist-ssr
 crm.db
 crm.db-shm
 crm.db-wal
+.jwt_secret

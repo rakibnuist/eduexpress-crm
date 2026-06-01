@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initDatabase, isDead } from './sqldb.js';
@@ -9,13 +9,32 @@ import { initDatabase, isDead } from './sqldb.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
+const DB_DIR = dirname(DB_PATH);
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // ─── AUTH primitives ───────────────────────────────────────────────────────
-const JWT_SECRET = process.env.JWT_SECRET || ('dev-' + crypto.randomBytes(32).toString('hex'));
+// Get or create persistent stable JWT_SECRET if process.env.JWT_SECRET is not set
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  const secretPath = join(DB_DIR, '.jwt_secret');
+  try {
+    if (!existsSync(DB_DIR)) {
+      mkdirSync(DB_DIR, { recursive: true });
+    }
+    if (existsSync(secretPath)) {
+      JWT_SECRET = readFileSync(secretPath, 'utf8').trim();
+    } else {
+      JWT_SECRET = 'edu-' + crypto.randomBytes(32).toString('hex');
+      writeFileSync(secretPath, JWT_SECRET, 'utf8');
+    }
+  } catch (err) {
+    console.warn('[startup] Failed to read/write persistent JWT secret, falling back to dynamic:', err.message);
+    JWT_SECRET = 'dev-' + crypto.randomBytes(32).toString('hex');
+  }
+}
 const AUTH_COOKIE = 'eduexpress_auth';
 const SESSION_DAYS = 30;
 
