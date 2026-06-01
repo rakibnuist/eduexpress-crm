@@ -133,8 +133,8 @@ function makeStatement(rawSql) {
         stmt.free();
         return row || undefined;
       } catch (e) {
-        if (handleFatalError(e, `get ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
-        throw new Error(`[sqldb] get failed: ${e.message}\nSQL: ${sql}`);
+        if (handleFatalError(e, `get ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
+        throw new Error(`[sqldb] get failed: ${e.message}\nSQL: ${sql}`, { cause: e });
       }
     },
 
@@ -149,8 +149,8 @@ function makeStatement(rawSql) {
         stmt.free();
         return rows;
       } catch (e) {
-        if (handleFatalError(e, `all ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
-        throw new Error(`[sqldb] all failed: ${e.message}\nSQL: ${sql}`);
+        if (handleFatalError(e, `all ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
+        throw new Error(`[sqldb] all failed: ${e.message}\nSQL: ${sql}`, { cause: e });
       }
     },
 
@@ -167,8 +167,8 @@ function makeStatement(rawSql) {
         if (write) scheduleSave();
         return { changes, lastInsertRowid };
       } catch (e) {
-        if (handleFatalError(e, `run ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting');
-        throw new Error(`[sqldb] run failed: ${e.message}\nSQL: ${sql}`);
+        if (handleFatalError(e, `run ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
+        throw new Error(`[sqldb] run failed: ${e.message}\nSQL: ${sql}`, { cause: e });
       }
     },
 
@@ -219,7 +219,7 @@ export async function initDatabase(dbPath) {
       // good but a known table fails (e.g. partially-truncated B-tree pages),
       // treat the whole file as corrupt.
       try { _db.exec("SELECT count(*) FROM sqlite_master WHERE type='table'"); }
-      catch (e2) { throw new Error(`master query failed: ${e2.message}`); }
+      catch (e2) { throw new Error(`master query failed: ${e2.message}`, { cause: e2 }); }
       console.log(`[sqldb] Loaded existing DB from ${dbPath}`);
     } catch (e) {
       console.error(`[sqldb] ⚠️  DB corrupt (${e.message}). Backing up and recreating.`);

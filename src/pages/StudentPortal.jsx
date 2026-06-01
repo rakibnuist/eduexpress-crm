@@ -308,7 +308,7 @@ function RequestedDoc({ doc, token, onUpdated }) {
   );
 }
 
-function ConversationThread({ token, consultant, studentName, thread, onSent }) {
+function ConversationThread({ token, consultant, thread, onSent }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 

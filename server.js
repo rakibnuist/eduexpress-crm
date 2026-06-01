@@ -3367,7 +3367,7 @@ app.post('/webhook/meta', async (req, res) => {
           const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
           const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
 
-          let content = null, type = msg.type, mediaUrl = null, caption = null;
+          let content, type = msg.type, mediaUrl = null, caption = null;
           if (msg.type === 'text')     { content = msg.text?.body; }
           else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
           else if (msg.type === 'audio')    { mediaUrl = msg.audio?.id;    content = '[Voice Message]'; }
