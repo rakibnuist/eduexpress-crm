@@ -7,7 +7,7 @@
    Intake, Degree, Major, Universities (multi-uni per applicant w/ status),
    Drive Link, Deposit, Visa & Departure dates, Notes, Documents checklist.
 */
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
