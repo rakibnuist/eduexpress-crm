@@ -3521,8 +3521,19 @@ app.get('/api/settings', (req, res) => {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
+  
+  // Auto-align with active employees list (all employees are consultants by default)
+  let activeEmployees = [];
+  try {
+    activeEmployees = db.prepare("SELECT name FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1'").all().map(e => e.name).filter(Boolean);
+  } catch (e) {
+    console.error("Could not fetch active employees for settings:", e);
+  }
+  const customConsultants = getList('settings_consultants', ['Ema','Afsana','Sakib','Mukta','Rafi','Admin']);
+  const combinedConsultants = Array.from(new Set([...activeEmployees, ...customConsultants])).filter(Boolean).sort();
+
   res.json({
-    consultants: getList('settings_consultants', ['Ema','Afsana','Sakib','Mukta','Rafi','Admin']),
+    consultants: combinedConsultants,
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
     destinations: getList('settings_destinations', ['China','Georgia','Malta']),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
