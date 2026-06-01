@@ -92,6 +92,8 @@ export default function Applications({ user }) {
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [filterStage, setFilterStage]     = useState('all');
   const [filterDest, setFilterDest]       = useState('all');
   const [filterSource, setFilterSource]   = useState('all');
@@ -122,6 +124,22 @@ export default function Applications({ user }) {
   useEffect(() => {
     api.settings().then(setSettings).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [view, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+
+  const handleBulkDelete = async () => {
+    try {
+      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
+      setSelectedIds([]);
+      setBulkDeleting(false);
+      load();
+      toast.success(`${selectedIds.length} applications deleted successfully`);
+    } catch (err) {
+      toast.error(err.message || 'Could not delete some applications');
+    }
+  };
 
   const handleCreateApplication = async (e) => {
     e.preventDefault();
@@ -243,8 +261,14 @@ export default function Applications({ user }) {
             className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+          {selectedIds.length > 0 && (
+            <button onClick={() => setBulkDeleting(true)}
+              className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+              <Trash2 size={16} /> Delete Selected ({selectedIds.length})
+            </button>
+          )}
           <button onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98]">
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
             <Plus size={16} /> Add Application
           </button>
         </div>
@@ -354,7 +378,7 @@ export default function Applications({ user }) {
       ) : view === 'kanban' ? (
         <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} />
       ) : (
-        <TableView rows={filtered} onPick={setSelected} stages={stages} />
+        <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
       )}
 
       {selected && (
@@ -364,7 +388,22 @@ export default function Applications({ user }) {
           referrers={referrers}
           onClose={() => setSelected(null)}
           onChanged={load}
+          user={user}
         />
+      )}
+
+      {bulkDeleting && (
+        <Modal title="Delete Selected Applications?" onClose={() => setBulkDeleting(false)}>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-650">
+              Are you sure you want to permanently delete the <strong>{selectedIds.length}</strong> selected student records? This action will remove them from the database and cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setBulkDeleting(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer select-none">Cancel</button>
+              <button onClick={handleBulkDelete} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 cursor-pointer select-none">Delete All</button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {showAddModal && (
@@ -625,7 +664,7 @@ function ApplicationCard({ card, onClick }) {
 }
 
 /* ───────────────────────────── TABLE (Excel-style) ───────────────────────────── */
-function TableView({ rows, onPick, stages }) {
+function TableView({ rows, onPick, stages, selectedIds, setSelectedIds }) {
   const stageLabel = (key) => stages.find(s => s.key === key)?.label || '—';
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -633,6 +672,28 @@ function TableView({ rows, onPick, stages }) {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
             <tr>
+              <Th>
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && rows.every(r => selectedIds.includes(r.id))}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedIds(prev => {
+                        const rowIds = rows.map(r => r.id);
+                        const union = Array.from(new Set([...prev, ...rowIds]));
+                        return union;
+                      });
+                    } else {
+                      setSelectedIds(prev => {
+                        const rowIds = rows.map(r => r.id);
+                        return prev.filter(id => !rowIds.includes(id));
+                      });
+                    }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                />
+              </Th>
               <Th>#</Th>
               <Th>Source</Th>
               <Th>Name</Th>
@@ -652,6 +713,20 @@ function TableView({ rows, onPick, stages }) {
           <tbody className="divide-y divide-slate-100">
             {rows.map((r, i) => (
               <tr key={r.id} onClick={() => onPick(r)} className="hover:bg-blue-50/40 cursor-pointer">
+                <Td onClick={e => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(r.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedIds(prev => [...prev, r.id]);
+                      } else {
+                        setSelectedIds(prev => prev.filter(id => id !== r.id));
+                      }
+                    }}
+                    className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                  />
+                </Td>
                 <Td>{i + 1}</Td>
                 <Td>{r.source && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
@@ -693,7 +768,7 @@ function Th({ children, right }) { return <th className={`px-3 py-2.5 font-semib
 function Td({ children, right, className = '' }) { return <td className={`px-3 py-2.5 align-middle whitespace-nowrap ${right ? 'text-right' : ''} ${className}`}>{children}</td>; }
 
 /* ───────────────────────────── PANEL ───────────────────────────── */
-function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
+function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, user }) {
   const [lead, setLead]     = useState(null);
   const [docs, setDocs]     = useState([]);
   const [unis, setUnis]     = useState([]);
@@ -702,33 +777,60 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
   const toast = useToast();
   const confirm = useConfirm();
 
+  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
+  const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
+
+  const onCloseRef = useRef(onClose);
+  const toastRef = useRef(toast);
+  const stagesRef = useRef(stages);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    toastRef.current = toast;
+    stagesRef.current = stages;
+  });
+
   const load = useCallback(async () => {
-    const [l, d, u] = await Promise.all([
-      api.getLead(leadId),
-      api.documents(leadId),
-      api.universityApps(leadId),
-    ]);
-    setLead(l); setDocs(d); setUnis(u);
-    setForm({
-      application_stage: l.application_stage || (stages[0]?.key || 'documents'),
-      source:            l.source || '',
-      referrer:          l.referrer || '',
-      nationality:       l.nationality || '',
-      passport:          l.passport || '',
-      degree:            l.degree || '',
-      major:             l.major || l.program || '',
-      intake_term:       l.intake_term || '',
-      university:        l.university || '',
-      drive_link:        l.drive_link || '',
-      deposit:           l.deposit || '',
-      visa_deadline:     l.visa_deadline || '',
-      departure_date:    l.departure_date || '',
-      application_notes: l.application_notes || '',
-      blood_group:       l.blood_group || '',
-      date_of_birth:     l.date_of_birth || '',
-      medical_notes:     l.medical_notes || '',
-      emergency_contact: l.emergency_contact || '',
-    });
+    try {
+      const [l, d, u] = await Promise.all([
+        api.getLead(leadId),
+        api.documents(leadId),
+        api.universityApps(leadId),
+      ]);
+      if (!l) {
+        toastRef.current?.error("Lead not found or access denied");
+        onCloseRef.current?.();
+        return;
+      }
+      setLead(l); 
+      setDocs(d || []); 
+      setUnis(u || []);
+      const curStages = stagesRef.current || [];
+      setForm({
+        application_stage: l.application_stage || (curStages[0]?.key || 'documents'),
+        source:            l.source || '',
+        referrer:          l.referrer || '',
+        nationality:       l.nationality || '',
+        passport:          l.passport || '',
+        degree:            l.degree || '',
+        major:             l.major || l.program || '',
+        intake_term:       l.intake_term || '',
+        university:        l.university || '',
+        drive_link:        l.drive_link || '',
+        deposit:           l.deposit || '',
+        visa_deadline:     l.visa_deadline || '',
+        departure_date:    l.departure_date || '',
+        application_notes: l.application_notes || '',
+        blood_group:       l.blood_group || '',
+        date_of_birth:     l.date_of_birth || '',
+        medical_notes:     l.medical_notes || '',
+        emergency_contact: l.emergency_contact || '',
+      });
+    } catch (err) {
+      console.error("Error loading application detail panel:", err);
+      toastRef.current?.error(err.message || "Failed to load application details");
+      onCloseRef.current?.();
+    }
   }, [leadId]);
 
   useEffect(() => { load(); }, [load]);
@@ -826,8 +928,8 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
     </div>;
   }
 
-  const currentIdx = stages.findIndex(s => s.key === (form.application_stage || stages[0]?.key || 'documents'));
-  const received = docs.filter(d => ['received','verified'].includes(d.status)).length;
+  const currentIdx = (stages || []).findIndex(s => s.key === (form.application_stage || stages?.[0]?.key || 'documents'));
+  const received = (docs || []).filter(d => d && ['received','verified'].includes(d.status)).length;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -858,15 +960,15 @@ function ApplicationPanel({ leadId, stages, referrers, onClose, onChanged }) {
         <div className="px-6 py-5 border-b border-slate-100">
           <div className="flex items-center justify-between mb-3">
             <p className="font-semibold text-slate-700 text-sm">Application Stage</p>
-            {currentIdx < stages.length - 1 && (
+            {currentIdx >= 0 && currentIdx < stages.length - 1 && stages[currentIdx + 1] && (
               <button onClick={advance} disabled={saving}
                 className="text-xs font-medium px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5">
-                Advance to {stages[currentIdx + 1].label} <ArrowRight size={13} />
+                Advance to {stages[currentIdx + 1]?.label || 'Next Stage'} <ArrowRight size={13} />
               </button>
             )}
           </div>
           <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
-            {stages.map((s, i) => (
+            {(stages || []).map((s, i) => (
               <div key={s.key} className="flex items-center gap-1.5">
                 <button onClick={() => changeStage(s.key)} disabled={saving}
                   className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50

@@ -54,6 +54,8 @@ export default function Leads({ user }) {
 
   const [modal, setModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const searchRef = useRef();
   const navigate = useNavigate();
   const toast = useToast();
@@ -128,6 +130,22 @@ export default function Leads({ user }) {
       load();
       toast.success('Lead deleted');
     } catch (e) { toast.error(e.message || 'Could not delete'); }
+  }
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [filters, view]);
+
+  async function handleBulkDelete() {
+    try {
+      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
+      setSelectedIds([]);
+      setBulkDeleting(false);
+      load();
+      toast.success(`${selectedIds.length} leads deleted successfully`);
+    } catch (e) {
+      toast.error(e.message || 'Could not delete some leads');
+    }
   }
 
   function exportCSV() {
@@ -212,6 +230,11 @@ export default function Leads({ user }) {
           </div>
 
           <div className="flex gap-2">
+            {selectedIds.length > 0 && (
+              <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm select-none cursor-pointer">
+                <Trash2 size={15} /> Delete Selected ({selectedIds.length})
+              </button>
+            )}
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
               <Download size={15} /> Export CSV
             </button>
@@ -319,6 +342,27 @@ export default function Leads({ user }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70">
+                  <th className="py-3.5 px-3.5 text-left text-xs">
+                    <input
+                      type="checkbox"
+                      checked={data.leads.length > 0 && data.leads.every(l => selectedIds.includes(l.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(prev => {
+                            const pageIds = data.leads.map(l => l.id);
+                            const union = Array.from(new Set([...prev, ...pageIds]));
+                            return union;
+                          });
+                        } else {
+                          setSelectedIds(prev => {
+                            const pageIds = data.leads.map(l => l.id);
+                            return prev.filter(id => !pageIds.includes(id));
+                          });
+                        }
+                      }}
+                      className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                    />
+                  </th>
                   {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Source', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
@@ -330,6 +374,20 @@ export default function Leads({ user }) {
                   const isOverdue = l.next_followup && l.next_followup < today && l.lead_status !== 'Enrolled' && l.lead_status !== 'Not Interested';
                   return (
                     <tr key={l.id} className="hover:bg-blue-50/40 transition-colors group cursor-pointer">
+                      <td className="py-3 px-3.5 text-left" onClick={e => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(l.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedIds(prev => [...prev, l.id]);
+                            } else {
+                              setSelectedIds(prev => prev.filter(id => id !== l.id));
+                            }
+                          }}
+                          className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                        />
+                      </td>
                       <td className="py-3 px-3.5 font-mono text-xs">
                         <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold">
                           {l.lead_id}
@@ -421,7 +479,7 @@ export default function Leads({ user }) {
                 })}
                 {data.leads.length === 0 && (
                   <tr>
-                    <td colSpan={14} className="py-12">
+                    <td colSpan={15} className="py-12">
                       <div className="text-center">
                         <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2">
                           <Search size={20} />
@@ -523,9 +581,14 @@ export default function Leads({ user }) {
                           <p className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{l.client_name}</p>
                           <p className="text-[10px] text-slate-400 font-mono font-semibold mt-0.5">{l.lead_id}</p>
                         </div>
-                        <button onClick={(e) => { e.stopPropagation(); setModal(l); }} className="p-1.5 text-slate-400 hover:text-blue-600 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
-                          <Pencil size={12}/>
-                        </button>
+                        <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                            <Pencil size={12}/>
+                          </button>
+                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-rose-600 flex-shrink-0 rounded-lg hover:bg-rose-55 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                            <Trash2 size={12}/>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="mt-2 space-y-1">
@@ -649,6 +712,20 @@ export default function Leads({ user }) {
           <div className="flex gap-2 justify-end">
             <button onClick={() => setDeleting(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 cursor-pointer select-none">Cancel</button>
             <button onClick={() => handleDelete(deleting)} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 cursor-pointer select-none">Delete</button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkDeleting && (
+        <Modal title="Delete Selected Leads?" onClose={() => setBulkDeleting(false)}>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-655">
+              Are you sure you want to permanently delete the <strong>{selectedIds.length}</strong> selected lead records? This action will remove them from all pipeline views and cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setBulkDeleting(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer select-none">Cancel</button>
+              <button onClick={handleBulkDelete} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 cursor-pointer select-none">Delete All</button>
+            </div>
           </div>
         </Modal>
       )}
