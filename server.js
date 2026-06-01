@@ -303,9 +303,12 @@ function templateFor(destination) {
 }
 
 function leadIsVisibleTo(lead, user) {
-  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
-  if (lead.source === 'China' && !isAuthorized) return false;
-  if (isAuthorized) return true;
+  const isChinaAuthorized = user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
+  const isChinaLead = lead.source === 'China' || (lead.lead_id && lead.lead_id.startsWith('C-'));
+  if (isChinaLead && !isChinaAuthorized) return false;
+
+  const isGeneralAuthorized = user?.role === 'admin' || user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
+  if (isGeneralAuthorized) return true;
   const me = user?.consultant_name || user?.name || '';
   if (!me || !lead.assigned_consultant) return false;
   const leadC = lead.assigned_consultant.toLowerCase().trim();
@@ -322,12 +325,13 @@ app.get('/api/application/meta', (req, res) => {
 // All leads currently in the application pipeline (i.e. that have a stage set,
 // or are 'Enrolled'/'File Opened'). Returns one card-friendly row each.
 app.get('/api/applications', (req, res) => {
-  const isAuthorized = req.user?.role === 'admin' || req.user?.role === 'manager';
+  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
   const where = [
     "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
   ];
-  if (!isAuthorized) {
+  if (!isChinaAuthorized) {
     where.push("(l.source IS NULL OR l.source != 'China')");
+    where.push("(l.lead_id IS NULL OR l.lead_id NOT LIKE 'C-%')");
   }
   const params = {};
   if (req.user?.role === 'consultant') { // admins + managers see all
@@ -1560,10 +1564,10 @@ app.get('/api/dashboard', (req, res) => {
   const meName = req.user?.consultant_name || req.user?.name || '';
   const meClean = meName.split(' ')[0];
   
-  let ws = '';
+  let ws = "WHERE (source IS NULL OR source != 'China') AND (lead_id IS NULL OR lead_id NOT LIKE 'C-%')";
   const params = {};
   if (isConsultant) {
-    ws = "WHERE (TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')";
+    ws += " AND (TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')";
     params.me = meName;
     params.meClean = meClean;
   }
@@ -1585,11 +1589,7 @@ app.get('/api/dashboard', (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
-  const where = []; const params = {};
-  const isAuthorized = req.user?.role === 'admin' || req.user?.role === 'manager';
-  if (!isAuthorized) {
-    where.push("(source IS NULL OR source != 'China')");
-  }
+  const where = ["(source IS NULL OR source != 'China') AND (lead_id IS NULL OR lead_id NOT LIKE 'C-%')"]; const params = {};
   if (search) { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
@@ -1690,7 +1690,11 @@ WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
-  const isChinaApp = d.isChinaApp || d.source === 'China';
+  const isChinaApp = d.isChinaApp || d.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-'));
+  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
+  if (isChinaApp && !isChinaAuthorized) {
+    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can add China inside student records.' });
+  }
   const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, lead_id, balance);
@@ -1707,6 +1711,14 @@ app.put('/api/leads/:id', async (req, res) => {
   const d = req.body;
   const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!oldLead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(oldLead, req.user)) {
+    return res.status(403).json({ error: 'Access denied to this lead record' });
+  }
+  const isChinaApp = d.source === 'China' || oldLead.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-')) || (oldLead.lead_id && String(oldLead.lead_id).startsWith('C-'));
+  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
+  if (isChinaApp && !isChinaAuthorized) {
+    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can edit China inside student records.' });
+  }
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, oldLead.lead_id, balance);
   db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
@@ -1727,7 +1739,20 @@ app.put('/api/leads/:id', async (req, res) => {
   }
   res.json(lead);
 });
-app.delete('/api/leads/:id', (req, res) => { db.prepare("DELETE FROM leads WHERE id=?").run(req.params.id); res.json({ ok: true }); });
+app.delete('/api/leads/:id', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (!leadIsVisibleTo(lead, req.user)) {
+    return res.status(403).json({ error: 'Access denied to this lead record' });
+  }
+  const isChinaApp = lead.source === 'China' || (lead.lead_id && String(lead.lead_id).startsWith('C-'));
+  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
+  if (isChinaApp && !isChinaAuthorized) {
+    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can delete China inside student records.' });
+  }
+  db.prepare("DELETE FROM leads WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
 
 // ─── LEAD TIMELINE — full chronological story of one lead ──────────────────
 // Merges activity_log entries for this lead with related income rows so the

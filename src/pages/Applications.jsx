@@ -115,8 +115,14 @@ export default function Applications({ user }) {
     assigned_consultant: '',
   });
 
-  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
+  const isAuthorized = user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
   const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
+
+  const [subTab, setSubTab] = useState('global'); // 'global' or 'china'
+
+  // Pre-calculate stable counts of all rows matching each tab context
+  const globalCount = useMemo(() => rows.filter(r => r.source !== 'China' && !(r.lead_id && r.lead_id.startsWith('C-'))).length, [rows]);
+  const chinaCount = useMemo(() => rows.filter(r => r.source === 'China' || (r.lead_id && r.lead_id.startsWith('C-'))).length, [rows]);
 
   const [hideEmptyColumns, setHideEmptyColumns] = useState(() => localStorage.getItem('hide_empty_cols') === 'true');
   useEffect(() => { localStorage.setItem('hide_empty_cols', hideEmptyColumns); }, [hideEmptyColumns]);
@@ -127,7 +133,7 @@ export default function Applications({ user }) {
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [view, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+  }, [view, filterStage, filterDest, filterSource, filterReferrer, searchQuery, subTab]);
 
   const handleBulkDelete = async () => {
     try {
@@ -148,9 +154,11 @@ export default function Applications({ user }) {
       return;
     }
     try {
+      const isChina = subTab === 'china';
       const payload = {
         ...newApp,
-        isChinaApp: true,
+        source: isChina ? 'China' : newApp.source,
+        isChinaApp: isChina || newApp.source === 'China',
         lead_status: 'File Opened',
         application_stage: 'documents',
       };
@@ -164,7 +172,7 @@ export default function Applications({ user }) {
         degree: 'Bachelor',
         major: '',
         university: '',
-        source: 'In-House',
+        source: isChina ? 'China' : 'In-House',
         referrer: '',
         assigned_consultant: '',
       });
@@ -183,7 +191,18 @@ export default function Applications({ user }) {
 
   useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
 
-  const filtered = useMemo(() => rows.filter(r => {
+  // Derive the active dataset matching the selected tab
+  const activeTabRows = useMemo(() => {
+    return rows.filter(r => {
+      const isChina = r.source === 'China' || (r.lead_id && r.lead_id.startsWith('C-'));
+      if (isAuthorized) {
+        return subTab === 'china' ? isChina : !isChina;
+      }
+      return !isChina; // regular consultants don't have access to China Inside
+    });
+  }, [rows, isAuthorized, subTab]);
+
+  const filtered = useMemo(() => activeTabRows.filter(r => {
     const defaultStage = stages[0]?.key || 'documents';
     if (filterStage    !== 'all' && (r.application_stage || defaultStage) !== filterStage) return false;
     if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
@@ -202,21 +221,21 @@ export default function Applications({ user }) {
       if (!nameMatch && !idMatch && !destMatch && !majorMatch && !universityMatch && !consultantMatch && !degreeMatch && !referrerMatch) return false;
     }
     return true;
-  }), [rows, stages, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+  }), [activeTabRows, stages, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
 
-  // Per-stage counts (across all rows, not filtered, so the strip is stable)
+  // Per-stage counts (across active tab rows, not filtered, so the strip is stable)
   const stageCounts = useMemo(() => {
     const m = Object.fromEntries(stages.map(s => [s.key, 0]));
     const defaultStage = stages[0]?.key || 'documents';
-    rows.forEach(r => {
+    activeTabRows.forEach(r => {
       const k = stages.some(s => s.key === r.application_stage) ? r.application_stage : defaultStage;
       m[k] = (m[k] || 0) + 1;
     });
     return m;
-  }, [rows, stages]);
+  }, [activeTabRows, stages]);
 
-  const destinations = useMemo(() => unique(rows.map(r => r.destination)), [rows]);
-  const referrers    = useMemo(() => unique(rows.map(r => r.referrer)), [rows]);
+  const destinations = useMemo(() => unique(activeTabRows.map(r => r.destination)), [activeTabRows]);
+  const referrers    = useMemo(() => unique(activeTabRows.map(r => r.referrer)), [activeTabRows]);
 
   // Stats by source (B2B vs In-House) — matches the Excel's "Remark" column
   const sourceSplit = useMemo(() => {
@@ -240,9 +259,20 @@ export default function Applications({ user }) {
             <GraduationCap size={22} className="text-blue-600" /> Application Pipeline
           </h2>
           <p className="text-sm text-slate-500">
-            {filtered.length} active{rows.length !== filtered.length ? ` of ${rows.length}` : ''} ·
-            <strong className="text-emerald-600 ml-1">{sourceSplit['In-House']}</strong> in-house ·
-            <strong className="text-violet-600 ml-1">{sourceSplit['B2B']}</strong> B2B
+            {filtered.length} active{activeTabRows.length !== filtered.length ? ` of ${activeTabRows.length}` : ''}
+            {(!isAuthorized || subTab === 'global') && (
+              <>
+                {' '}·{' '}
+                <strong className="text-emerald-600 ml-1">{sourceSplit['In-House']}</strong> in-house ·{' '}
+                <strong className="text-violet-600 ml-1">{sourceSplit['B2B']}</strong> B2B
+              </>
+            )}
+            {isAuthorized && subTab === 'china' && (
+              <>
+                {' '}·{' '}
+                <strong className="text-amber-600 ml-1">{filtered.length}</strong> China Inside Students
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -267,12 +297,63 @@ export default function Applications({ user }) {
               <Trash2 size={16} /> Delete Selected ({selectedIds.length})
             </button>
           )}
-          <button onClick={() => setShowAddModal(true)}
+          <button onClick={() => {
+            setNewApp(prev => ({
+              ...prev,
+              source: subTab === 'china' ? 'China' : 'In-House'
+            }));
+            setShowAddModal(true);
+          }}
             className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
             <Plus size={16} /> Add Application
           </button>
         </div>
       </div>
+
+      {isAuthorized && (
+        <div className="flex bg-slate-105 p-0.5 rounded-xl border border-slate-200 w-fit shadow-sm gap-0.5">
+          <button
+            onClick={() => {
+              setSubTab('global');
+              setFilterSource('all');
+              setFilterStage('all');
+            }}
+            className={`flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg transition-all ${
+              subTab === 'global'
+                ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Building2 size={13} className={subTab === 'global' ? 'text-blue-600' : 'text-slate-400'} />
+            Global Student Profiles
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              subTab === 'global' ? 'bg-blue-50 text-blue-700 font-bold' : 'bg-slate-200 text-slate-650'
+            }`}>
+              {globalCount}
+            </span>
+          </button>
+          <button
+            onClick={() => {
+              setSubTab('china');
+              setFilterSource('all');
+              setFilterStage('all');
+            }}
+            className={`flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg transition-all ${
+              subTab === 'china'
+                ? 'bg-white text-slate-850 shadow-sm border border-slate-200/50'
+                : 'text-slate-500 hover:text-slate-850'
+            }`}
+          >
+            <MapPin size={13} className={subTab === 'china' ? 'text-amber-600 animate-pulse' : 'text-slate-400'} />
+            China Inside Student Profiles
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              subTab === 'china' ? 'bg-amber-50 text-amber-700 font-bold' : 'bg-slate-200 text-slate-650'
+            }`}>
+              {chinaCount}
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Advanced Sticky Filter & Search Bar */}
       <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-md -mx-4 lg:-mx-6 px-4 lg:px-6 py-2 border-b border-slate-200/80">
@@ -344,13 +425,13 @@ export default function Applications({ user }) {
       </div>
 
       {/* Stage pill strip — click to filter, click again to clear */}
-      {stages.length > 0 && rows.length > 0 && (
+      {stages.length > 0 && activeTabRows.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           <button onClick={() => setFilterStage('all')}
             className={`flex-shrink-0 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
               ${filterStage === 'all' ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                 : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
-            All <span className="ml-1 opacity-75">{rows.length}</span>
+            All <span className="ml-1 opacity-75">{activeTabRows.length}</span>
           </button>
           {stages.map((s, index) => {
             const n = stageCounts[s.key] || 0;
@@ -407,7 +488,7 @@ export default function Applications({ user }) {
       )}
 
       {showAddModal && (
-        <Modal title="Add Direct China Application" onClose={() => setShowAddModal(false)}>
+        <Modal title={subTab === 'china' ? "Add China Inside Student Application" : "Add Direct Student Application"} onClose={() => setShowAddModal(false)}>
           <form onSubmit={handleCreateApplication} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -488,9 +569,10 @@ export default function Applications({ user }) {
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Source (Remark)</label>
                 <select
-                  value={newApp.source}
+                  value={subTab === 'china' ? 'China' : newApp.source}
+                  disabled={subTab === 'china'}
                   onChange={e => setNewApp({ ...newApp, source: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                 >
                   {visibleSources.map(s => (
                     <option key={s} value={s}>{s}</option>
@@ -614,7 +696,7 @@ function ApplicationCard({ card, onClick }) {
   const docPct = card.docs_total > 0 ? Math.round((card.docs_received / card.docs_total) * 100) : 0;
   const visaSoon = card.visa_deadline && (new Date(card.visa_deadline) - new Date() < 30 * 86400000);
   const isB2B = card.source === 'B2B' || card.source === 'Agent';
-  const isChina = card.source === 'China';
+  const isChina = card.source === 'China' || (card.lead_id && card.lead_id.startsWith('C-'));
 
   return (
     <button onClick={onClick} className="w-full text-left bg-white rounded-xl p-3 shadow-sm hover:shadow-md border border-slate-100 hover:border-blue-200 transition-all">
@@ -624,14 +706,14 @@ function ApplicationCard({ card, onClick }) {
       </div>
       <p className="text-[11px] text-slate-400 truncate">{card.lead_id}</p>
       <div className="flex items-center gap-1.5 flex-wrap mt-1">
-        {card.source && (
+        {(card.source || isChina) && (
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
             ${isChina 
               ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' 
               : isB2B 
               ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' 
               : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-            {card.source}
+            {card.source || 'China'}
           </span>
         )}
         {card.destination && (
@@ -728,14 +810,14 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds }) {
                   />
                 </Td>
                 <Td>{i + 1}</Td>
-                <Td>{r.source && (
+                <Td>{(r.source || (r.lead_id && r.lead_id.startsWith('C-'))) && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
-                    ${r.source === 'China'
+                    ${(r.source === 'China' || (r.lead_id && r.lead_id.startsWith('C-')))
                       ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
                       : (r.source === 'B2B' || r.source === 'Agent')
                       ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm'
                       : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-                    {r.source}
+                    {r.source || 'China'}
                   </span>
                 )}</Td>
                 <Td><div className="font-medium text-slate-800">{r.client_name}</div>
@@ -777,7 +859,7 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
   const toast = useToast();
   const confirm = useConfirm();
 
-  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
+  const isAuthorized = user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
   const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
 
   const onCloseRef = useRef(onClose);
