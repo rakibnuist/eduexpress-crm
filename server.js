@@ -565,7 +565,7 @@ function buildDaySummary(date) {
 
   const newLeads     = db.prepare("SELECT COUNT(*) as n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?").get(date, date).n;
   const conversions  = db.prepare("SELECT COUNT(*) as n FROM activity_log WHERE type='lead_status_changed' AND to_value='Enrolled' AND substr(created_at,1,10)=?").get(date).n;
-  const paymentsRow  = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(amount),0) as s FROM income WHERE date=?").get(date);
+  const paymentsRow  = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(amount),0) as s FROM income WHERE date=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(date);
   const expensesRow  = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(amount),0) as s FROM expenses WHERE date=?").get(date);
 
   return {
@@ -655,7 +655,7 @@ app.get('/api/cockpit', (req, res, next) => requireManagerOrAdmin(req, res, () =
     trend.push({
       date: d,
       newLeads: db.prepare("SELECT COUNT(*) as n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?").get(d, d).n,
-      revenue:  db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM income WHERE date=?").get(d).s,
+      revenue:  db.prepare("SELECT COALESCE(SUM(amount),0) as s FROM income WHERE date=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(d).s,
     });
   }
 
@@ -1030,6 +1030,7 @@ function runMigrations() {
     `ALTER TABLE lead_documents ADD COLUMN student_uploaded_at TEXT`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
+    `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -1091,6 +1092,9 @@ function runMigrations() {
 
   // Self-healing migration to seed pre-June 2026 partner investments
   try {
+    // Delete duplicate cumulative entries if they exist
+    db.prepare("DELETE FROM income WHERE notes LIKE 'Pre-June 2026 %'").run();
+
     db.prepare("UPDATE income SET client_name = 'Sakib Al Jubaer' WHERE category='Investment' AND client_name IN ('Sakib', 'Sakib Al Jubaer')").run();
 
     const investments = [
@@ -1112,6 +1116,15 @@ function runMigrations() {
         console.log(`[migration] Seeded investment for ${inv.name}: ${inv.val} BDT`);
       }
     });
+
+    // Exclude prior investments from cash calculations (except Sakib's last 100k)
+    db.prepare(`
+      UPDATE income 
+      SET exclude_from_cash = 1 
+      WHERE category = 'Investment' 
+        AND NOT (client_name = 'Sakib Al Jubaer' AND amount = 100000 AND date = '2026-05-15')
+    `).run();
+
     console.log("[migration] Partner investments self-healing checks complete.");
   } catch (e) {
     console.error("[migration] Seeding partner investments failed:", e.message);
@@ -2079,7 +2092,9 @@ app.post('/api/public/student/:token/message', (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/income', (req, res) => {
   const { month, page=1, limit=50 } = req.query;
-  const w = month ? `WHERE month='${month}'` : '';
+  const w = month 
+    ? `WHERE month='${month}' AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)` 
+    : `WHERE (exclude_from_cash IS NULL OR exclude_from_cash = 0)`;
   const sum = db.prepare(`SELECT SUM(amount) as s FROM income ${w}`).get().s || 0;
   const total = db.prepare(`SELECT COUNT(*) as c FROM income ${w}`).get().c;
   const rows = db.prepare(`SELECT * FROM income ${w} ORDER BY date DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all();
@@ -2126,7 +2141,7 @@ app.delete('/api/expenses/:id', (req, res) => { db.prepare("DELETE FROM expenses
 app.get('/api/pnl', (req, res) => {
   const months = db.prepare("SELECT DISTINCT month FROM (SELECT month FROM income UNION SELECT month FROM expenses) WHERE month IS NOT NULL ORDER BY month").all().map(r => r.month);
   res.json(months.map(m => {
-    const inc = db.prepare("SELECT SUM(amount) as s FROM income WHERE month=?").get(m).s||0;
+    const inc = db.prepare("SELECT SUM(amount) as s FROM income WHERE month=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(m).s||0;
     const exp = db.prepare("SELECT SUM(amount) as s FROM expenses WHERE month=?").get(m).s||0;
     return { month: m, income: inc, expense: exp, profit: inc-exp, margin: inc>0?((inc-exp)/inc*100).toFixed(1):0 };
   }));
@@ -2148,7 +2163,7 @@ const EXPENSE_CATEGORIES = [
 function computeOpeningBalance(month) {
   const initial = parseFloat(getConfig('cash_initial')) || 0;
   if (!month) return initial;
-  const sumIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ?").get(month).s;
+  const sumIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(month).s;
   const sumOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month < ?").get(month).s;
   return initial + sumIn - sumOut;
 }
@@ -2170,7 +2185,7 @@ app.put('/api/cashflow/initial', (req, res, next) => requireAdmin(req, res, () =
 // Includes running balance per row so the table reads like a real cashflow.
 app.get('/api/cashflow', (req, res, next) => requireManagerOrAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
-  const incomeRows  = db.prepare("SELECT id,date,category,client_name,reference,amount,notes FROM income   WHERE month=? ORDER BY date, id").all(month);
+  const incomeRows  = db.prepare("SELECT id,date,category,client_name,reference,amount,notes FROM income   WHERE month=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0) ORDER BY date, id").all(month);
   const expenseRows = db.prepare("SELECT id,date,category,paid_to AS client_name,reference,amount,notes FROM expenses WHERE month=? ORDER BY date, id").all(month);
   const opening = computeOpeningBalance(month);
   const totalIn  = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
@@ -2213,12 +2228,12 @@ app.get('/api/cashflow/year', (req, res, next) => requireManagerOrAdmin(req, res
   const year = (req.query.year || new Date().toISOString().slice(0, 4)).toString();
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const initial = parseFloat(getConfig('cash_initial')) || 0;
-  const priorIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ?").get(`${year}-01`).s;
+  const priorIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(`${year}-01`).s;
   const priorOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month < ?").get(`${year}-01`).s;
   let running = initial + priorIn - priorOut;
 
   const rows = months.map(m => {
-    const inc = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month=?").get(m).s;
+    const inc = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(m).s;
     const exp = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month=?").get(m).s;
     const opening = running;
     const closing = opening + inc - exp;
@@ -2713,16 +2728,16 @@ app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () =
     WHERE type='uni_app_status' AND substr(created_at,1,10) BETWEEN ? AND ? GROUP BY to_value`).all(startStr, endStr);
 
   // ── Cashflow ───────────────────────────────────────────────────────────
-  const cashIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM income   WHERE date BETWEEN ? AND ?`).get(startStr, endStr);
+  const cashIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM income   WHERE date BETWEEN ? AND ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)`).get(startStr, endStr);
   const cashOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM expenses WHERE date BETWEEN ? AND ?`).get(startStr, endStr);
-  const prevIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date BETWEEN ? AND ?`).get(prevStartStr, prevEndStr).s;
+  const prevIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date BETWEEN ? AND ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)`).get(prevStartStr, prevEndStr).s;
   const prevOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date BETWEEN ? AND ?`).get(prevStartStr, prevEndStr).s;
-  const incomeCat  = db.prepare(`SELECT COALESCE(category,'Uncategorised') AS k, SUM(amount) AS v FROM income   WHERE date BETWEEN ? AND ? GROUP BY category ORDER BY v DESC`).all(startStr, endStr);
+  const incomeCat  = db.prepare(`SELECT COALESCE(category,'Uncategorised') AS k, SUM(amount) AS v FROM income   WHERE date BETWEEN ? AND ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0) GROUP BY category ORDER BY v DESC`).all(startStr, endStr);
   const expenseCat = db.prepare(`SELECT COALESCE(category,'Uncategorised') AS k, SUM(amount) AS v FROM expenses WHERE date BETWEEN ? AND ? GROUP BY category ORDER BY v DESC`).all(startStr, endStr);
-  const topClients = db.prepare(`SELECT client_name AS k, SUM(amount) AS v FROM income WHERE date BETWEEN ? AND ? AND client_name IS NOT NULL GROUP BY client_name ORDER BY v DESC LIMIT 5`).all(startStr, endStr);
+  const topClients = db.prepare(`SELECT client_name AS k, SUM(amount) AS v FROM income WHERE date BETWEEN ? AND ? AND client_name IS NOT NULL AND (exclude_from_cash IS NULL OR exclude_from_cash = 0) GROUP BY client_name ORDER BY v DESC LIMIT 5`).all(startStr, endStr);
   // Cash position at end of period
   const initial = parseFloat(getConfig('cash_initial')) || 0;
-  const priorIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date < ?`).get(startStr).s;
+  const priorIn  = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE date < ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)`).get(startStr).s;
   const priorOut = db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date < ?`).get(startStr).s;
   const opening = initial + priorIn - priorOut;
   const closing = opening + cashIn.s - cashOut.s;
