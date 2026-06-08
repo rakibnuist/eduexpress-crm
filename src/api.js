@@ -29,6 +29,16 @@ async function req(path, opts = {}, attempt = 1) {
   return r.json();
 }
 
+function toQuery(p) {
+  const filtered = {};
+  for (const k in p) {
+    if (p[k] !== undefined && p[k] !== null && p[k] !== '') {
+      filtered[k] = p[k];
+    }
+  }
+  return new URLSearchParams(filtered).toString();
+}
+
 export const api = {
   // Auth
   me:     ()                              => req('/auth/me'),
@@ -41,11 +51,11 @@ export const api = {
 
   // Owner's Cockpit
   cockpit:  ()       => req('/cockpit'),
-  activity: (p = {}) => req('/activity?' + new URLSearchParams(p)),
+  activity: (p = {}) => req('/activity?' + toQuery(p)),
 
   // Application pipeline
   applicationMeta: ()        => req('/application/meta'),
-  applications:    (p = {})  => req('/applications?' + new URLSearchParams(p)),
+  applications:    (p = {})  => req('/applications?' + toQuery(p)),
   updateStage:     (id, d)   => req(`/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify(d) }),
   documents:       (leadId)  => req(`/leads/${leadId}/documents`),
   addDocument:     (leadId, d) => req(`/leads/${leadId}/documents`, { method: 'POST', body: JSON.stringify(d) }),
@@ -64,7 +74,7 @@ export const api = {
   saveSettings: (key, value) => req('/settings', { method: 'POST', body: JSON.stringify({ key, value }) }),
 
   // Leads
-  leads:        (p = {}) => req('/leads?' + new URLSearchParams(p)),
+  leads:        (p = {}) => req('/leads?' + toQuery(p)),
   getLead:      (id)     => req(`/leads/${id}`),
   createLead:   (d)      => req('/leads',       { method: 'POST', body: JSON.stringify(d) }),
   updateLead:   (id, d)  => req(`/leads/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
@@ -91,19 +101,19 @@ export const api = {
     }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t)))),
 
   // Finance
-  income:        (p = {}) => req('/income?' + new URLSearchParams(p)),
+  income:        (p = {}) => req('/income?' + toQuery(p)),
   createIncome:  (d)      => req('/income',       { method: 'POST', body: JSON.stringify(d) }),
   updateIncome:  (id, d)  => req(`/income/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteIncome:  (id)     => req(`/income/${id}`, { method: 'DELETE' }),
-  expenses:      (p = {}) => req('/expenses?' + new URLSearchParams(p)),
+  expenses:      (p = {}) => req('/expenses?' + toQuery(p)),
   createExpense: (d)      => req('/expenses',       { method: 'POST', body: JSON.stringify(d) }),
   updateExpense: (id, d)  => req(`/expenses/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteExpense: (id)     => req(`/expenses/${id}`, { method: 'DELETE' }),
   pnl: () => req('/pnl'),
 
   // Cashflow
-  cashflow:           (month)  => req('/cashflow?' + new URLSearchParams({ month })),
-  cashflowYear:       (year)   => req('/cashflow/year?' + new URLSearchParams({ year })),
+  cashflow:           (month)  => req('/cashflow?' + toQuery({ month })),
+  cashflowYear:       (year)   => req('/cashflow/year?' + toQuery({ year })),
   cashflowCategories: ()       => req('/cashflow/categories'),
   cashflowInvestors:  ()       => req('/cashflow/investors'),
   setInitialCash:     (amount) => req('/cashflow/initial', { method: 'PUT', body: JSON.stringify({ amount }) }),
@@ -129,7 +139,7 @@ export const api = {
   deleteEmployee: (id)    => req(`/employees/${id}`, { method: 'DELETE' }),
 
   // Attendance
-  attendance:        (p = {}) => req('/attendance?' + new URLSearchParams(p)),
+  attendance:        (p = {}) => req('/attendance?' + toQuery(p)),
   attendanceSummary: (month)  => req(`/attendance/summary/${month}`),
   checkIn:           (d)      => req('/attendance/checkin', { method: 'POST', body: JSON.stringify(d) }),
   checkOut:          (id, t)  => req(`/attendance/${id}/checkout`, { method: 'PUT', body: JSON.stringify({ time: t }) }),
@@ -142,17 +152,17 @@ export const api = {
   setKpiTargets: (d)     => req('/kpi/targets', { method: 'PUT', body: JSON.stringify(d) }),
 
   // Payroll
-  payroll:        (month) => req('/payroll?' + new URLSearchParams({ month })),
+  payroll:        (month) => req('/payroll?' + toQuery({ month })),
   updatePayroll:  (id, d) => req(`/payroll/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   markPayrollPaid:(id)    => req(`/payroll/${id}/mark-paid`, { method: 'POST' }),
 
   // Reports (weekly/monthly digest)
-  report:         (period, date) => req('/reports?' + new URLSearchParams({ period, date })),
+  report:         (period, date) => req('/reports?' + toQuery({ period, date })),
 
   // Employee performance
-  employeeKpi:    (month) => req('/employee-kpi?' + new URLSearchParams({ month })),
-  employeeKpiOne: (emp_id, month) => req(`/employee-kpi/${emp_id}?` + new URLSearchParams({ month })),
-  dailyLogs:      (params = {}) => req('/daily-logs?' + new URLSearchParams(params)),
+  employeeKpi:    (month) => req('/employee-kpi?' + toQuery({ month })),
+  employeeKpiOne: (emp_id, month) => req(`/employee-kpi/${emp_id}?` + toQuery({ month })),
+  dailyLogs:      (params = {}) => req('/daily-logs?' + toQuery(params)),
   dailyLogsToday: ()         => req('/daily-logs/me/today'),
   submitDailyLog: (d)        => req('/daily-logs', { method: 'POST', body: JSON.stringify(d) }),
 
@@ -174,7 +184,7 @@ export const api = {
   syncChannel:    (id)   => req(`/channels/${id}/sync`, { method: 'POST' }),
 
   // Conversations & Live Chat
-  conversations:   (p = {})  => req('/conversations?' + new URLSearchParams(p)),
+  conversations:   (p = {})  => req('/conversations?' + toQuery(p)),
   getConversation: (id)      => req(`/conversations/${id}`),
   updateConversation:(id, d) => req(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   createConversation:(d)     => req('/conversations', { method: 'POST', body: JSON.stringify(d) }),

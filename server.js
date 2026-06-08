@@ -1653,7 +1653,7 @@ app.get('/api/dashboard', (req, res) => {
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
   const where = ["(source IS NULL OR source != 'China') AND (lead_id IS NULL OR lead_id NOT LIKE 'C-%')"]; const params = {};
-  if (search) { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
+  if (search && search !== 'undefined' && search !== 'null') { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
@@ -3185,7 +3185,7 @@ app.post('/api/channels/:id/sync', async (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/contacts', (req, res) => {
   const { search } = req.query;
-  const where = search ? `WHERE name LIKE '%${search}%' OR phone LIKE '%${search}%'` : '';
+  const where = (search && search !== 'undefined' && search !== 'null') ? `WHERE name LIKE '%${search}%' OR phone LIKE '%${search}%'` : '';
   res.json(db.prepare(`SELECT contacts.*, leads.lead_status, leads.lead_id as crm_lead_id, leads.destination FROM contacts LEFT JOIN leads ON leads.id=contacts.lead_id ${where} ORDER BY contacts.id DESC LIMIT 100`).all());
 });
 
@@ -3221,7 +3221,7 @@ app.get('/api/conversations', (req, res) => {
   if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
   if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
   if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
-  if (search) { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
+  if (search && search !== 'undefined' && search !== 'null') { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id ${ws}`).get(params).c;
   const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
