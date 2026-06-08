@@ -192,4 +192,5 @@ export const api = {
   messages:        (convId)  => req(`/conversations/${convId}/messages`),
   sendMessage:     (convId, d)=> req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
   quickReplies:    ()        => req('/quick-replies'),
+  convertLead:     (convId, d)=> req(`/conversations/${convId}/convert-lead`, { method: 'POST', body: JSON.stringify(d) }),
 };

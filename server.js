@@ -13,7 +13,14 @@ const DB_DIR = dirname(DB_PATH);
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+const UPLOADS_DIR = join(__dirname, 'uploads');
+if (!existsSync(UPLOADS_DIR)) {
+  mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 // ─── AUTH primitives ───────────────────────────────────────────────────────
 // Get or create persistent stable JWT_SECRET if process.env.JWT_SECRET is not set
@@ -184,6 +191,23 @@ function requireManagerOrAdmin(req, res, next) {
     return res.status(403).json({ error: 'Manager or admin only' });
   }
   next();
+}
+
+// Check if a user has access to a specific conversation (admin has access to all; employees/consultants only to their own)
+function userHasAccessToConversation(user, conversationId) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const c = db.prepare(`
+    SELECT channels.consultant, conversations.assigned_to
+    FROM conversations
+    LEFT JOIN channels ON channels.id = conversations.channel_id
+    WHERE conversations.id = ?
+  `).get(conversationId);
+  if (!c) return false;
+  
+  const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
+  if (!meUser) return false;
+  return c.consultant === meUser.consultant_name || c.assigned_to === user.id;
 }
 
 // Random URL-safe token for the student portal share link.
@@ -1571,7 +1595,7 @@ function saveInboundMessage(convId, content, type = 'text', waMessageId = null, 
       direction: 'inbound',
       contact_name: conv?.contact_name,
       channel_type: conv?.channel_type,
-    });
+    }, (u) => userHasAccessToConversation(u, convId));
     return msg;
   } catch (e) {
     if (!e.message.includes('UNIQUE')) console.error('saveInboundMessage:', e.message);
@@ -1579,23 +1603,46 @@ function saveInboundMessage(convId, content, type = 'text', waMessageId = null, 
   }
 }
 
-async function sendWhatsApp(channel, to, text) {
+async function sendWhatsApp(channel, to, text, type = 'text', mediaUrl = null) {
   const cleanTo = to.replace(/\D/g, '');
   const url = `https://graph.facebook.com/v19.0/${channel.phone_number_id}/messages`;
+  let bodyObj = { messaging_product: 'whatsapp', to: cleanTo };
+  if (type === 'image' && mediaUrl) {
+    bodyObj.type = 'image';
+    bodyObj.image = { link: mediaUrl, caption: text || undefined };
+  } else if (type === 'document' && mediaUrl) {
+    bodyObj.type = 'document';
+    bodyObj.document = { link: mediaUrl, filename: text || 'Document' };
+  } else {
+    bodyObj.type = 'text';
+    bodyObj.text = { body: text };
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.access_token}` },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: cleanTo, type: 'text', text: { body: text } })
+    body: JSON.stringify(bodyObj)
   });
   return res.json();
 }
 
-async function sendMessenger(channel, recipientId, text) {
+async function sendMessenger(channel, recipientId, text, type = 'text', mediaUrl = null) {
   const url = `https://graph.facebook.com/v19.0/${channel.page_id}/messages`;
+  let bodyObj = { recipient: { id: recipientId } };
+  if (mediaUrl && (type === 'image' || type === 'document')) {
+    bodyObj.message = {
+      attachment: {
+        type: type === 'image' ? 'image' : 'file',
+        payload: { url: mediaUrl, is_reusable: true }
+      }
+    };
+  } else {
+    bodyObj.message = { text };
+    bodyObj.messaging_type = 'RESPONSE';
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.access_token}` },
-    body: JSON.stringify({ recipient: { id: recipientId }, message: { text }, messaging_type: 'RESPONSE' })
+    body: JSON.stringify(bodyObj)
   });
   return res.json();
 }
@@ -3220,7 +3267,9 @@ const CONV_SELECT = `
     channels.type  AS channel_type,
     channels.color AS channel_color,
     channels.consultant AS channel_consultant,
-    channels.phone_number_id
+    channels.phone_number_id,
+    (SELECT direction FROM messages WHERE conversation_id = conversations.id ORDER BY created_at DESC, id DESC LIMIT 1) AS last_message_direction,
+    (SELECT status FROM messages WHERE conversation_id = conversations.id ORDER BY created_at DESC, id DESC LIMIT 1) AS last_message_status
   FROM conversations
   LEFT JOIN contacts  ON contacts.id  = conversations.contact_id
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
@@ -3233,8 +3282,17 @@ app.get('/api/conversations', (req, res) => {
   if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
   if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
   if (search && search !== 'undefined' && search !== 'null') { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
+
+  // RBAC Access Filter: non-admin employees can only access their assigned WhatsApp/Facebook channels
+  const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
+  if (loggedInUser && loggedInUser.role !== 'admin') {
+    where.push("(channels.consultant = @user_consultant OR conversations.assigned_to = @user_id)");
+    params.user_consultant = loggedInUser.consultant_name || '';
+    params.user_id = loggedInUser.id;
+  }
+
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
-  const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id ${ws}`).get(params).c;
+  const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws}`).get(params).c;
   const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
   res.json({ conversations: convs, total, page: parseInt(page), pages: Math.ceil(total/limit) });
 });
@@ -3242,7 +3300,57 @@ app.get('/api/conversations', (req, res) => {
 app.get('/api/conversations/:id', (req, res) => {
   const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
   if (!conv) return res.status(404).json({ error:'Not found' });
+
+  // RBAC check
+  const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
+  if (loggedInUser && loggedInUser.role !== 'admin') {
+    if (conv.channel_consultant !== loggedInUser.consultant_name && conv.assigned_to !== loggedInUser.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+
   res.json(conv);
+});
+
+// Convert conversation contact into a CRM lead (creating new lead or linking to existing)
+app.post('/api/conversations/:id/convert-lead', (req, res) => {
+  try {
+    const { lead_id } = req.body;
+    const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    let lead = null;
+    if (lead_id) {
+      // Link to existing lead
+      lead = db.prepare("SELECT * FROM leads WHERE id=?").get(lead_id);
+      if (!lead) return res.status(404).json({ error: 'Selected lead not found' });
+
+      db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, conv.contact_id);
+      db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conv.id);
+
+      // If lead does not have assigned consultant, assign the channel's consultant
+      if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
+        const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
+        const consultant = channel?.consultant || 'Abdullah Al Rakib';
+        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(consultant, lead.id);
+        lead.assigned_consultant = consultant;
+      }
+    } else {
+      // Create new lead
+      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message);
+      if (!lead) return res.status(500).json({ error: 'Failed to create lead' });
+    }
+
+    res.json({
+      success: true,
+      lead_id: lead.id,
+      lead,
+      conversation: db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conv.id)
+    });
+  } catch (err) {
+    console.error('Convert lead error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/conversations/:id', (req, res) => {
@@ -3328,9 +3436,18 @@ app.post('/api/conversations/:id/read', (req, res) => {
 // Delete an entire conversation (and its messages)
 app.delete('/api/conversations/:id', (req, res) => {
   try {
-    db.prepare("DELETE FROM messages WHERE conversation_id=?").run(req.params.id);
-    db.prepare("DELETE FROM conversations WHERE id=?").run(req.params.id);
-    broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id) });
+    const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
+    if (conv) {
+      db.prepare("DELETE FROM messages WHERE conversation_id=?").run(req.params.id);
+      db.prepare("DELETE FROM conversations WHERE id=?").run(req.params.id);
+      broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id) }, (u) => {
+        if (!u) return false;
+        if (u.role === 'admin') return true;
+        const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
+        const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(u.id);
+        return channel?.consultant === meUser?.consultant_name || conv.assigned_to === u.id;
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -3376,6 +3493,37 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   res.json(msgs);
 });
 
+// File upload endpoint for base64 encoded media attachments
+app.post('/api/upload', (req, res) => {
+  try {
+    const { name, type, data } = req.body;
+    if (!name || !data) {
+      return res.status(400).json({ error: 'name and data (base64) are required' });
+    }
+    // Clean filename
+    const cleanName = name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filename = `${Date.now()}_${cleanName}`;
+    const filePath = join(UPLOADS_DIR, filename);
+
+    // Decode base64
+    const buffer = Buffer.from(data, 'base64');
+    writeFileSync(filePath, buffer);
+
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.get('host');
+    const fileUrl = `${protocol}://${host}/uploads/${filename}`;
+
+    res.json({
+      url: fileUrl,
+      relativeUrl: `/uploads/${filename}`,
+      name: filename
+    });
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Send message
 app.post('/api/conversations/:id/messages', async (req, res) => {
   try {
@@ -3400,11 +3548,11 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       if (channel.type === 'whatsapp') {
         const to = conv.wa_id || conv.contact_phone;
         if (!to) throw new Error('No recipient phone number found');
-        apiResult = await sendWhatsApp(channel, to, content);
+        apiResult = await sendWhatsApp(channel, to, content, type, media_url);
       } else if (channel.type === 'messenger') {
-        apiResult = await sendMessenger(channel, conv.messenger_id, content);
+        apiResult = await sendMessenger(channel, conv.messenger_id, content, type, media_url);
       } else if (channel.type === 'instagram') {
-        apiResult = await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, conv.instagram_id || conv.messenger_id, content);
+        apiResult = await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, conv.instagram_id || conv.messenger_id, content, type, media_url);
       }
     } catch (e) {
       console.error('Send API error:', e.message);
@@ -3418,8 +3566,8 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       .run(req.params.id, 'out', type, content, media_url||null, waId, status, sent_by, errMsg);
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
 
-    db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), status='open' WHERE id=?").run(content, req.params.id);
-    broadcast('new_message', { ...msg, conversation_id: parseInt(req.params.id), direction: 'outbound' });
+    db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), status='open' WHERE id=?").run(content || (type === 'image' ? '📷 Image' : '📎 Document'), req.params.id);
+    broadcast('new_message', { ...msg, conversation_id: parseInt(req.params.id), direction: 'outbound' }, (u) => userHasAccessToConversation(u, req.params.id));
     res.json({ message: msg, apiResult });
   } catch(e) {
     console.error('sendMessage error:', e.message, e.stack);
@@ -3481,7 +3629,12 @@ app.post('/webhook/meta', async (req, res) => {
         // Delivery/read status updates
         for (const status of val.statuses || []) {
           db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
-          broadcast('message_status', { wa_message_id: status.id, status: status.status });
+          const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
+          if (msg) {
+            broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
+          } else {
+            broadcast('message_status', { wa_message_id: status.id, status: status.status });
+          }
         }
 
         // Incoming messages
@@ -3501,7 +3654,6 @@ app.post('/webhook/meta', async (req, res) => {
           else { content = `[${msg.type}]`; }
 
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
-          createLeadFromContact(contact.id, 'whatsapp', content);
           console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
       }
@@ -3595,7 +3747,6 @@ app.post('/webhook/meta', async (req, res) => {
         }
         if (!text) text = '[message]';
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
-        createLeadFromContact(contact.id, 'messenger', text);
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
     }
@@ -3622,7 +3773,6 @@ app.post('/webhook/meta', async (req, res) => {
         const conv = upsertConversation(contact.id, channel.id, 'instagram');
         const text = msg.message.text || '[message]';
         saveInboundMessage(conv.id, text, 'text', msg.message.mid);
-        createLeadFromContact(contact.id, 'instagram', text);
         console.log(`📸 Instagram [${channel.name}]: ${text}`);
       }
     }
