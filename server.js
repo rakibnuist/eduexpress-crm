@@ -207,7 +207,7 @@ function userHasAccessToConversation(user, conversationId) {
   
   const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
   if (!meUser) return false;
-  return c.consultant === meUser.consultant_name || c.assigned_to === user.id;
+  return (c.consultant && meUser.consultant_name && c.consultant === meUser.consultant_name) || c.assigned_to === user.id;
 }
 
 // Random URL-safe token for the student portal share link.
@@ -3274,6 +3274,16 @@ const CONV_SELECT = `
   LEFT JOIN contacts  ON contacts.id  = conversations.contact_id
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
 `;
+
+app.get('/api/public/debug-conversations', (req, res) => {
+  try {
+    const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id`).get().c;
+    const convs = db.prepare(`${CONV_SELECT} ORDER BY conversations.last_message_at DESC LIMIT 5`).all();
+    res.json({ success: true, total, conversations: convs });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
 
 app.get('/api/conversations', (req, res) => {
   const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;

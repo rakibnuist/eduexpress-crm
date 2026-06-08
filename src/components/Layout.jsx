@@ -15,7 +15,7 @@ const baseNav = [
   { to: '/my-day',       icon: Sun,             label: 'Daily Workspace & Reflections' },
   { to: '/leads',        icon: Users,           label: 'Leads & Pipeline' },
   { to: '/applications', icon: Plane,           label: 'Applications' },
-  { to: '/conversations', icon: MessageSquare,   label: 'Chat Inbox',  chatAccess: true },
+  { to: '/conversations', icon: MessageSquare,   label: 'Chat Inbox' },
   { to: '/finance',      icon: DollarSign,      label: 'Finance',     adminOnly: true },
   { to: '/hr',           icon: UserCheck,       label: 'HR',          adminOnly: true },
   { to: '/settings',     icon: Settings,        label: 'Settings',    adminOnly: true },
@@ -27,8 +27,7 @@ export default function Layout({ children, user, onLogout }) {
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
   const isStaff = user?.role === 'admin' || user?.role === 'manager';
-  const hasChatAccess = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'consultant';
-  const nav = baseNav.filter(n => (!n.adminOnly || isAdmin) && (!n.staffOnly || isStaff) && (!n.chatAccess || hasChatAccess));
+  const nav = baseNav.filter(n => (!n.adminOnly || isAdmin) && (!n.staffOnly || isStaff));
   const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'Core';
 
   const logout = async () => {
