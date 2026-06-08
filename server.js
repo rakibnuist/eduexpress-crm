@@ -729,6 +729,18 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
+    try {
+      const distDir = join(__dirname, 'dist');
+      if (existsSync(distDir)) {
+        const channels = db.prepare("SELECT id, type, name, phone_number_id, waba_id, page_id, ig_account_id, status, active FROM channels").all();
+        const messages = db.prepare("SELECT id, conversation_id, direction, type, status, content, error_msg, created_at FROM messages ORDER BY id DESC LIMIT 20").all();
+        writeFileSync(join(distDir, 'debug-db.json'), JSON.stringify({ channels, messages }));
+        console.log('[startup] Wrote dist/debug-db.json');
+      }
+    } catch (err) {
+      console.error('[startup] Failed to write debug-db.json:', err.message);
+    }
+
     // Trigger historical sync on startup in background for all active Messenger/Instagram channels
     setTimeout(async () => {
       try {
