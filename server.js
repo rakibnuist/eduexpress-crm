@@ -1199,6 +1199,16 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Failed to self-heal conversations status:", e.message);
   }
+
+  // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token
+  try {
+    const newToken = 'EAAVoF1AFCwoBRtNAVfoUh9UMzdxtZBtsPpLq44ywxCUNHo7rZA70SwZA3ZCCKfdiUchZA5VWw3LnVTlDIiyqqbfOLVbWh1GSV7SVj3M7pR1m17GUXCPFYKd0kxspI0ZCoYrpw2ryfOkYo18SZAkJNSttD6kZAlDmERYFJhFTjZB9xMIZBaqO8ZCJRydcxFD6ZBGVj4ypxQZDZD';
+    const info = db.prepare("UPDATE channels SET access_token = ?").run(newToken);
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
+    console.log(`[migration] Self-healed ${info.changes} channels and page_access_token with fresh System User token.`);
+  } catch (e) {
+    console.error("[migration] Failed to apply new System User token:", e.message);
+  }
 }
 
 function seedData() {
