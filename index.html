@@ -5,6 +5,38 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EduExpress CRM</title>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        fetch('/api/public/client-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'error',
+            message: message,
+            source: source,
+            lineno: lineno,
+            colno: colno,
+            stack: error ? error.stack : null,
+            href: window.location.href,
+            userAgent: navigator.userAgent
+          })
+        }).catch(function() {});
+        return false;
+      };
+      window.onunhandledrejection = function(event) {
+        fetch('/api/public/client-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'unhandledrejection',
+            message: event.reason ? (event.reason.message || String(event.reason)) : 'Unknown rejection',
+            stack: event.reason ? event.reason.stack : null,
+            href: window.location.href,
+            userAgent: navigator.userAgent
+          })
+        }).catch(function() {});
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

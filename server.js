@@ -2134,6 +2134,29 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
 
 
 
+app.post('/api/public/client-log', (req, res) => {
+  try {
+    const logPath = join(__dirname, 'dist', 'client-errors.json');
+    let logs = [];
+    if (existsSync(logPath)) {
+      try {
+        logs = JSON.parse(readFileSync(logPath, 'utf8'));
+      } catch {}
+    }
+    const entry = {
+      timestamp: new Date().toISOString(),
+      ...req.body
+    };
+    console.log('[Client Error Logged]', entry);
+    logs.push(entry);
+    if (logs.length > 100) logs = logs.slice(-100);
+    writeFileSync(logPath, JSON.stringify(logs, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Client Log Error]', err.message);
+  }
+  res.json({ ok: true });
+});
+
 // Public — student fetches the conversation thread (their messages + staff replies)
 app.get('/api/public/student/:token/thread', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
