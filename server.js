@@ -82,6 +82,16 @@ function clearAuthCookie(res) {
   res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
+app.get('/api/public/debug-db', (req, res) => {
+  try {
+    const channels = db.prepare("SELECT id, type, name, phone_number_id, waba_id, page_id, ig_account_id, status, active FROM channels").all();
+    const messages = db.prepare("SELECT id, conversation_id, direction, type, status, content, error_msg, created_at FROM messages ORDER BY id DESC LIMIT 20").all();
+    res.json({ channels, messages });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(join(__dirname, 'dist')));
