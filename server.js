@@ -3375,8 +3375,14 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
     const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
     if (!conv) return res.status(404).json({ error:'Conversation not found' });
 
-    // Get full channel (with token)
-    const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
+    // Get full channel (with token), fallback to active channel of same type if not found
+    let channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
+    if (!channel) {
+      channel = db.prepare("SELECT * FROM channels WHERE type=? AND status='active'").get(conv.channel_type);
+      if (channel) {
+        db.prepare("UPDATE conversations SET channel_id=? WHERE id=?").run(channel.id, req.params.id);
+      }
+    }
     if (!channel) return res.status(400).json({ error:'Channel not found' });
 
     let apiResult = null;
