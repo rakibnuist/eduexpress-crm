@@ -489,7 +489,7 @@ export default function Conversations({ user }) {
                   <div className="relative flex-shrink-0 select-none">
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base shadow-sm
                       ${isWhatsApp ? 'bg-[#25d366]' : isMessenger ? 'bg-[#0084ff]' : 'bg-gradient-to-tr from-[#feda75] via-[#d62976] to-[#962fbf]'}`}>
-                      {(conv.contact_name || 'C').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+                      {String(conv.contact_name || 'C').split(' ').filter(Boolean).map(s => s[0] || '').slice(0, 2).join('').toUpperCase()}
                     </div>
                     {/* Tiny Channel Badge */}
                     <span className={`absolute -bottom-1 -right-1 w-5.5 h-5.5 rounded-full flex items-center justify-center border-2 border-white text-[9px] font-black text-white shadow-sm
@@ -556,7 +556,7 @@ export default function Conversations({ user }) {
               <div className="flex items-center gap-3.5 min-w-0">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-sm
                   ${selectedConv.channel_type === 'whatsapp' ? 'bg-[#25d366]' : 'bg-[#0084ff]'}`}>
-                  {(selectedConv.contact_name || 'C').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+                  {String(selectedConv.contact_name || 'C').split(' ').filter(Boolean).map(s => s[0] || '').slice(0, 2).join('').toUpperCase()}
                 </div>
                 <div className="min-w-0">
                   <h3 className="font-bold text-slate-800 text-sm truncate">

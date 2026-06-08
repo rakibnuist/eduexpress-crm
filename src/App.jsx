@@ -65,7 +65,7 @@ export default function App() {
                     <Route path="/my-day" element={<MyDay user={user} />} />
                     <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
                     <Route path="/applications" element={<Applications user={user} />} />
-                    {(user.role === 'admin' || user.role === 'manager') && <Route path="/conversations" element={<Conversations user={user} />} />}
+                    {(user.role === 'admin' || user.role === 'manager' || user.role === 'consultant') && <Route path="/conversations" element={<Conversations user={user} />} />}
                     {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
                     {user.role === 'admin' && <Route path="/hr" element={<HR user={user} />} />}
                     {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
