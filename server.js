@@ -207,7 +207,9 @@ function userHasAccessToConversation(user, conversationId) {
   
   const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
   if (!meUser) return false;
-  return (c.consultant && meUser.consultant_name && c.consultant === meUser.consultant_name) || c.assigned_to === user.id;
+  const matchConsultant = c.consultant && meUser.consultant_name &&
+    c.consultant.trim().toLowerCase() === meUser.consultant_name.trim().toLowerCase();
+  return matchConsultant || c.assigned_to === user.id;
 }
 
 // Random URL-safe token for the student portal share link.
@@ -3275,16 +3277,6 @@ const CONV_SELECT = `
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
 `;
 
-app.get('/api/public/debug-conversations', (req, res) => {
-  try {
-    const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id`).get().c;
-    const convs = db.prepare(`${CONV_SELECT} ORDER BY conversations.last_message_at DESC LIMIT 5`).all();
-    res.json({ success: true, total, conversations: convs });
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
-
 app.get('/api/conversations', (req, res) => {
   const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;
   const where=[]; const params={};
@@ -3296,8 +3288,8 @@ app.get('/api/conversations', (req, res) => {
   // RBAC Access Filter: non-admin employees can only access their assigned WhatsApp/Facebook channels
   const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
   if (loggedInUser && loggedInUser.role !== 'admin') {
-    where.push("(channels.consultant = @user_consultant OR conversations.assigned_to = @user_id)");
-    params.user_consultant = loggedInUser.consultant_name || '';
+    where.push("(channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id)");
+    params.user_consultant = (loggedInUser.consultant_name || '').trim();
     params.user_id = loggedInUser.id;
   }
 
@@ -3314,7 +3306,9 @@ app.get('/api/conversations/:id', (req, res) => {
   // RBAC check
   const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
   if (loggedInUser && loggedInUser.role !== 'admin') {
-    if (conv.channel_consultant !== loggedInUser.consultant_name && conv.assigned_to !== loggedInUser.id) {
+    const matchConsultant = conv.channel_consultant && loggedInUser.consultant_name &&
+      conv.channel_consultant.trim().toLowerCase() === loggedInUser.consultant_name.trim().toLowerCase();
+    if (!matchConsultant && conv.assigned_to !== loggedInUser.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
   }
