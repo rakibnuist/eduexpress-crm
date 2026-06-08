@@ -2031,13 +2031,25 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
 });
 
 // Temporary debug route for database table inspection
-app.get('/api/public/debug-db', (req, res) => {
+app.get('/api/public/debug-conversations-api', (req, res) => {
   try {
-    const conversations = db.prepare("SELECT * FROM conversations").all();
-    const contacts = db.prepare("SELECT * FROM contacts").all();
-    const channels = db.prepare("SELECT * FROM channels").all();
-    const leads = db.prepare("SELECT id, lead_id, client_name, phone, assigned_consultant FROM leads").all();
-    res.json({ conversations, contacts, channels, leads });
+    const status = req.query.status || 'all';
+    const channel_type = req.query.channel_type || 'all';
+    const channel_id = req.query.channel_id || 'all';
+    const search = req.query.search || '';
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 30;
+
+    const where=[]; const params={};
+    if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
+    if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
+    if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
+    if (search) { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
+    const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
+    
+    const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id ${ws}`).get(params).c;
+    const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
+    res.json({ total, conversations: convs, where, params, ws });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
