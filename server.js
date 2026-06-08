@@ -1147,6 +1147,16 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Seeding partner investments failed:", e.message);
   }
+
+  // Self-healing migration to set the WhatsApp channel consultant to "Abdullah Al Rakib"
+  try {
+    const info = db.prepare("UPDATE channels SET consultant = 'Abdullah Al Rakib' WHERE type = 'whatsapp'").run();
+    if (info.changes > 0) {
+      console.log(`[migration] Updated ${info.changes} WhatsApp channels consultant to Abdullah Al Rakib.`);
+    }
+  } catch (e) {
+    console.error("[migration] Failed to set WhatsApp channel consultant:", e.message);
+  }
 }
 
 function seedData() {
@@ -1451,12 +1461,23 @@ function createLeadFromContact(contactId, source, initialMessage) {
     const phone = contact.phone || null;
     const email = contact.email || null;
 
+    // Find the channel consultant for this contact's conversation
+    let assigned_consultant = null;
+    const lastConv = db.prepare("SELECT channel_id FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1").get(contactId);
+    if (lastConv) {
+      const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(lastConv.channel_id);
+      if (chan) {
+        assigned_consultant = chan.consultant;
+      }
+    }
+
     const params = leadParams({
       client_name,
       phone,
       email,
       lead_source: source === 'whatsapp' ? 'WhatsApp' : source === 'messenger' ? 'Messenger' : 'Instagram',
       lead_status: 'New Lead',
+      assigned_consultant,
       notes: initialMessage ? `Initial Inquiry: "${initialMessage}"` : `Auto-created from ${source} chat integration.`
     }, lead_id, 0);
 
@@ -2007,6 +2028,19 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });
   logActivity({ type: 'reply_to_student', actor: req.user, lead, details: text.trim() });
   res.json({ ok: true });
+});
+
+// Temporary debug route for database table inspection
+app.get('/api/public/debug-db', (req, res) => {
+  try {
+    const conversations = db.prepare("SELECT * FROM conversations").all();
+    const contacts = db.prepare("SELECT * FROM contacts").all();
+    const channels = db.prepare("SELECT * FROM channels").all();
+    const leads = db.prepare("SELECT id, lead_id, client_name, phone, assigned_consultant FROM leads").all();
+    res.json({ conversations, contacts, channels, leads });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Public — student fetches the conversation thread (their messages + staff replies)
