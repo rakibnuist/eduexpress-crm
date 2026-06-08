@@ -394,6 +394,14 @@ export default function Conversations({ user }) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
+  const filteredConversations = conversations.filter(c => {
+    if (activeTab === 'unread') return c.unread_count > 0;
+    if (activeTab === 'whatsapp') return c.channel_type === 'whatsapp';
+    if (activeTab === 'messenger') return c.channel_type === 'messenger';
+    if (activeTab === 'instagram') return c.channel_type === 'instagram';
+    return true;
+  });
+
   return (
     <div className="flex h-[calc(100vh-120px)] bg-[#f0f2f5] border border-[#e9edef] rounded-3xl overflow-hidden shadow-lg select-none">
       
