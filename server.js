@@ -196,7 +196,7 @@ function requireManagerOrAdmin(req, res, next) {
 // Check if a user has access to a specific conversation (admin has access to all; employees/consultants only to their own)
 function userHasAccessToConversation(user, conversationId) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (user.role === 'admin' || user.role === 'manager') return true;
   const c = db.prepare(`
     SELECT channels.consultant, conversations.assigned_to
     FROM conversations
@@ -3277,33 +3277,6 @@ const CONV_SELECT = `
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
 `;
 
-app.get('/api/public/debug-query', (req, res) => {
-  try {
-    const tableInfo = db.prepare("PRAGMA table_info(channels)").all();
-    const tableInfoConv = db.prepare("PRAGMA table_info(conversations)").all();
-    
-    // Try to run the query with a mock non-admin user filter
-    const ws = "WHERE (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id)";
-    const params = { user_consultant: 'Abdullah Al Rakib', user_id: 1 };
-    
-    const countQuery = `SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws}`;
-    const total = db.prepare(countQuery).get(params).c;
-    
-    const listQuery = `${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`;
-    const convs = db.prepare(listQuery).all(params);
-    
-    res.json({
-      success: true,
-      channels_schema: tableInfo,
-      conversations_schema: tableInfoConv,
-      total,
-      convs_count: convs.length
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
-
 app.get('/api/conversations', (req, res) => {
   const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;
   const where=[]; const params={};
@@ -3312,9 +3285,9 @@ app.get('/api/conversations', (req, res) => {
   if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
   if (search && search !== 'undefined' && search !== 'null') { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
 
-  // RBAC Access Filter: non-admin employees can only access their assigned WhatsApp/Facebook channels
+  // RBAC Access Filter: non-admin/non-manager employees can only access their assigned WhatsApp/Facebook channels
   const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (loggedInUser && loggedInUser.role !== 'admin') {
+  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
     where.push("(channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id)");
     params.user_consultant = (loggedInUser.consultant_name || '').trim();
     params.user_id = loggedInUser.id;
@@ -3332,7 +3305,7 @@ app.get('/api/conversations/:id', (req, res) => {
 
   // RBAC check
   const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (loggedInUser && loggedInUser.role !== 'admin') {
+  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
     const matchConsultant = conv.channel_consultant && loggedInUser.consultant_name &&
       conv.channel_consultant.trim().toLowerCase() === loggedInUser.consultant_name.trim().toLowerCase();
     if (!matchConsultant && conv.assigned_to !== loggedInUser.id) {
@@ -3912,6 +3885,7 @@ app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
 // Express v5 requires '/{*path}' instead of '*'
 if (process.env.NODE_ENV === 'production') {
   app.get('/{*path}', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   });
 }
