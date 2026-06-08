@@ -17,7 +17,7 @@ export default function Conversations({ user }) {
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('open'); // 'open' | 'archived' | 'all'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'open' | 'archived' | 'all'
   const [channelFilter, setChannelFilter] = useState('all');
   
   // Compose message state
@@ -278,9 +278,9 @@ export default function Conversations({ user }) {
               onChange={e => setStatusFilter(e.target.value)}
               className="flex-1 bg-white border border-slate-200 rounded-lg py-1 px-2 text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
+              <option value="all">All Statuses</option>
               <option value="open">Open Chats</option>
               <option value="archived">Archived</option>
-              <option value="all">All Statuses</option>
             </select>
 
             <select
