@@ -235,11 +235,15 @@ export default function Conversations({ user }) {
     setSending(true);
     try {
       const sentBy = user?.name || user?.email || 'Admin';
-      await api.sendMessage(selectedConv.id, {
+      const res = await api.sendMessage(selectedConv.id, {
         content: replyText.trim(),
         sent_by: sentBy
       });
-      setReplyText('');
+      if (res?.message?.status === 'failed') {
+        toast.error('Failed to send: ' + (res.message.error_msg || 'Unknown Meta API error'));
+      } else {
+        setReplyText('');
+      }
     } catch (err) {
       toast.error('Failed to send message: ' + err.message);
     } finally {

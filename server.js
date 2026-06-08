@@ -1570,11 +1570,12 @@ function saveInboundMessage(convId, content, type = 'text', waMessageId = null, 
 }
 
 async function sendWhatsApp(channel, to, text) {
+  const cleanTo = to.replace(/\D/g, '');
   const url = `https://graph.facebook.com/v19.0/${channel.phone_number_id}/messages`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.access_token}` },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } })
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: cleanTo, type: 'text', text: { body: text } })
   });
   return res.json();
 }
@@ -3396,8 +3397,9 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 
     const waId = apiResult?.messages?.[0]?.id || apiResult?.message_id || null;
     const status = apiResult?.error ? 'failed' : 'sent';
-    const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,media_url,wa_message_id,status,sent_by) VALUES (?,?,?,?,?,?,?,?)`)
-      .run(req.params.id, 'out', type, content, media_url||null, waId, status, sent_by);
+    const errMsg = apiResult?.error ? (apiResult.error.message || JSON.stringify(apiResult.error)) : null;
+    const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,media_url,wa_message_id,status,sent_by,error_msg) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(req.params.id, 'out', type, content, media_url||null, waId, status, sent_by, errMsg);
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
 
     db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), status='open' WHERE id=?").run(content, req.params.id);
