@@ -3277,6 +3277,33 @@ const CONV_SELECT = `
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
 `;
 
+app.get('/api/public/debug-query', (req, res) => {
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(channels)").all();
+    const tableInfoConv = db.prepare("PRAGMA table_info(conversations)").all();
+    
+    // Try to run the query with a mock non-admin user filter
+    const ws = "WHERE (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id)";
+    const params = { user_consultant: 'Abdullah Al Rakib', user_id: 1 };
+    
+    const countQuery = `SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws}`;
+    const total = db.prepare(countQuery).get(params).c;
+    
+    const listQuery = `${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`;
+    const convs = db.prepare(listQuery).all(params);
+    
+    res.json({
+      success: true,
+      channels_schema: tableInfo,
+      conversations_schema: tableInfoConv,
+      total,
+      convs_count: convs.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 app.get('/api/conversations', (req, res) => {
   const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;
   const where=[]; const params={};
