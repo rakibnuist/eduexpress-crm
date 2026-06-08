@@ -3189,12 +3189,45 @@ app.put('/api/conversations/:id', (req, res) => {
 // Create outbound conversation manually
 app.post('/api/conversations', (req, res) => {
   try {
-    const { channel_id, phone, name } = req.body;
+    const { channel_id, phone, name, lead_id } = req.body;
     if (!channel_id || !phone) return res.status(400).json({ error: 'channel_id and phone required' });
     const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channel_id);
     if (!channel) return res.status(404).json({ error: 'Channel not found' });
     const contact = upsertContact({ name: name || phone, phone, wa_id: channel.type === 'whatsapp' ? phone : null });
+    
+    // Link contact and conversation to lead if lead_id is provided
+    let resolvedLeadId = lead_id;
+    if (!resolvedLeadId && phone) {
+      // Find lead by matching phone exactly
+      let matchedLead = db.prepare("SELECT id FROM leads WHERE phone=?").get(phone);
+      if (!matchedLead) {
+        // Try cleaning the input phone to check if any lead phone matches when cleaned
+        const cleanPhone = phone.replace(/\D/g, '');
+        if (cleanPhone.length >= 8) {
+          // Find all leads and look for one with matching digits
+          const allLeads = db.prepare("SELECT id, phone FROM leads WHERE phone IS NOT NULL").all();
+          matchedLead = allLeads.find(l => {
+            const lp = l.phone.replace(/\D/g, '');
+            return lp === cleanPhone || lp.endsWith(cleanPhone) || cleanPhone.endsWith(lp);
+          });
+        }
+      }
+      if (matchedLead) {
+        resolvedLeadId = matchedLead.id;
+      }
+    }
+    
+    if (resolvedLeadId) {
+      db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(resolvedLeadId, contact.id);
+    }
+    
     const conversation = upsertConversation(contact.id, channel_id, channel.type);
+    
+    // Make sure conversation lead_id is set
+    if (resolvedLeadId) {
+      db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(resolvedLeadId, conversation.id);
+    }
+
     const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conversation.id);
     res.json(conv);
   } catch(e) {

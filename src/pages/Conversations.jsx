@@ -4,9 +4,9 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import {
   MessageSquare, Search, Send, Clock, User, Phone, Mail, ExternalLink,
-  Check, CheckCheck, AlertCircle, Sparkles, Filter, Archive, CheckCircle, RefreshCw
+  Check, CheckCheck, AlertCircle, Sparkles, Filter, Archive, CheckCircle, RefreshCw, Trash2
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 export default function Conversations({ user }) {
   const [conversations, setConversations] = useState([]);
@@ -23,6 +23,8 @@ export default function Conversations({ user }) {
   // Compose message state
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
+  
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const toast = useToast();
   const confirm = useConfirm();
@@ -79,6 +81,39 @@ export default function Conversations({ user }) {
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  // Handle query parameter ?id=... to auto-select or load a conversation
+  useEffect(() => {
+    const idParam = searchParams.get('id');
+    if (idParam && !loading) {
+      const parsedId = parseInt(idParam);
+      const found = conversations.find(c => c.id === parsedId);
+      if (found) {
+        setSelectedConv(found);
+        searchParams.delete('id');
+        setSearchParams(searchParams, { replace: true });
+      } else {
+        api.getConversation(parsedId)
+          .then(conv => {
+            if (conv) {
+              setConversations(prev => {
+                if (prev.some(c => c.id === conv.id)) return prev;
+                return [conv, ...prev];
+              });
+              setSelectedConv(conv);
+            }
+            searchParams.delete('id');
+            setSearchParams(searchParams, { replace: true });
+          })
+          .catch(err => {
+            console.error('Failed to load conversation from query param:', err);
+            toast.error('Could not find conversation: ' + err.message);
+            searchParams.delete('id');
+            setSearchParams(searchParams, { replace: true });
+          });
+      }
+    }
+  }, [loading, conversations, searchParams, setSearchParams, toast]);
 
   // Load messages when selected conversation changes
   useEffect(() => {

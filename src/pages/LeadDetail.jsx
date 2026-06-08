@@ -110,6 +110,40 @@ export default function LeadDetail({ user }) {
   }, [lead?.id]);
 
   const toast = useToast();
+  const [startingChat, setStartingChat] = useState(false);
+
+  const handleStartCRMChat = async () => {
+    if (!lead?.phone) {
+      toast.error('This lead does not have a phone number.');
+      return;
+    }
+    setStartingChat(true);
+    try {
+      const activeChannels = await api.channels();
+      if (!activeChannels || activeChannels.length === 0) {
+        toast.error('No messaging channels configured. Please add one in settings.');
+        return;
+      }
+      // Prefer whatsapp, then messenger, then any
+      const channel = activeChannels.find(c => c.type === 'whatsapp') || 
+                      activeChannels.find(c => c.type === 'messenger') || 
+                      activeChannels[0];
+      
+      const conv = await api.createConversation({
+        channel_id: channel.id,
+        phone: lead.phone,
+        name: lead.client_name,
+        lead_id: lead.id
+      });
+      
+      toast.success('Conversation initiated!');
+      navigate(`/conversations?id=${conv.id}`);
+    } catch (err) {
+      toast.error('Failed to start CRM chat: ' + err.message);
+    } finally {
+      setStartingChat(false);
+    }
+  };
 
   const handleDelete = async () => {
     try { await api.deleteLead(lead.id); toast.success(`${lead.client_name} deleted`); navigate('/leads'); }
@@ -231,6 +265,27 @@ export default function LeadDetail({ user }) {
             <Row icon={<Mail size={12}/>}>{lead.email || '—'}</Row>
             <Row icon={<Globe size={12}/>}>{lead.nationality || '—'}</Row>
             <Row icon={<Hash size={12}/>} mono>{lead.passport || '—'}</Row>
+            {lead.phone && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <button
+                  disabled={startingChat}
+                  onClick={handleStartCRMChat}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl transition-all shadow-sm cursor-pointer hover:shadow"
+                >
+                  {startingChat ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Initiating Chat...</span>
+                    </>
+                  ) : (
+                    <>
+                      <MessageSquare size={13} />
+                      <span>Message in CRM Chat Inbox</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </Card>
 
           <Card title="Academic" icon={<GraduationCap size={14}/>}>
