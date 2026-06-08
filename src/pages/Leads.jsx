@@ -428,7 +428,23 @@ export default function Leads({ user }) {
                       <td className="py-3 px-3.5 text-slate-600 font-semibold">{l.destination || '—'}</td>
                       <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.last_education || '—'}</td>
                       <td className="py-3 px-3.5 text-slate-500 font-medium">{l.gpa ?? '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs max-w-[100px] truncate font-medium">{l.lead_source || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs max-w-[120px] truncate font-medium">
+                        {l.lead_source === 'WhatsApp' ? (
+                          <a href={l.phone ? `https://wa.me/${l.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                            <span>WhatsApp</span>
+                          </a>
+                        ) : l.lead_source === 'Messenger' ? (
+                          <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
+                            <span>Messenger</span>
+                          </a>
+                        ) : (
+                          l.lead_source || '—'
+                        )}
+                      </td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
                       <td className="py-3 px-3.5">
@@ -578,7 +594,25 @@ export default function Leads({ user }) {
 
                       <div className="flex items-start justify-between gap-1.5">
                         <div className="min-w-0 flex-1 pr-3">
-                          <p className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{l.client_name}</p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{l.client_name}</p>
+                            {l.lead_source === 'WhatsApp' && (
+                              <a href={l.phone ? `https://wa.me/${l.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
+                                onClick={e => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors flex-shrink-0" title="Message on WhatsApp">
+                                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
+                                WA
+                              </a>
+                            )}
+                            {l.lead_source === 'Messenger' && (
+                              <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
+                                onClick={e => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-100 hover:bg-blue-100 transition-colors flex-shrink-0" title="Message on Messenger">
+                                <span className="w-1 h-1 rounded-full bg-blue-500 animate-pulse"></span>
+                                Msg
+                              </a>
+                            )}
+                          </div>
                           <p className="text-[10px] text-slate-400 font-mono font-semibold mt-0.5">{l.lead_id}</p>
                         </div>
                         <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>

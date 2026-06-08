@@ -16,7 +16,7 @@ import {
 const curMonth = new Date().toISOString().slice(0, 7);
 const today = new Date().toISOString().slice(0, 10);
 
-export default function HR() {
+export default function HR({ user }) {
   useEffect(() => { document.title = "HR & Attendance Panel | EduExpress Core"; }, []);
 
   const [tab, setTab] = useState('performance');
@@ -158,6 +158,29 @@ export default function HR() {
                     <InfoPill label="Salary" value={`৳${(emp.salary || 0).toLocaleString()}`} />
                     {emp.device_id && <InfoPill label="Device" value={emp.device_id} mono />}
                     {emp.join_date && <InfoPill label="Joined" value={emp.join_date} />}
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-3 mt-3 space-y-1.5 text-xs">
+                    {emp.phone && (
+                      <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                        <span className="font-semibold text-slate-400">Phone:</span>
+                        {user?.email === 'admin@eduexpressint.com' ? (
+                          <a href={`https://wa.me/${emp.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                            className="text-slate-600 hover:text-emerald-600 hover:underline inline-flex items-center gap-1 transition-colors font-semibold" title="Chat on WhatsApp">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                            {emp.phone}
+                          </a>
+                        ) : (
+                          <span className="text-slate-600">{emp.phone}</span>
+                        )}
+                      </div>
+                    )}
+                    {emp.email && (
+                      <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                        <span className="font-semibold text-slate-400">Email:</span>
+                        <span className="text-slate-600 truncate">{emp.email}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Today attendance status */}

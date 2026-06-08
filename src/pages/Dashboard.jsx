@@ -341,9 +341,31 @@ export default function Dashboard({ user }) {
           <div className="space-y-2">
             {recentLeads.map(l => (
               <div key={l.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 pr-2">
                   <p className="text-sm font-medium text-slate-800 truncate">{l.client_name}</p>
-                  <p className="text-xs text-slate-400">{l.phone} · {l.destination}</p>
+                  <p className="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap mt-0.5">
+                    {user?.email === 'admin@eduexpressint.com' && l.phone ? (
+                      <a href={`https://wa.me/${l.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                        className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1 font-semibold" title="Chat on WhatsApp">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                        {l.phone}
+                      </a>
+                    ) : user?.email === 'admin@eduexpressint.com' && l.lead_source === 'Messenger' ? (
+                      <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
+                        className="text-slate-600 hover:text-blue-600 hover:underline transition-colors inline-flex items-center gap-1 font-semibold" title="Chat on Messenger">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
+                        Messenger
+                      </a>
+                    ) : (
+                      l.phone || '—'
+                    )}
+                    {l.destination && (
+                      <>
+                        <span className="text-slate-300">·</span>
+                        <span>{l.destination}</span>
+                      </>
+                    )}
+                  </p>
                 </div>
                 <StatusBadge status={l.lead_status} />
               </div>

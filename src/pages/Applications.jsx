@@ -457,9 +457,9 @@ export default function Applications({ user }) {
       ) : filtered.length === 0 ? (
         <EmptyState />
       ) : view === 'kanban' ? (
-        <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} />
+        <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} user={user} />
       ) : (
-        <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
+        <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} user={user} />
       )}
 
       {selected && (
@@ -642,7 +642,7 @@ function EmptyState() {
 }
 
 /* ───────────────────────────── KANBAN ───────────────────────────── */
-function KanbanView({ stages, rows, onPick, hideEmptyColumns }) {
+function KanbanView({ stages, rows, onPick, hideEmptyColumns, user }) {
   const byStage = useMemo(() => {
     const map = Object.fromEntries(stages.map(s => [s.key, []]));
     const defaultStage = stages[0]?.key || 'documents';
@@ -681,7 +681,7 @@ function KanbanView({ stages, rows, onPick, hideEmptyColumns }) {
                     <p className="font-semibold text-slate-500">No student files</p>
                   </div>
                 ) : items.map(card => (
-                  <ApplicationCard key={card.id} card={card} onClick={() => onPick(card)} />
+                  <ApplicationCard key={card.id} card={card} onClick={() => onPick(card)} user={user} />
                 ))}
               </div>
             </div>
@@ -692,7 +692,7 @@ function KanbanView({ stages, rows, onPick, hideEmptyColumns }) {
   );
 }
 
-function ApplicationCard({ card, onClick }) {
+function ApplicationCard({ card, onClick, user }) {
   const docPct = card.docs_total > 0 ? Math.round((card.docs_received / card.docs_total) * 100) : 0;
   const visaSoon = card.visa_deadline && (new Date(card.visa_deadline) - new Date() < 30 * 86400000);
   const isB2B = card.source === 'B2B' || card.source === 'Agent';
@@ -737,6 +737,16 @@ function ApplicationCard({ card, onClick }) {
           </div>
         </div>
       )}
+      {user?.email === 'admin@eduexpressint.com' && card.phone && (
+        <div className="mt-2.5 pt-2 border-t border-slate-50 flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
+          <a href={`https://wa.me/${card.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+            onClick={e => e.stopPropagation()}
+            className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1 font-semibold" title="Chat on WhatsApp">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+            {card.phone}
+          </a>
+        </div>
+      )}
       <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
         <span className="truncate">{card.referrer || card.assigned_consultant || '—'}</span>
         {card.intake_term && <span>{card.intake_term}</span>}
@@ -746,7 +756,7 @@ function ApplicationCard({ card, onClick }) {
 }
 
 /* ───────────────────────────── TABLE (Excel-style) ───────────────────────────── */
-function TableView({ rows, onPick, stages, selectedIds, setSelectedIds }) {
+function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user }) {
   const stageLabel = (key) => stages.find(s => s.key === key)?.label || '—';
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -820,8 +830,23 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds }) {
                     {r.source || 'China'}
                   </span>
                 )}</Td>
-                <Td><div className="font-medium text-slate-800">{r.client_name}</div>
-                    <div className="text-[11px] text-slate-400">{r.lead_id}</div></Td>
+                <Td>
+                  <div className="font-medium text-slate-800">{r.client_name}</div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[11px] text-slate-400">{r.lead_id}</span>
+                    {user?.email === 'admin@eduexpressint.com' && r.phone && (
+                      <>
+                        <span className="text-slate-300">·</span>
+                        <a href={`https://wa.me/${r.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-emerald-600 hover:underline transition-colors font-medium" title="Chat on WhatsApp">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                          <span>{r.phone}</span>
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </Td>
                 <Td>{r.nationality || '—'}</Td>
                 <Td className="font-mono text-[12px]">{r.passport || '—'}</Td>
                 <Td>{r.intake_term || '—'}</Td>
@@ -1022,6 +1047,16 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
             <p className="text-xs text-slate-400 truncate">
               {lead.lead_id} · {lead.destination || 'No destination'} · {lead.assigned_consultant || 'Unassigned'}
             </p>
+            {user?.email === 'admin@eduexpressint.com' && lead.phone && (
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                <span className="font-semibold">Phone:</span>
+                <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                  className="text-slate-600 hover:text-emerald-600 hover:underline inline-flex items-center gap-1 transition-colors font-medium" title="Chat on WhatsApp">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                  {lead.phone}
+                </a>
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {form.drive_link && (

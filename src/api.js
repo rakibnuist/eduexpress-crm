@@ -172,4 +172,14 @@ export const api = {
   updateChannel:  (id, d)=> req(`/channels/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteChannel:  (id)   => req(`/channels/${id}`, { method: 'DELETE' }),
   syncChannel:    (id)   => req(`/channels/${id}/sync`, { method: 'POST' }),
+
+  // Conversations & Live Chat
+  conversations:   (p = {})  => req('/conversations?' + new URLSearchParams(p)),
+  getConversation: (id)      => req(`/conversations/${id}`),
+  updateConversation:(id, d) => req(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  createConversation:(d)     => req('/conversations', { method: 'POST', body: JSON.stringify(d) }),
+  deleteConversation:(id)    => req(`/conversations/${id}`, { method: 'DELETE' }),
+  messages:        (convId)  => req(`/conversations/${convId}/messages`),
+  sendMessage:     (convId, d)=> req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
+  quickReplies:    ()        => req('/quick-replies'),
 };

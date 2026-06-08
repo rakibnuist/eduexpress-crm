@@ -14,6 +14,7 @@ import Settings from './pages/Settings';
 import LegalNotice from './pages/LegalNotice';
 import Login from './pages/Login';
 import StudentPortal from './pages/StudentPortal';
+import Conversations from './pages/Conversations';
 import CommandPalette from './components/CommandPalette';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
@@ -64,8 +65,9 @@ export default function App() {
                     <Route path="/my-day" element={<MyDay user={user} />} />
                     <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
                     <Route path="/applications" element={<Applications user={user} />} />
+                    {(user.role === 'admin' || user.role === 'manager') && <Route path="/conversations" element={<Conversations user={user} />} />}
                     {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
-                    {user.role === 'admin' && <Route path="/hr" element={<HR />} />}
+                    {user.role === 'admin' && <Route path="/hr" element={<HR user={user} />} />}
                     {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

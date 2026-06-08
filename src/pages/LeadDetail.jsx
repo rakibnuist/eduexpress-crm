@@ -268,7 +268,23 @@ export default function LeadDetail({ user }) {
             <Row label="Departure">{lead.departure_date || '—'}</Row>
             <Row label="Source">{lead.source || '—'}</Row>
             <Row label="Referrer">{lead.referrer || '—'}</Row>
-            <Row label="Lead source">{lead.lead_source || '—'}</Row>
+            <Row label="Lead source">
+              {lead.lead_source === 'WhatsApp' ? (
+                <a href={lead.phone ? `https://wa.me/${lead.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                  <span>WhatsApp (Message)</span>
+                </a>
+              ) : lead.lead_source === 'Messenger' ? (
+                <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
+                  <span>Messenger (Message)</span>
+                </a>
+              ) : (
+                lead.lead_source || '—'
+              )}
+            </Row>
             <Row label="Follow-up">{lead.next_followup || '—'}</Row>
           </Card>
 
