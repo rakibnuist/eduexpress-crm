@@ -151,8 +151,31 @@ export default function Conversations({ user }) {
         setConversations(prev => {
           const idx = prev.findIndex(c => c.id === data.conversation_id);
           if (idx === -1) {
-            // Not in list (maybe new convo), refresh list
-            loadConversations();
+            // Fetch single conversation details silently in the background
+            api.getConversation(data.conversation_id)
+              .then(conv => {
+                if (conv) {
+                  setConversations(current => {
+                    if (current.some(c => c.id === conv.id)) {
+                      return current.map(c => c.id === conv.id ? {
+                        ...c,
+                        last_message: data.content,
+                        last_message_at: data.created_at,
+                        unread_count: (selectedConv && selectedConv.id === c.id) ? 0 : (c.unread_count + (data.direction === 'in' ? 1 : 0))
+                      } : c).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+                    }
+                    return [{
+                      ...conv,
+                      last_message: data.content,
+                      last_message_at: data.created_at,
+                      unread_count: (selectedConv && selectedConv.id === conv.id) ? 0 : (data.direction === 'in' ? 1 : 0)
+                    }, ...current];
+                  });
+                }
+              })
+              .catch(err => {
+                console.error('Failed to fetch new conversation detail:', err);
+              });
             return prev;
           }
           const updated = [...prev];

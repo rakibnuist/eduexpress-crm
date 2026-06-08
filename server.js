@@ -718,6 +718,21 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     seedData();
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
+
+    // Trigger historical sync on startup in background for all active Messenger/Instagram channels
+    setTimeout(async () => {
+      try {
+        const activeChannels = db.prepare("SELECT id, name FROM channels WHERE active = 1 AND type IN ('messenger', 'instagram')").all();
+        for (const chan of activeChannels) {
+          console.log(`[startup-sync] Triggering background sync for channel: ${chan.name} (ID: ${chan.id})`);
+          syncChannelMessages(chan.id, 6)
+            .then(res => console.log(`[startup-sync] Completed background sync for ${chan.name}: Imported ${res.imported} messages.`))
+            .catch(e => console.error(`[startup-sync] Background sync failed for ${chan.name}:`, e.message));
+        }
+      } catch (err) {
+        console.error('[startup-sync] Error checking active channels for startup sync:', err.message);
+      }
+    }, 10000); // delay 10s to not interfere with main startup requests
   } catch (e) {
     console.error('[startup] DB init failed:', e.message);
     process.exit(1);
@@ -1156,6 +1171,33 @@ function runMigrations() {
     }
   } catch (e) {
     console.error("[migration] Failed to set WhatsApp channel consultant:", e.message);
+  }
+
+  // Self-healing migration to assign "Abdullah Al Rakib" to any existing unassigned WhatsApp leads
+  try {
+    const info = db.prepare(`
+      UPDATE leads 
+      SET assigned_consultant = 'Abdullah Al Rakib' 
+      WHERE (assigned_consultant IS NULL OR assigned_consultant = '') 
+        AND (lead_source = 'WhatsApp' OR id IN (
+          SELECT DISTINCT lead_id FROM conversations WHERE channel_type = 'whatsapp' AND lead_id IS NOT NULL
+        ))
+    `).run();
+    if (info.changes > 0) {
+      console.log(`[migration] Updated ${info.changes} unassigned WhatsApp leads to consultant Abdullah Al Rakib.`);
+    }
+  } catch (e) {
+    console.error("[migration] Failed to set WhatsApp leads consultant:", e.message);
+  }
+
+  // Self-healing migration to ensure all conversations have status set
+  try {
+    const info = db.prepare("UPDATE conversations SET status = 'open' WHERE status IS NULL OR status = ''").run();
+    if (info.changes > 0) {
+      console.log(`[migration] Self-healed ${info.changes} conversations with NULL/empty status to 'open'.`);
+    }
+  } catch (e) {
+    console.error("[migration] Failed to self-heal conversations status:", e.message);
   }
 }
 
@@ -2030,30 +2072,7 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
   res.json({ ok: true });
 });
 
-// Temporary debug route for database table inspection
-app.get('/api/public/debug-conversations-api', (req, res) => {
-  try {
-    const status = req.query.status || 'all';
-    const channel_type = req.query.channel_type || 'all';
-    const channel_id = req.query.channel_id || 'all';
-    const search = req.query.search || '';
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 30;
 
-    const where=[]; const params={};
-    if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
-    if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
-    if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
-    if (search) { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
-    const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
-    
-    const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id ${ws}`).get(params).c;
-    const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
-    res.json({ total, conversations: convs, where, params, ws });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // Public — student fetches the conversation thread (their messages + staff replies)
 app.get('/api/public/student/:token/thread', (req, res) => {
@@ -2986,34 +3005,19 @@ app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels
 // Track in-flight syncs so a channel can't be synced twice at once.
 const activeSyncs = new Set();
 
-// ─── Sync historical messages from a Messenger / Instagram channel ───────────
-// Runs in the BACKGROUND and responds immediately — a long sync would otherwise
-// exceed nginx's gateway timeout (504). Progress streams over SSE; the inbox
-// polling picks up new conversations as they're imported.
-app.post('/api/channels/:id/sync', async (req, res) => {
-  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
-  if (!channel) return res.status(404).json({ error: 'Channel not found' });
-  if (!channel.access_token) return res.status(400).json({ error: 'No access token on this channel' });
-  if (channel.type !== 'messenger' && channel.type !== 'instagram')
-    return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
-  if (activeSyncs.has(channel.id))
-    return res.status(409).json({ error: 'A sync is already running for this channel' });
+// Helper to sync historical messages from Facebook/Instagram Page Channel
+async function syncChannelMessages(channelId, months = 6) {
+  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
+  if (!channel || !channel.access_token) return { imported: 0, skipped: 0 };
+  if (channel.type !== 'messenger' && channel.type !== 'instagram') return { imported: 0, skipped: 0 };
 
   const token   = channel.access_token;
   const pageId  = channel.page_id;
-  const { months = 6 } = req.body || {};
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
 
-  // Respond NOW — everything below runs in the background.
-  activeSyncs.add(channel.id);
-  res.json({ ok: true, started: true, channel: channel.name });
-  runSync().catch(e => console.error('[sync] fatal:', e.message));
-  async function runSync() {
-  const MAX_MESSAGES = 5000; // safety cap (OOM is now prevented by paused autosave)
-
+  const MAX_MESSAGES = 5000;
   let imported = 0, skipped = 0, conversations = 0;
 
-  // Fetch one page of FB API results; returns { items, nextUrl }
   async function fbGet(url) {
     const r = await fetch(url);
     const d = await r.json();
@@ -3021,7 +3025,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     return { items: d.data || [], nextUrl: d.paging?.next || null };
   }
 
-  // Pre-prepare statements ONCE — avoids re-compiling SQL in wasm on every row
   const stmtInsertMsg = db.prepare(
     `INSERT OR IGNORE INTO messages
        (conversation_id, direction, type, content, media_url, wa_message_id, status, created_at)
@@ -3032,13 +3035,11 @@ app.post('/api/channels/:id/sync', async (req, res) => {
      WHERE id=? AND (last_message_at IS NULL OR last_message_at < ?)`
   );
 
-  // Batch-insert all messages for one conversation inside a single transaction
   const insertBatch = db.transaction((rows, conv) => {
     let added = 0;
     for (const msg of rows) {
       const fromPage = String(msg.from?.id) === String(pageId);
 
-      // Extract real content / media instead of dumping everything as "[Attachment]"
       let content, type = 'text', mediaUrl = null;
       const att = msg.attachments?.data?.[0];
       if (msg.message) {
@@ -3071,10 +3072,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     return added;
   });
 
-  // Suspend disk writes for the whole sync. Exporting the entire DB to disk on
-  // every insert is what blows the WASM heap (OOM). We checkpoint every few
-  // conversations instead, and the atomic temp+rename save guarantees the
-  // on-disk file is never left half-written even if a checkpoint OOMs.
   if (db.pauseSave) db.pauseSave();
   let convCounter = 0;
 
@@ -3082,10 +3079,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   const toSqlTime = (t) => t ? new Date(t).toISOString().replace('T', ' ').slice(0, 19) : null;
 
   try {
-    // ── Step 1: paginate conversations (newest-activity first) ─────────────────
-    // Pull updated_time + a 1-message snippet so we can set the conversation's
-    // recency and preview from FB's authoritative value — even if the very
-    // latest item (e.g. a broadcast) isn't returned by the /messages edge.
     let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
       + `?fields=updated_time,participants,snippet`
       + `&limit=50&access_token=${token}`;
@@ -3098,8 +3091,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
       for (const fbConv of fbConvs) {
         if (imported + skipped >= MAX_MESSAGES) break;
 
-        // Conversations come ordered newest-first; once we pass the time window,
-        // everything after is older too — stop paginating.
         const updatedMs = fbConv.updated_time ? new Date(fbConv.updated_time).getTime() : 0;
         if (updatedMs && updatedMs < cutoffMs) { stop = true; break; }
 
@@ -3107,7 +3098,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
         const other = (fbConv.participants?.data || []).find(p => String(p.id) !== String(pageId));
         if (!other) continue;
 
-        // Fetch the participant's profile picture (best-effort)
         let avatar = null;
         try {
           const pr = await fetch(`https://graph.facebook.com/v19.0/${other.id}?fields=profile_pic,name&access_token=${token}`);
@@ -3119,7 +3109,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
         const contact = upsertContact({ name: other.name || 'Messenger User', messenger_id: other.id, avatar_url: avatar });
         const conv    = upsertConversation(contact.id, channel.id, 'messenger');
 
-        // Authoritatively set recency + preview from the conversation itself.
         const convTime = toSqlTime(fbConv.updated_time);
         if (convTime) {
           db.prepare(`UPDATE conversations SET last_message=COALESCE(@snip,last_message), last_message_at=@t
@@ -3127,7 +3116,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
             .run({ snip: fbConv.snippet || null, t: convTime, id: conv.id });
         }
 
-        // ── Step 2: paginate messages for this conversation ──────────────────
         let msgUrl = `https://graph.facebook.com/v19.0/${fbConv.id}/messages`
           + `?fields=message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}`
           + `&limit=25&access_token=${token}`;
@@ -3138,7 +3126,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
           msgUrl = nextMsgUrl;
           if (msgs.length === 0) break;
 
-          // Stop once this page is entirely older than the window
           const oldest = msgs[msgs.length - 1]?.created_time;
           const added = insertBatch(msgs, conv);
           imported += added;
@@ -3147,7 +3134,6 @@ app.post('/api/channels/:id/sync', async (req, res) => {
           if (oldest && new Date(oldest).getTime() < cutoffMs) break;
         }
 
-        // Checkpoint to disk every 10 conversations (resume → save → pause again)
         if (++convCounter % 10 === 0 && db.resumeSave && db.pauseSave) {
           db.resumeSave();
           db.pauseSave();
@@ -3159,16 +3145,39 @@ app.post('/api/channels/:id/sync', async (req, res) => {
     const capped = (imported + skipped >= MAX_MESSAGES);
     console.log(`[sync] ${channel.name}: ${conversations} convs, ${imported} imported, ${skipped} skipped${capped ? ' (capped)' : ''}`);
     broadcast('sync_done', { channel_id: channel.id, channel: channel.name, imported, skipped, conversations, capped });
+    return { imported, skipped, conversations, capped };
 
   } catch (e) {
     console.error('[sync] error:', e.message);
     broadcast('sync_error', { channel_id: channel.id, channel: channel.name, error: e.message, imported, conversations });
+    throw e;
   } finally {
-    // Always re-enable disk writes, persist, and clear the in-flight flag.
     if (db.resumeSave) db.resumeSave();
-    activeSyncs.delete(channel.id);
   }
-  } // end runSync
+}
+
+// ─── Sync historical messages from a Messenger / Instagram channel ───────────
+// Runs in the BACKGROUND and responds immediately — a long sync would otherwise
+// exceed nginx's gateway timeout (504). Progress streams over SSE; the inbox
+// polling picks up new conversations as they're imported.
+app.post('/api/channels/:id/sync', async (req, res) => {
+  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
+  if (!channel) return res.status(404).json({ error: 'Channel not found' });
+  if (!channel.access_token) return res.status(400).json({ error: 'No access token on this channel' });
+  if (channel.type !== 'messenger' && channel.type !== 'instagram')
+    return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
+  if (activeSyncs.has(channel.id))
+    return res.status(409).json({ error: 'A sync is already running for this channel' });
+
+  const { months = 6 } = req.body || {};
+
+  // Respond NOW — everything below runs in the background.
+  activeSyncs.add(channel.id);
+  res.json({ ok: true, started: true, channel: channel.name });
+
+  syncChannelMessages(channel.id, months)
+    .catch(e => console.error('[sync] Background sync failed:', e.message))
+    .finally(() => activeSyncs.delete(channel.id));
 });
 
 // ─────────────────────────────────────────────────────────
@@ -3229,6 +3238,18 @@ app.put('/api/conversations/:id', (req, res) => {
   const { status, assigned_to, lead_id } = req.body;
   db.prepare("UPDATE conversations SET status=COALESCE(@status,status), assigned_to=COALESCE(@assigned_to,assigned_to), lead_id=COALESCE(@lead_id,lead_id), unread_count=CASE WHEN @status='open' THEN unread_count ELSE 0 END WHERE id=@id")
     .run({ status: status||null, assigned_to: assigned_to||null, lead_id: lead_id||null, id: req.params.id });
+
+  if (lead_id) {
+    const conv = db.prepare("SELECT channel_id FROM conversations WHERE id=?").get(req.params.id);
+    if (conv) {
+      const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
+      const lead = db.prepare("SELECT assigned_consultant FROM leads WHERE id=?").get(lead_id);
+      if (lead && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
+        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel?.consultant || 'Abdullah Al Rakib', lead_id);
+      }
+    }
+  }
+
   res.json(db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id));
 });
 
@@ -3272,6 +3293,11 @@ app.post('/api/conversations', (req, res) => {
     // Make sure conversation lead_id is set
     if (resolvedLeadId) {
       db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(resolvedLeadId, conversation.id);
+      // Auto-assign consultant to the lead if not set
+      const lead = db.prepare("SELECT assigned_consultant FROM leads WHERE id=?").get(resolvedLeadId);
+      if (lead && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
+        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel.consultant || 'Abdullah Al Rakib', resolvedLeadId);
+      }
     }
 
     const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conversation.id);
@@ -3322,8 +3348,8 @@ app.delete('/api/messages/:id', (req, res) => {
 // MESSAGES
 // ─────────────────────────────────────────────────────────
 app.get('/api/conversations/:id/messages', (req, res) => {
-  const { before, limit=200 } = req.query;
-  const lim = Math.min(parseInt(limit) || 200, 1000);
+  const { before, limit=500 } = req.query;
+  const lim = Math.min(parseInt(limit) || 500, 2000);
   // Order CHRONOLOGICALLY by timestamp (not insert id) — synced messages are
   // inserted newest-first, so id order ≠ time order. Grab the most-recent N,
   // then flip to ascending so the chat reads oldest→newest top-to-bottom.
@@ -3490,7 +3516,31 @@ app.post('/webhook/meta', async (req, res) => {
               .run(lead_id, new Date().toISOString().slice(0,10), client_name, fields.phone_number||null, fields.email||null, fields.destination||null,
                 metaData.campaign_name||'Meta Ad','New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,JSON.stringify(fields));
             const lead = db.prepare("SELECT * FROM leads WHERE meta_lead_id=?").get(leadgen_id);
-            if (lead) { sendCAPIEvent('Lead', lead); broadcast('new_lead', { lead }); }
+            if (lead) { 
+              sendCAPIEvent('Lead', lead); 
+              broadcast('new_lead', { lead }); 
+
+              // Automatically create a contact and conversation if phone is available
+              if (lead.phone) {
+                const whatsappChannel = db.prepare("SELECT * FROM channels WHERE type='whatsapp' AND active=1 LIMIT 1").get();
+                if (whatsappChannel) {
+                  const contact = upsertContact({
+                    name: lead.client_name,
+                    phone: lead.phone,
+                    wa_id: lead.phone,
+                    lead_id: lead.id
+                  });
+                  const conv = upsertConversation(contact.id, whatsappChannel.id, 'whatsapp');
+                  db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conv.id);
+                  
+                  // Auto-assign consultant to the lead if not set
+                  if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
+                    db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(whatsappChannel.consultant || 'Abdullah Al Rakib', lead.id);
+                  }
+                  console.log(`[leadgen] Auto-created WhatsApp conversation for lead ${lead.lead_id}`);
+                }
+              }
+            }
             console.log(`✅ Meta Lead: ${lead_id} — ${client_name}`);
           } catch(e) { console.error('Lead webhook error:', e.message); }
         }
