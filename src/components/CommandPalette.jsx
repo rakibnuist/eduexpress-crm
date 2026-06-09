@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import {
   Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Users,
-  Kanban, Plane, DollarSign, UserCheck, Settings, MessageSquare, GraduationCap,
+  Plane, DollarSign, UserCheck, Settings, MessageSquare, GraduationCap,
 } from 'lucide-react';
 
 const PAGES = [
@@ -16,8 +16,7 @@ const PAGES = [
   { id: 'cockpit',      label: 'Cockpit',        to: '/cockpit',      icon: Eye,             keys: 'cockpit live alerts',     staffOnly: true },
   { id: 'reports',      label: 'Reports',        to: '/reports',      icon: FileBarChart,    keys: 'reports weekly monthly',  staffOnly: true },
   { id: 'my-day',       label: 'My Day',         to: '/my-day',       icon: Sun,             keys: 'my day daily log' },
-  { id: 'leads',        label: 'All Leads',      to: '/leads',        icon: Users,           keys: 'leads students' },
-  { id: 'pipeline',     label: 'Sales Pipeline', to: '/pipeline',     icon: Kanban,          keys: 'pipeline sales' },
+  { id: 'leads',        label: 'Leads & Pipeline', to: '/leads',        icon: Users,           keys: 'leads students pipeline sales board kanban' },
   { id: 'applications', label: 'Applications',   to: '/applications', icon: Plane,           keys: 'applications kanban' },
   { id: 'finance',      label: 'Finance',        to: '/finance',      icon: DollarSign,      keys: 'finance cashflow money',  adminOnly: true },
   { id: 'hr',           label: 'HR',             to: '/hr',           icon: UserCheck,       keys: 'hr employees attendance payroll', adminOnly: true },

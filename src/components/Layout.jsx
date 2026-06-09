@@ -1,6 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, Kanban, DollarSign,
+  LayoutDashboard, Users, DollarSign,
   UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -13,8 +13,7 @@ const baseNav = [
   { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     staffOnly: true },
   { to: '/reports',      icon: FileBarChart,    label: 'Reports',     staffOnly: true },
   { to: '/my-day',       icon: Sun,             label: 'Daily Workspace & Reflections' },
-  { to: '/leads',        icon: Users,           label: 'All Leads' },
-  { to: '/pipeline',     icon: Kanban,          label: 'Sales Pipeline' },
+  { to: '/leads',        icon: Users,           label: 'Leads & Pipeline' },
   { to: '/applications', icon: Plane,           label: 'Applications' },
   { to: '/conversations', icon: MessageSquare,   label: 'Chat Inbox' },
   { to: '/finance',      icon: DollarSign,      label: 'Finance',     adminOnly: true },

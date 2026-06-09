@@ -24,16 +24,35 @@ const STAGES = [
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 export default function Leads({ user }) {
-  const location = useLocation();
-  const isPipelineRoute = location.pathname.startsWith('/pipeline');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlView = searchParams.get('view');
+
+  // View state: table or kanban
+  const [view, setView] = useState(() => {
+    if (urlView === 'kanban' || urlView === 'table') return urlView;
+    return localStorage.getItem('leads_view') || 'table';
+  });
+
+  // Sync view state when urlView changes (e.g. from redirect, command palette, or back/forward)
+  useEffect(() => {
+    if (urlView === 'kanban' || urlView === 'table') {
+      setView(urlView);
+    } else if (!urlView) {
+      const savedView = localStorage.getItem('leads_view');
+      if (savedView === 'kanban' || savedView === 'table') {
+        setView(savedView);
+      } else {
+        setView('table');
+      }
+    }
+  }, [urlView]);
 
   useEffect(() => {
-    document.title = isPipelineRoute
+    document.title = view === 'kanban'
       ? "Sales Pipeline | EduExpress Core"
       : "All Leads | EduExpress Core";
-  }, [isPipelineRoute]);
+  }, [view]);
 
-  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ leads: [], total: 0, pages: 1 });
   const [settings, setSettings] = useState(null);
   const [stages, setStages] = useState([]);
@@ -43,23 +62,6 @@ export default function Leads({ user }) {
   const [dragging, setDragging] = useState(null);  // { lead, fromStatus }
   const [overCol, setOverCol]   = useState(null);
   const [expanded, setExpanded] = useState({});
-
-  // View state: table or kanban
-  const [view, setView] = useState(() => {
-    if (window.location.pathname.startsWith('/pipeline')) return 'kanban';
-    if (window.location.pathname.startsWith('/leads')) return 'table';
-    const urlView = searchParams.get('view');
-    if (urlView === 'kanban' || urlView === 'table') return urlView;
-    return localStorage.getItem('leads_view') || 'table';
-  });
-
-  useEffect(() => {
-    if (isPipelineRoute) {
-      setView('kanban');
-    } else {
-      setView('table');
-    }
-  }, [location.pathname, isPipelineRoute]);
 
   const [filters, setFilters] = useState({
     search: '',
@@ -84,7 +86,7 @@ export default function Leads({ user }) {
     // Sync URL search param
     const currentParams = Object.fromEntries(searchParams);
     if (currentParams.view !== view) {
-      setSearchParams({ ...currentParams, view });
+      setSearchParams({ ...currentParams, view }, { replace: true });
     }
   }, [view, searchParams, setSearchParams]);
 
@@ -222,13 +224,41 @@ export default function Leads({ user }) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
-            {isPipelineRoute ? 'Sales Pipeline' : 'All Leads'}
-          </h2>
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/60 pb-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-4 flex-wrap">
+            <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+              {view === 'kanban' ? 'Sales Pipeline' : 'All Leads'}
+            </h2>
+            
+            {/* View Switcher Toggle */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/50 shadow-inner">
+              <button
+                onClick={() => setView('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold select-none cursor-pointer transition-all duration-200 ${
+                  view === 'table'
+                    ? 'bg-white text-blue-600 shadow-sm font-bold scale-[1.02]'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <TableIcon size={13} />
+                All Leads
+              </button>
+              <button
+                onClick={() => setView('kanban')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold select-none cursor-pointer transition-all duration-200 ${
+                  view === 'kanban'
+                    ? 'bg-white text-blue-600 shadow-sm font-bold scale-[1.02]'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <LayoutGrid size={13} />
+                Pipeline Board
+              </button>
+            </div>
+          </div>
           <p className="text-sm text-slate-500">
-            {isPipelineRoute 
+            {view === 'kanban' 
               ? `${Object.values(byStatus).flat().length} active prospects on board`
               : `${data.total.toLocaleString()} total active records`
             }
