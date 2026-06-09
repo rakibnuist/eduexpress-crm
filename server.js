@@ -2099,6 +2099,86 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
 
 
 
+app.get('/api/public/debug-media', async (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT m.id, m.media_url, m.media_mime, m.type as msg_type,
+             ch.access_token, ch.type as chan_type, cv.id as conv_id
+      FROM messages m
+      JOIN conversations cv ON cv.id = m.conversation_id
+      JOIN channels ch ON ch.id = cv.channel_id
+      WHERE m.type IN ('image', 'document', 'audio', 'video')
+      ORDER BY m.id DESC LIMIT 5
+    `).all();
+
+    const results = [];
+    for (const row of rows) {
+      const step1 = {};
+      const step2 = {};
+      let downloadUrl = null;
+
+      if (row.media_url.startsWith('http')) {
+        step1.status = 'skipped (Messenger direct URL)';
+        step1.url = row.media_url;
+        try {
+          const imgRes = await fetch(row.media_url);
+          step2.status = imgRes.status;
+          step2.contentType = imgRes.headers.get('content-type');
+        } catch (err) {
+          step2.error = err.message;
+        }
+      } else {
+        const token = row.access_token;
+        if (!token) {
+          step1.error = 'Channel has no access token';
+        } else {
+          try {
+            const metaRes = await fetch(`https://graph.facebook.com/v19.0/${row.media_url}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            const metaBody = await metaRes.json();
+            step1.status = metaRes.status;
+            step1.body = metaBody;
+            downloadUrl = metaBody.url;
+          } catch (err) {
+            step1.error = err.message;
+          }
+
+          if (downloadUrl) {
+            try {
+              const imgRes = await fetch(downloadUrl, {
+                headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'WhatsApp/2.0' }
+              });
+              step2.status = imgRes.status;
+              step2.contentType = imgRes.headers.get('content-type');
+              if (!imgRes.ok) {
+                step2.bodyText = await imgRes.text();
+              }
+            } catch (err) {
+              step2.error = err.message;
+            }
+          }
+        }
+      }
+
+      results.push({
+        message_id: row.id,
+        media_url: row.media_url,
+        media_mime: row.media_mime,
+        msg_type: row.msg_type,
+        chan_type: row.chan_type,
+        has_token: !!row.access_token,
+        step1,
+        step2
+      });
+    }
+
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 app.post('/api/public/client-log', (req, res) => {
   try {
     const logPath = join(__dirname, 'dist', 'client-errors.json');
