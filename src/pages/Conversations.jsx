@@ -29,7 +29,7 @@ export default function Conversations({ user }) {
   const [statusFilter, setStatusFilter] = useState('all'); // 'open' | 'archived' | 'all'
   const [channelFilter, setChannelFilter] = useState('all');
   const [selectedChannelId, setSelectedChannelId] = useState('all');
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'unread' | 'whatsapp' | 'messenger' | 'instagram'
+  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'unread' | 'open' | 'archived'
 
   // Media upload and lightbox state
   const [lightboxImage, setLightboxImage] = useState(null);
@@ -495,9 +495,6 @@ export default function Conversations({ user }) {
 
   const filteredConversations = conversations.filter(c => {
     if (activeTab === 'unread') return c.unread_count > 0;
-    if (activeTab === 'whatsapp') return c.channel_type === 'whatsapp';
-    if (activeTab === 'messenger') return c.channel_type === 'messenger';
-    if (activeTab === 'instagram') return c.channel_type === 'instagram';
     return true;
   });
 
@@ -565,14 +562,20 @@ export default function Conversations({ user }) {
             {[
               { id: 'all', label: 'All' },
               { id: 'unread', label: 'Unread' },
-              { id: 'whatsapp', label: 'WhatsApp' },
-              { id: 'messenger', label: 'Messenger' },
-              { id: 'instagram', label: 'Instagram' }
+              { id: 'open', label: 'Active' },
+              { id: 'archived', label: 'Archived' }
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`text-[11px] px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === 'all' || tab.id === 'unread') {
+                    setStatusFilter('all');
+                  } else {
+                    setStatusFilter(tab.id); // 'open' or 'archived'
+                  }
+                }}
+                className={`text-[11px] px-3.5 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap
                   ${activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
                     : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
