@@ -2179,6 +2179,98 @@ app.get('/api/public/debug-media', async (req, res) => {
   }
 });
 
+app.get('/api/media/:msgId', async (req, res) => {
+  try {
+    const row = db.prepare(`
+      SELECT m.id, m.media_url, m.media_mime, m.type as msg_type,
+             ch.access_token, ch.type as chan_type
+      FROM messages m
+      JOIN conversations cv ON cv.id = m.conversation_id
+      JOIN channels ch ON ch.id = cv.channel_id
+      WHERE m.id = ?
+    `).get(req.params.msgId);
+
+    if (!row) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    if (!row.media_url) {
+      return res.status(400).json({ error: 'Message has no media attachment' });
+    }
+
+    // 1. Local uploads
+    if (row.media_url.startsWith('/uploads')) {
+      const filePath = join(__dirname, row.media_url);
+      if (existsSync(filePath)) {
+        return res.sendFile(filePath);
+      }
+      return res.status(404).json({ error: 'Local file not found' });
+    }
+
+    // 2. Direct HTTP/HTTPS URLs (Messenger/Instagram)
+    if (row.media_url.startsWith('http')) {
+      try {
+        const mediaRes = await fetch(row.media_url);
+        if (!mediaRes.ok) {
+          return res.status(mediaRes.status).json({ error: `Failed to fetch remote media: ${mediaRes.statusText}` });
+        }
+        const contentType = mediaRes.headers.get('content-type') || row.media_mime || 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
+        const arrayBuffer = await mediaRes.arrayBuffer();
+        return res.send(Buffer.from(arrayBuffer));
+      } catch (fetchErr) {
+        return res.status(500).json({ error: `Failed to fetch remote media: ${fetchErr.message}` });
+      }
+    }
+
+    // 3. Meta Media ID (numeric)
+    const token = row.access_token;
+    if (!token) {
+      return res.status(400).json({ error: 'Channel has no access token to fetch Meta media' });
+    }
+
+    // Step 1: Query Meta Graph API to resolve media URL
+    let downloadUrl = null;
+    try {
+      const metaRes = await fetch(`https://graph.facebook.com/v19.0/${row.media_url}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!metaRes.ok) {
+        const errText = await metaRes.text();
+        return res.status(metaRes.status).json({ error: `Meta Graph API error: ${errText}` });
+      }
+      const metaBody = await metaRes.json();
+      downloadUrl = metaBody.url;
+    } catch (metaErr) {
+      return res.status(500).json({ error: `Meta Graph API request failed: ${metaErr.message}` });
+    }
+
+    if (!downloadUrl) {
+      return res.status(500).json({ error: 'Meta Graph API did not return a media URL' });
+    }
+
+    // Step 2: Download the binary media from the resolved URL
+    try {
+      const imgRes = await fetch(downloadUrl, {
+        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'WhatsApp/2.0' }
+      });
+      if (!imgRes.ok) {
+        const errText = await imgRes.text();
+        return res.status(imgRes.status).json({ error: `Failed to download media from Meta CDN: ${errText}` });
+      }
+      const contentType = imgRes.headers.get('content-type') || row.media_mime || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      const arrayBuffer = await imgRes.arrayBuffer();
+      return res.send(Buffer.from(arrayBuffer));
+    } catch (downloadErr) {
+      return res.status(500).json({ error: `Failed to download media from Meta CDN: ${downloadErr.message}` });
+    }
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/public/client-log', (req, res) => {
   try {
     const logPath = join(__dirname, 'dist', 'client-errors.json');
