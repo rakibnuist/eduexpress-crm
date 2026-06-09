@@ -1696,7 +1696,14 @@ app.get('/api/leads', (req, res) => {
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
-  if (source === 'meta') where.push("meta_lead_id IS NOT NULL");
+  if (source) {
+    if (source === 'meta') {
+      where.push("meta_lead_id IS NOT NULL");
+    } else {
+      where.push("lead_source=@source");
+      params.source = source;
+    }
+  }
   // Consultants are scoped to their own assigned leads — enforced server-side.
   // Admins and Application Managers see everything.
   if (req.user?.role === 'consultant') {

@@ -66,6 +66,7 @@ export default function Leads({ user }) {
     status: searchParams.get('status') || '',
     consultant: '',
     destination: '',
+    source: '',
     page: 1,
   });
 
@@ -95,6 +96,7 @@ export default function Leads({ user }) {
       if (filters.status) p.status = filters.status;
       if (filters.consultant) p.consultant = filters.consultant;
       if (filters.destination) p.destination = filters.destination;
+      if (filters.source) p.source = filters.source;
       p.page = filters.page;
       api.leads(p).then(setData).catch(() => {});
     } else {
@@ -103,6 +105,7 @@ export default function Leads({ user }) {
       if (filters.search) p.search = filters.search;
       if (filters.consultant) p.consultant = filters.consultant;
       if (filters.destination) p.destination = filters.destination;
+      if (filters.source) p.source = filters.source;
       api.leads(p).then(d => {
         const grouped = {};
         STAGES.forEach(({ status }) => { grouped[status] = []; });
@@ -138,7 +141,7 @@ export default function Leads({ user }) {
     setFilters(f => ({ ...f, [key]: val, page: 1 }));
   }
 
-  const activeFilters = [filters.status, filters.consultant, filters.destination].filter(Boolean).length;
+  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.source].filter(Boolean).length;
 
   async function handleDelete(id) {
     try {
@@ -317,10 +320,11 @@ export default function Leads({ user }) {
               )}
               <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
+              <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources} placeholder="All Sources" />
             </div>
           )}
           {(activeFilters > 0 || filters.search) && (
-            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', page: 1 })}
+            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', source: '', page: 1 })}
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all select-none cursor-pointer">
               <X size={14} /> Clear all
             </button>
@@ -328,12 +332,13 @@ export default function Leads({ user }) {
         </div>
 
         {/* Active-filter chips */}
-        {(filters.status || filters.consultant || filters.destination || filters.search) && (
+        {(filters.status || filters.consultant || filters.destination || filters.source || filters.search) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
             {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
             {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}
             {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
+            {filters.source && <Chip onClear={() => setFilter('source', '')}>Source: <strong>{filters.source}</strong></Chip>}
             <span className="text-xs text-slate-400 self-center ml-1">{data.total.toLocaleString()} match{data.total === 1 ? '' : 'es'}</span>
           </div>
         )}

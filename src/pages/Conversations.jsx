@@ -94,6 +94,65 @@ export default function Conversations({ user }) {
     }
   }, [toast]);
 
+  // Silent background refresh for conversations list (updates unread counts and last messages)
+  const refreshConversationsSilently = useCallback(async () => {
+    try {
+      const p = {
+        status: statusFilter,
+        search: search.trim() || undefined,
+        limit: 100
+      };
+      if (channelFilter !== 'all') {
+        p.channel_type = channelFilter;
+      }
+      const res = await api.conversations(p);
+      if (res && res.conversations) {
+        setConversations(current => {
+          if (JSON.stringify(current) !== JSON.stringify(res.conversations)) {
+            return res.conversations;
+          }
+          return current;
+        });
+      }
+    } catch (err) {
+      console.warn('Silent conversations refresh failed:', err);
+    }
+  }, [statusFilter, channelFilter, search]);
+
+  // Silent background refresh for message thread (polls for new incoming messages)
+  const refreshMessagesSilently = useCallback(async (conv) => {
+    if (!conv) return;
+    try {
+      const res = await api.messages(conv.id);
+      if (res) {
+        setMessages(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(res)) {
+            return res;
+          }
+          return prev;
+        });
+      }
+      // Also check if there were unread messages that we should clear
+      if (conv.unread_count > 0) {
+        await api.updateConversation(conv.id, { status: 'open' });
+        setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
+      }
+    } catch (err) {
+      console.warn('Silent messages refresh failed:', err);
+    }
+  }, []);
+
+  // Background polling timer (every 10 seconds)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refreshConversationsSilently();
+      if (selectedConv) {
+        refreshMessagesSilently(selectedConv);
+      }
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [selectedConv, refreshConversationsSilently, refreshMessagesSilently]);
+
   // Initial load
   useEffect(() => {
     document.title = "Live Chat Inbox | EduExpress Core";
