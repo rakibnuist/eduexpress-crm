@@ -298,6 +298,27 @@ export default function Conversations({ user }) {
       } else {
         setReplyText('');
         setSelectedFile(null);
+        if (res?.message) {
+          // Instantly append to thread messages list to update UI
+          setMessages(prev => {
+            if (prev.some(m => m.id === res.message.id || (res.message.wa_message_id && m.wa_message_id === res.message.wa_message_id))) {
+              return prev;
+            }
+            return [...prev, res.message];
+          });
+          // Instantly update conversation last_message in the sidebar
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === selectedConv.id);
+            if (idx === -1) return prev;
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              last_message: res.message.content || (res.message.type === 'image' ? '📷 Image' : '📎 Document'),
+              last_message_at: res.message.created_at || new Date().toISOString()
+            };
+            return updated.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+          });
+        }
       }
     } catch (err) {
       toast.error('Failed to send message: ' + err.message);
@@ -680,6 +701,17 @@ export default function Conversations({ user }) {
                               className="max-w-full h-auto object-cover max-h-[300px] cursor-pointer hover:brightness-95 transition-all"
                               onClick={() => setLightboxImage(getMediaUrl(m))}
                             />
+                            <div className="p-1 px-2.5 text-right bg-white/40 border-t border-black/5">
+                              <a
+                                href={getMediaUrl(m)}
+                                download={`image_${m.id}.jpg`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`text-[10px] font-black underline ${isInbound ? 'text-emerald-600 hover:text-emerald-800' : 'text-emerald-700 hover:text-emerald-800'} inline-block`}
+                              >
+                                Download image
+                              </a>
+                            </div>
                           </div>
                         )}
 
@@ -715,6 +747,17 @@ export default function Conversations({ user }) {
                         {m.type === 'video' && (
                           <div className="mb-1 max-w-full overflow-hidden rounded-md bg-black/5 border border-black/5 max-w-sm">
                             <video controls className="max-w-full h-auto object-cover max-h-[300px]" src={getMediaUrl(m)} />
+                            <div className="p-1 px-2.5 text-right bg-white/40 border-t border-black/5">
+                              <a
+                                href={getMediaUrl(m)}
+                                download={`video_${m.id}.mp4`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`text-[10px] font-black underline ${isInbound ? 'text-emerald-600 hover:text-emerald-800' : 'text-emerald-700 hover:text-emerald-800'} inline-block`}
+                              >
+                                Download video
+                              </a>
+                            </div>
                           </div>
                         )}
 
