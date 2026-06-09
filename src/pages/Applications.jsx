@@ -98,6 +98,7 @@ export default function Applications({ user }) {
   const [filterDest, setFilterDest]       = useState('all');
   const [filterSource, setFilterSource]   = useState('all');
   const [filterReferrer, setFilterReferrer] = useState('all');
+  const [filterConsultant, setFilterConsultant] = useState('all');
   const [searchQuery, setSearchQuery]     = useState('');
   const [view, setView] = useState(() => localStorage.getItem('app_view') || 'kanban');
 
@@ -127,7 +128,7 @@ export default function Applications({ user }) {
 
   useEffect(() => {
     setSelectedIds([]);
-  }, [view, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+  }, [view, filterStage, filterDest, filterSource, filterReferrer, filterConsultant, searchQuery]);
 
   const handleBulkDelete = async () => {
     try {
@@ -188,6 +189,7 @@ export default function Applications({ user }) {
     if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
     if (filterSource   !== 'all' && r.source !== filterSource)        return false;
     if (filterReferrer !== 'all' && r.referrer !== filterReferrer)    return false;
+    if (filterConsultant !== 'all' && r.assigned_consultant !== filterConsultant) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const nameMatch = (r.client_name || '').toLowerCase().includes(q);
@@ -201,9 +203,8 @@ export default function Applications({ user }) {
       if (!nameMatch && !idMatch && !destMatch && !majorMatch && !universityMatch && !consultantMatch && !degreeMatch && !referrerMatch) return false;
     }
     return true;
-  }), [rows, stages, filterStage, filterDest, filterSource, filterReferrer, searchQuery]);
+  }), [rows, stages, filterStage, filterDest, filterSource, filterReferrer, filterConsultant, searchQuery]);
 
-  // Per-stage counts (across all rows, not filtered, so the strip is stable)
   const stageCounts = useMemo(() => {
     const m = Object.fromEntries(stages.map(s => [s.key, 0]));
     const defaultStage = stages[0]?.key || 'documents';
@@ -216,8 +217,8 @@ export default function Applications({ user }) {
 
   const destinations = useMemo(() => unique(rows.map(r => r.destination)), [rows]);
   const referrers    = useMemo(() => unique(rows.map(r => r.referrer)), [rows]);
+  const consultants  = useMemo(() => unique(rows.map(r => r.assigned_consultant)), [rows]);
 
-  // Stats by source (B2B vs In-House) — matches the Excel's "Remark" column
   const sourceSplit = useMemo(() => {
     const m = { 'In-House': 0, 'B2B': 0, 'Unknown': 0 };
     filtered.forEach(r => {
@@ -229,7 +230,7 @@ export default function Applications({ user }) {
     return m;
   }, [filtered]);
 
-  const isFilterActive = filterSource !== 'all' || filterDest !== 'all' || filterReferrer !== 'all' || searchQuery;
+  const isFilterActive = filterSource !== 'all' || filterDest !== 'all' || filterReferrer !== 'all' || filterConsultant !== 'all' || searchQuery;
 
   return (
     <div className="space-y-5">
@@ -323,6 +324,13 @@ export default function Applications({ user }) {
               {referrers.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
 
+            <select value={filterConsultant} onChange={e => setFilterConsultant(e.target.value)}
+              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
+                ${filterConsultant !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              <option value="all">All Consultants</option>
+              {consultants.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+
             {view === 'kanban' && (
               <label className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white cursor-pointer select-none hover:bg-slate-50 transition-colors">
                 <input type="checkbox" checked={hideEmptyColumns} onChange={e => setHideEmptyColumns(e.target.checked)}
@@ -338,6 +346,7 @@ export default function Applications({ user }) {
                   setFilterSource('all');
                   setFilterDest('all');
                   setFilterReferrer('all');
+                  setFilterConsultant('all');
                 }}
                 className="flex items-center gap-1 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold"
               >

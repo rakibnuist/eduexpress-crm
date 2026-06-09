@@ -84,7 +84,7 @@ export default function Conversations({ user }) {
       setMessages(res || []);
       // Mark as read/clear unread count locally and on server
       if (conv.unread_count > 0) {
-        await api.updateConversation(conv.id, { status: 'open' }); // updates unread_count=0
+        await api.markConversationAsRead(conv.id);
         setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
       }
     } catch (err) {
@@ -134,7 +134,7 @@ export default function Conversations({ user }) {
       }
       // Also check if there were unread messages that we should clear
       if (conv.unread_count > 0) {
-        await api.updateConversation(conv.id, { status: 'open' });
+        await api.markConversationAsRead(conv.id);
         setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
       }
     } catch (err) {
