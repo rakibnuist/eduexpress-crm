@@ -63,7 +63,7 @@ export default function App() {
                     <Route path="/leads" element={<Leads user={user} />} />
                     <Route path="/leads/:id" element={<LeadDetail user={user} />} />
                     <Route path="/my-day" element={<MyDay user={user} />} />
-                    <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
+                    <Route path="/pipeline" element={<Leads user={user} />} />
                     <Route path="/applications" element={<Applications user={user} />} />
                     <Route path="/conversations" element={<Conversations user={user} />} />
                     {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}

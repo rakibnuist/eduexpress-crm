@@ -329,10 +329,6 @@ function templateFor(destination) {
 }
 
 function leadIsVisibleTo(lead, user) {
-  const isChinaAuthorized = user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
-  const isChinaLead = lead.source === 'China' || (lead.lead_id && lead.lead_id.startsWith('C-'));
-  if (isChinaLead && !isChinaAuthorized) return false;
-
   const isGeneralAuthorized = user?.role === 'admin' || user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
   if (isGeneralAuthorized) return true;
   const me = user?.consultant_name || user?.name || '';
@@ -351,14 +347,9 @@ app.get('/api/application/meta', (req, res) => {
 // All leads currently in the application pipeline (i.e. that have a stage set,
 // or are 'Enrolled'/'File Opened'). Returns one card-friendly row each.
 app.get('/api/applications', (req, res) => {
-  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
   const where = [
     "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
   ];
-  if (!isChinaAuthorized) {
-    where.push("(l.source IS NULL OR l.source != 'China')");
-    where.push("(l.lead_id IS NULL OR l.lead_id NOT LIKE 'C-%')");
-  }
   const params = {};
   if (req.user?.role === 'consultant') { // admins + managers see all
     const meName = req.user.consultant_name || req.user.name || '';
@@ -1683,25 +1674,13 @@ async function sendCAPIEvent(eventName, leadData) {
 // DASHBOARD
 // ─────────────────────────────────────────────────────────
 app.get('/api/dashboard', (req, res) => {
-  const isConsultant = req.user?.role === 'consultant';
-  const meName = req.user?.consultant_name || req.user?.name || '';
-  const meClean = meName.split(' ')[0];
-  
-  let ws = "WHERE (source IS NULL OR source != 'China') AND (lead_id IS NULL OR lead_id NOT LIKE 'C-%')";
-  const params = {};
-  if (isConsultant) {
-    ws += " AND (TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')";
-    params.me = meName;
-    params.meClean = meClean;
-  }
-
-  const pipeline     = db.prepare(`SELECT lead_status, COUNT(*) as count FROM leads ${ws} GROUP BY lead_status`).all(params);
-  const total        = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
+  const pipeline     = db.prepare("SELECT lead_status, COUNT(*) as count FROM leads GROUP BY lead_status").all();
+  const total        = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
   const today        = new Date().toISOString().slice(0, 10);
-  const followupToday= db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + ' AND' : 'WHERE'} next_followup=@today`).get({ ...params, today }).c;
-  const recentLeads  = db.prepare(`SELECT * FROM leads ${ws} ORDER BY id DESC LIMIT 5`).all(params);
-  const totalPaid    = db.prepare(`SELECT SUM(paid) as s FROM leads ${ws}`).get(params).s || 0;
-  const metaLeads    = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + ' AND' : 'WHERE'} meta_lead_id IS NOT NULL`).get(params).c;
+  const followupToday= db.prepare("SELECT COUNT(*) as c FROM leads WHERE next_followup=?").get(today).c;
+  const recentLeads  = db.prepare("SELECT * FROM leads ORDER BY id DESC LIMIT 5").all();
+  const totalPaid    = db.prepare("SELECT SUM(paid) as s FROM leads").get().s || 0;
+  const metaLeads    = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
   const openConvs    = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='open'").get().c;
   const unreadMsgs   = db.prepare("SELECT SUM(unread_count) as s FROM conversations").get().s || 0;
   res.json({ pipeline, total, followupToday, recentLeads, totalPaid, metaLeads, openConvs, unreadMsgs });
@@ -1712,7 +1691,7 @@ app.get('/api/dashboard', (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
-  const where = ["(source IS NULL OR source != 'China') AND (lead_id IS NULL OR lead_id NOT LIKE 'C-%')"]; const params = {};
+  const where = []; const params = {};
   if (search && search !== 'undefined' && search !== 'null') { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
@@ -1814,10 +1793,6 @@ WHERE id=@id`;
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
   const isChinaApp = d.isChinaApp || d.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-'));
-  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
-  if (isChinaApp && !isChinaAuthorized) {
-    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can add China inside student records.' });
-  }
   const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, lead_id, balance);
@@ -1836,11 +1811,6 @@ app.put('/api/leads/:id', async (req, res) => {
   if (!oldLead) return res.status(404).json({ error: 'Not found' });
   if (!leadIsVisibleTo(oldLead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
-  }
-  const isChinaApp = d.source === 'China' || oldLead.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-')) || (oldLead.lead_id && String(oldLead.lead_id).startsWith('C-'));
-  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
-  if (isChinaApp && !isChinaAuthorized) {
-    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can edit China inside student records.' });
   }
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, oldLead.lead_id, balance);
@@ -1867,11 +1837,6 @@ app.delete('/api/leads/:id', (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Not found' });
   if (!leadIsVisibleTo(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
-  }
-  const isChinaApp = lead.source === 'China' || (lead.lead_id && String(lead.lead_id).startsWith('C-'));
-  const isChinaAuthorized = req.user?.role === 'manager' || req.user?.email === 'admin@eduexpressint.com';
-  if (isChinaApp && !isChinaAuthorized) {
-    return res.status(403).json({ error: 'Access denied: only Super Admin and Application Manager can delete China inside student records.' });
   }
   db.prepare("DELETE FROM leads WHERE id=?").run(req.params.id);
   res.json({ ok: true });

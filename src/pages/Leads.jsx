@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useSearchParams, Link, useNavigate } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -24,7 +24,14 @@ const STAGES = [
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 export default function Leads({ user }) {
-  useEffect(() => { document.title = "Leads & Pipeline | EduExpress Core"; }, []);
+  const location = useLocation();
+  const isPipelineRoute = location.pathname.startsWith('/pipeline');
+
+  useEffect(() => {
+    document.title = isPipelineRoute
+      ? "Sales Pipeline | EduExpress Core"
+      : "All Leads | EduExpress Core";
+  }, [isPipelineRoute]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ leads: [], total: 0, pages: 1 });
@@ -39,10 +46,20 @@ export default function Leads({ user }) {
 
   // View state: table or kanban
   const [view, setView] = useState(() => {
+    if (window.location.pathname.startsWith('/pipeline')) return 'kanban';
+    if (window.location.pathname.startsWith('/leads')) return 'table';
     const urlView = searchParams.get('view');
     if (urlView === 'kanban' || urlView === 'table') return urlView;
     return localStorage.getItem('leads_view') || 'table';
   });
+
+  useEffect(() => {
+    if (isPipelineRoute) {
+      setView('kanban');
+    } else {
+      setView('table');
+    }
+  }, [location.pathname, isPipelineRoute]);
 
   const [filters, setFilters] = useState({
     search: '',
@@ -204,31 +221,18 @@ export default function Leads({ user }) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Leads & Sales Pipeline</h2>
-          <p className="text-sm text-slate-500">{data.total.toLocaleString()} total active records</p>
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
+            {isPipelineRoute ? 'Sales Pipeline' : 'All Leads'}
+          </h2>
+          <p className="text-sm text-slate-500">
+            {isPipelineRoute 
+              ? `${Object.values(byStatus).flat().length} active prospects on board`
+              : `${data.total.toLocaleString()} total active records`
+            }
+          </p>
         </div>
         
         <div className="flex items-center gap-3">
-          {/* Visual switcher toggle */}
-          <div className="flex gap-1.5 bg-slate-200/60 p-1 rounded-xl shadow-inner">
-            <button
-              onClick={() => handleSetView('table')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 select-none cursor-pointer ${
-                view === 'table' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <TableIcon size={13} /> Table View
-            </button>
-            <button
-              onClick={() => handleSetView('kanban')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 select-none cursor-pointer ${
-                view === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <LayoutGrid size={13} /> Pipeline Board
-            </button>
-          </div>
-
           <div className="flex gap-2">
             {selectedIds.length > 0 && (
               <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm select-none cursor-pointer">
