@@ -28,6 +28,7 @@ export default function Conversations({ user }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'open' | 'archived' | 'all'
   const [channelFilter, setChannelFilter] = useState('all');
+  const [selectedChannelId, setSelectedChannelId] = useState('all');
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'unread' | 'whatsapp' | 'messenger' | 'instagram'
 
   // Media upload and lightbox state
@@ -66,6 +67,9 @@ export default function Conversations({ user }) {
       if (channelFilter !== 'all') {
         p.channel_type = channelFilter;
       }
+      if (selectedChannelId !== 'all') {
+        p.channel_id = selectedChannelId;
+      }
       const res = await api.conversations(p);
       setConversations(res.conversations || []);
     } catch (err) {
@@ -73,7 +77,7 @@ export default function Conversations({ user }) {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, channelFilter, search, toast]);
+  }, [statusFilter, channelFilter, selectedChannelId, search, toast]);
 
   // Load message thread
   const loadMessages = useCallback(async (conv) => {
@@ -82,11 +86,10 @@ export default function Conversations({ user }) {
     try {
       const res = await api.messages(conv.id);
       setMessages(res || []);
-      // Mark as read/clear unread count locally and on server
-      if (conv.unread_count > 0) {
-        await api.markConversationAsRead(conv.id);
-        setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
-      }
+      // Mark as read/clear unread count locally and on server unconditionally
+      await api.markConversationAsRead(conv.id);
+      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
+      setSelectedConv(prev => prev && prev.id === conv.id ? { ...prev, unread_count: 0 } : prev);
     } catch (err) {
       toast.error('Could not load messages: ' + err.message);
     } finally {
@@ -105,6 +108,9 @@ export default function Conversations({ user }) {
       if (channelFilter !== 'all') {
         p.channel_type = channelFilter;
       }
+      if (selectedChannelId !== 'all') {
+        p.channel_id = selectedChannelId;
+      }
       const res = await api.conversations(p);
       if (res && res.conversations) {
         setConversations(current => {
@@ -117,7 +123,7 @@ export default function Conversations({ user }) {
     } catch (err) {
       console.warn('Silent conversations refresh failed:', err);
     }
-  }, [statusFilter, channelFilter, search]);
+  }, [statusFilter, channelFilter, selectedChannelId, search]);
 
   // Silent background refresh for message thread (polls for new incoming messages)
   const refreshMessagesSilently = useCallback(async (conv) => {
@@ -132,11 +138,10 @@ export default function Conversations({ user }) {
           return prev;
         });
       }
-      // Also check if there were unread messages that we should clear
-      if (conv.unread_count > 0) {
-        await api.markConversationAsRead(conv.id);
-        setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
-      }
+      // Unconditionally mark as read on backend if the user is looking at this conversation
+      await api.markConversationAsRead(conv.id);
+      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
+      setSelectedConv(prev => prev && prev.id === conv.id ? { ...prev, unread_count: 0 } : prev);
     } catch (err) {
       console.warn('Silent messages refresh failed:', err);
     }
@@ -236,7 +241,7 @@ export default function Conversations({ user }) {
     es.addEventListener('new_message', (e) => {
       try {
         const data = JSON.parse(e.data);
-        // If it belongs to currently selected conversation, append it
+        // If it belongs to currently selected conversation, append it and mark as read immediately
         if (selectedConv && data.conversation_id === selectedConv.id) {
           setMessages(prev => {
             // Avoid duplicate appends
@@ -245,6 +250,12 @@ export default function Conversations({ user }) {
             }
             return [...prev, data];
           });
+          // Call markConversationAsRead on server immediately
+          api.markConversationAsRead(selectedConv.id).catch(err => {
+            console.error('Failed to mark incoming active message as read:', err);
+          });
+          // Ensure selectedConv itself has unread_count = 0
+          setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
         }
 
         // Update last message in the conversations list
@@ -529,6 +540,25 @@ export default function Conversations({ user }) {
               className="w-full bg-slate-50 border border-slate-200/60 rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-600/15 focus:border-blue-600 transition-all placeholder-slate-400"
             />
           </div>
+
+          {/* Channel dropdown filter */}
+          {channels.length > 0 && (
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider whitespace-nowrap">Page/Channel:</span>
+              <select
+                value={selectedChannelId}
+                onChange={e => setSelectedChannelId(e.target.value)}
+                className="flex-1 bg-slate-50 border border-slate-200/50 rounded-lg px-2.5 py-1 text-[11px] font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-600/15 focus:border-blue-600 transition-all cursor-pointer"
+              >
+                <option value="all">All Pages / Channels</option>
+                {channels.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Client-side Filter Pills */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
