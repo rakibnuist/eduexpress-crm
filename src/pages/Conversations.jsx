@@ -9,6 +9,14 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 
+const getMediaUrl = (msg) => {
+  if (!msg.media_url) return '';
+  if (msg.media_url.startsWith('http') || msg.media_url.startsWith('/uploads')) {
+    return msg.media_url;
+  }
+  return `/api/media/${msg.id}?v=2`;
+};
+
 export default function Conversations({ user }) {
   const [conversations, setConversations] = useState([]);
   const [selectedConv, setSelectedConv] = useState(null);
@@ -667,10 +675,10 @@ export default function Conversations({ user }) {
                         {m.type === 'image' && m.media_url && (
                           <div className="mb-1 max-w-full overflow-hidden rounded-md bg-black/5 border border-black/5">
                             <img
-                              src={m.media_url}
+                              src={getMediaUrl(m)}
                               alt="Attachment Image"
                               className="max-w-full h-auto object-cover max-h-[300px] cursor-pointer hover:brightness-95 transition-all"
-                              onClick={() => setLightboxImage(m.media_url)}
+                              onClick={() => setLightboxImage(getMediaUrl(m))}
                             />
                           </div>
                         )}
@@ -684,7 +692,7 @@ export default function Conversations({ user }) {
                                 {m.content || 'Document Attachment'}
                               </p>
                               <a
-                                href={m.media_url}
+                                href={getMediaUrl(m)}
                                 download
                                 target="_blank"
                                 rel="noreferrer"
@@ -696,8 +704,24 @@ export default function Conversations({ user }) {
                           </div>
                         )}
 
-                        {/* 3. Text Message content (Only if text type or image description) */}
-                        {(m.type === 'text' || !m.type || (m.type !== 'image' && m.type !== 'document') || (m.type === 'image' && m.content && m.content !== m.media_url)) && (
+                        {/* 3. Audio / Voice Render */}
+                        {(m.type === 'audio' || m.type === 'voice') && (
+                          <div className={`mb-1 p-2 rounded-lg flex items-center gap-3 border ${isInbound ? 'bg-slate-50 border-slate-200' : 'bg-emerald-700/10 border-emerald-600/20'} max-w-xs`}>
+                            <audio controls className="h-8 w-full max-w-[200px]" src={getMediaUrl(m)} />
+                          </div>
+                        )}
+
+                        {/* 4. Video Render */}
+                        {m.type === 'video' && (
+                          <div className="mb-1 max-w-full overflow-hidden rounded-md bg-black/5 border border-black/5 max-w-sm">
+                            <video controls className="max-w-full h-auto object-cover max-h-[300px]" src={getMediaUrl(m)} />
+                          </div>
+                        )}
+
+                        {/* 5. Text Message content (Only if text type or media has description) */}
+                        {(m.type === 'text' || !m.type || 
+                          (m.type !== 'image' && m.type !== 'document' && m.type !== 'audio' && m.type !== 'voice' && m.type !== 'video') || 
+                          ((m.type === 'image' || m.type === 'video') && m.content && m.content !== m.media_url && m.content !== '[Image]' && m.content !== '[Video]')) && (
                           <p className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{m.content}</p>
                         )}
                         
