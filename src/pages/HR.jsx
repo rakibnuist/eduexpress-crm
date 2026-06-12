@@ -629,10 +629,13 @@ function InfoPill({ label, value, mono }) {
 function EmpForm({ emp, onSave }) {
   const [form, setForm] = useState(emp || { active: 'Yes' });
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const toast = useToast();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   async function submit(e) {
-    e.preventDefault(); setSaving(true);
+    e.preventDefault(); setSaving(true); setErr('');
     try { if (emp) await api.updateEmployee(emp.id, form); else await api.createEmployee(form); onSave(); }
+    catch (e) { setErr(e.message); toast.error(e.message); }
     finally { setSaving(false); }
   }
   return (
@@ -661,6 +664,9 @@ function EmpForm({ emp, onSave }) {
           <option>Yes</option><option>No</option>
         </select>
       </div>
+      {err && (
+        <div className="col-span-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</div>
+      )}
       <div className="col-span-2 flex justify-end pt-1">
         <button type="submit" disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60">
           {saving ? 'Saving…' : 'Save'}
