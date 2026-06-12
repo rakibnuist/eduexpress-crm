@@ -2097,6 +2097,19 @@ app.post('/api/import/applications', (req, res, next) => requireAdmin(req, res, 
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+// ─── ADMIN: wipe all leads (+ cascaded documents, uni-apps, activity_log) ───
+app.delete('/api/admin/wipe-leads', (req, res, next) => requireAdmin(req, res, () => {
+  try {
+    const count = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
+    db.prepare("DELETE FROM leads").run();
+    // Reset auto-increment so IDs start fresh
+    db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('leads','lead_documents','lead_university_applications','activity_log')").run();
+    res.json({ ok: true, deleted: count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
 // ─── STAFF REPLY to a student through the portal thread ───────────────────
 app.post('/api/leads/:id/reply-to-student', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);

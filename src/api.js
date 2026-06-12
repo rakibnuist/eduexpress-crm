@@ -128,6 +128,9 @@ export const api = {
   importCashflow:    (rows)    => req('/import/cashflow', { method: 'POST', body: JSON.stringify({ rows }) }),
   importApplications:(rows)    => req('/import/applications', { method: 'POST', body: JSON.stringify({ rows }) }),
 
+  // Admin: wipe all leads + cascaded data
+  wipeLeads: () => req('/admin/wipe-leads', { method: 'DELETE' }),
+
   // Staff↔student thread
   replyToStudent:    (id, t)   => req(`/leads/${id}/reply-to-student`, { method: 'POST', body: JSON.stringify({ text: t }) }),
   studentThread:     (token)   => fetch(`/api/public/student/${token}/thread`).then(r => r.ok ? r.json() : Promise.reject(new Error(r.statusText))),

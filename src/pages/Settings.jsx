@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, Wifi, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Upload, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2 } from 'lucide-react';
-import ExcelImport from '../components/ExcelImport';
+import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
@@ -101,8 +100,6 @@ export default function Settings() {
                 listKey="settings_leadStatuses" items={settings.leadStatuses || []} onSaved={reloadSettings} />
               <EditableCard icon={<Globe size={16} />} title="Destinations" color="emerald"
                 listKey="settings_destinations" items={settings.destinations || []} onSaved={reloadSettings} />
-              <EditableCard icon={<Wifi size={16} />} title="Lead Sources" color="orange"
-                listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
               <EditableCard icon={<CreditCard size={16} />} title="Payment Statuses" color="rose"
                 listKey="settings_paymentStatuses" items={settings.paymentStatuses || []} onSaved={reloadSettings} />
               <EditableCard icon={<Clock size={16} />} title="File Stages" color="amber"
@@ -121,16 +118,6 @@ export default function Settings() {
             <BroadcastManager />
 
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-              <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-sky-50 text-sky-700">
-                <Upload size={17} />
-                <span className="font-semibold text-sm">Import from Excel</span>
-              </div>
-              <div className="p-5">
-                <ExcelImport />
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
               <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-slate-50 text-slate-600">
                 <Info size={17} />
                 <span className="font-semibold text-sm">System Information</span>
@@ -144,6 +131,8 @@ export default function Settings() {
                 </div>
               </div>
             </div>
+
+            <DangerZone />
           </div>
         )}
 
@@ -178,6 +167,64 @@ function InfoRow({ label, value }) {
     <div>
       <p className="text-xs text-slate-400 font-medium">{label}</p>
       <p className="text-slate-700 font-medium mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+function DangerZone() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+
+  const handleWipeLeads = async () => {
+    const ok = await confirm({
+      title: 'Delete ALL Leads & Applications?',
+      body: 'This will permanently delete every lead, document, university application, and related activity log from the database. This cannot be undone.',
+      confirmLabel: 'Yes, delete everything',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    // Second confirmation
+    const sure = await confirm({
+      title: 'Are you absolutely sure?',
+      body: 'All student records will be gone forever.',
+      confirmLabel: 'Delete permanently',
+      tone: 'danger',
+    });
+    if (!sure) return;
+    setBusy(true);
+    try {
+      const res = await api.wipeLeads();
+      toast.success(`Deleted ${res.deleted} lead(s) and all associated records.`);
+    } catch (e) {
+      toast.error(e.message || 'Wipe failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-rose-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-rose-100 bg-rose-50 text-rose-700">
+        <AlertTriangle size={17} />
+        <span className="font-semibold text-sm">Danger Zone</span>
+      </div>
+      <div className="p-5 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Delete All Leads &amp; Applications</p>
+            <p className="text-xs text-slate-500 mt-0.5">Permanently removes every lead, document, university application, and activity log. Use this to clear test data before going live.</p>
+          </div>
+          <button
+            onClick={handleWipeLeads}
+            disabled={busy}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition-colors disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {busy ? 'Deleting…' : 'Wipe Leads'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
