@@ -731,7 +731,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
       if (missing.length) throw new Error(`Schema rebuild failed, still missing: ${missing.join(', ')}`);
     }
 
-    seedData();
+    // seedData(); // disabled — production environment, no dummy data
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
