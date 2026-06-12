@@ -71,20 +71,21 @@ export default function Cockpit() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-            <Eye size={24} className="text-blue-600" /> Executive Cockpit & Operations Monitoring
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5">
+            <div className="p-1.5 bg-blue-600 rounded-lg"><Eye size={18} className="text-white"/></div>
+            Cockpit
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Live metrics stream · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
-            {' · '}<span className="text-emerald-600 font-semibold">Office time: {new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })} Dhaka</span>
+            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {' · '}<span className="text-emerald-600 font-medium">{new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' })} Dhaka</span>
           </p>
         </div>
         <button onClick={load} disabled={refreshing}
-          className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50">
+          className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-700 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 transition-all">
           <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          {lastSync ? `Updated ${timeAgo(lastSync.toISOString())}` : 'Refresh'}
+          {lastSync ? `Synced ${timeAgo(lastSync.toISOString())}` : 'Refresh'}
         </button>
       </div>
 
@@ -109,17 +110,21 @@ export default function Cockpit() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+      <div className="flex gap-1 bg-slate-100/80 p-1 rounded-xl w-fit border border-slate-200/60">
         {[
-          { id: 'overview',  label: 'Overview',     icon: Activity },
-          { id: 'attendance', label: 'Attendance',  icon: Clock },
-          { id: 'alerts',    label: `Alerts (${totalAlerts})`, icon: AlertTriangle },
-          { id: 'feed',      label: 'Activity feed', icon: TrendingUp },
+          { id: 'overview',   label: 'Overview',          icon: Activity },
+          { id: 'attendance', label: 'Attendance',         icon: Clock },
+          { id: 'alerts',     label: `Alerts${totalAlerts > 0 ? ` (${totalAlerts})` : ''}`, icon: AlertTriangle },
+          { id: 'feed',       label: 'Activity',           icon: TrendingUp },
         ].map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-              ${tab === id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            <Icon size={15} /> {label}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all
+              ${tab === id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}>
+            <Icon size={14} className={tab === id ? (id === 'alerts' && totalAlerts > 0 ? 'text-rose-500' : 'text-blue-600') : ''} />
+            {label}
+            {id === 'alerts' && totalAlerts > 0 && tab !== 'alerts' && (
+              <span className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-pulse"/>
+            )}
           </button>
         ))}
       </div>
@@ -127,39 +132,51 @@ export default function Cockpit() {
       {tab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* 7-day trend */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
-            <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2"><TrendingUp size={16}/> Last 7 days</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={trend} margin={{ top: 0, right: 8, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="2 2" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(8, 10)} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} />
-                <Bar dataKey="newLeads" fill="#60a5fa" radius={[4, 4, 0, 0]} name="New leads" />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="mt-4">
-              <p className="text-xs font-medium text-slate-500 mb-1">Daily revenue</p>
-              <ResponsiveContainer width="100%" height={70}>
-                <LineChart data={trend} margin={{ top: 6, right: 8, left: -10, bottom: 0 }}>
-                  <XAxis dataKey="date" hide />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} formatter={v => fmt(v)} />
-                  <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} />
-                </LineChart>
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+              <h3 className="font-semibold text-slate-700 flex items-center gap-2"><TrendingUp size={15}/> 7-Day Lead Trend</h3>
+              <span className="text-xs text-slate-400">New leads per day</span>
+            </div>
+            <div className="p-5">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={trend} margin={{ top: 0, right: 8, left: -10, bottom: 0 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={d => d.slice(5)} />
+                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                  <Tooltip contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 24px rgba(0,0,0,.1)', fontSize: 12 }}
+                    cursor={{ fill: 'rgba(148,163,184,.08)' }} />
+                  <Bar dataKey="newLeads" fill="#60a5fa" radius={[5, 5, 0, 0]} name="New leads" />
+                </BarChart>
               </ResponsiveContainer>
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
+                  <DollarSign size={12} className="text-emerald-500"/> Daily revenue
+                </p>
+                <ResponsiveContainer width="100%" height={70}>
+                  <LineChart data={trend} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+                    <XAxis dataKey="date" hide />
+                    <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} formatter={v => fmt(v)} />
+                    <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
 
           {/* Yesterday recap */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5">
-            <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2"><CalendarClock size={16}/> Yesterday</h3>
-            <div className="space-y-2.5 text-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
+              <h3 className="font-semibold text-slate-700 flex items-center gap-2"><CalendarClock size={15}/> Yesterday</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{yesterday.date}</p>
+            </div>
+            <div className="p-5 space-y-2">
               <Stat label="Attendance" value={`${yesterday.attendance.checkedIn.length}/${yesterday.attendance.totalActive}`} />
               <Stat label="New leads" value={yesterday.stats.newLeads} />
               <Stat label="Conversions" value={yesterday.stats.conversions} />
-              <Stat label="Money in" value={fmt(yesterday.stats.paymentsAmount)} />
-              <Stat label="Money out" value={fmt(yesterday.stats.expensesAmount)} />
-              <Stat label="Net cash" value={fmt(yesterday.stats.netCash)} highlight={yesterday.stats.netCash >= 0 ? 'pos' : 'neg'} />
+              <Stat label="Money in" value={fmt(yesterday.stats.paymentsAmount)} highlight="pos" />
+              <Stat label="Money out" value={fmt(yesterday.stats.expensesAmount)} highlight="neg" />
+              <div className="pt-2 mt-1 border-t border-slate-100">
+                <Stat label="Net cash" value={fmt(yesterday.stats.netCash)} highlight={yesterday.stats.netCash >= 0 ? 'pos' : 'neg'} bold />
+              </div>
             </div>
           </div>
         </div>
@@ -174,32 +191,41 @@ export default function Cockpit() {
 
 /* ── pieces ─────────────────────────────────────────────────────────────── */
 function PulseCard({ icon, label, value, sub, color }) {
-  const colors = {
+  const gradients = {
+    blue:    'from-blue-500 to-blue-700',
+    emerald: 'from-emerald-500 to-emerald-700',
+    violet:  'from-violet-500 to-violet-700',
+    amber:   'from-amber-500 to-orange-600',
+    rose:    'from-rose-500 to-rose-700',
+    slate:   'from-slate-400 to-slate-500',
+  };
+  const icons = {
     blue:    'bg-blue-50 text-blue-600',
     emerald: 'bg-emerald-50 text-emerald-600',
     violet:  'bg-violet-50 text-violet-600',
     amber:   'bg-amber-50 text-amber-600',
-    rose:    'bg-rose-50 text-rose-600',
+    rose:    'bg-rose-50 text-rose-500',
     slate:   'bg-slate-50 text-slate-500',
   };
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-start gap-3">
-      <div className={`p-2.5 rounded-xl ${colors[color]}`}>{icon}</div>
+    <div className="relative overflow-hidden bg-white border border-slate-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm hover:shadow-md transition-all group">
+      <div className={`absolute top-0 right-0 w-20 h-20 bg-gradient-to-bl ${gradients[color] || gradients.slate} opacity-[0.06] rounded-bl-3xl pointer-events-none`}/>
+      <div className={`p-2.5 rounded-xl ${icons[color]} flex-shrink-0`}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-slate-500 font-medium truncate uppercase tracking-wide">{label}</p>
-        <p className="text-2xl font-bold text-slate-800 leading-tight">{value}</p>
-        <p className="text-[11px] text-slate-400 truncate">{sub}</p>
+        <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-extrabold text-slate-800 leading-tight mt-0.5">{value}</p>
+        <p className="text-[11px] text-slate-400 truncate mt-0.5">{sub}</p>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, highlight }) {
+function Stat({ label, value, highlight, bold }) {
   const colorMap = { pos: 'text-emerald-600', neg: 'text-rose-600' };
   return (
-    <div className="flex justify-between items-center">
+    <div className="flex justify-between items-center py-0.5">
       <span className="text-xs text-slate-500">{label}</span>
-      <span className={`font-semibold ${colorMap[highlight] || 'text-slate-800'}`}>{value}</span>
+      <span className={`text-sm font-${bold ? 'extrabold' : 'semibold'} ${colorMap[highlight] || 'text-slate-800'}`}>{value}</span>
     </div>
   );
 }
@@ -299,43 +325,50 @@ function AlertsTab({ alerts, visaDeadlines = [], totalOutstanding }) {
 
 function AlertLane({ title, icon, color, subtitle, rows, renderMeta }) {
   const [open, setOpen] = useState(false);
-  const colors = {
-    amber:  'bg-amber-50 border-amber-100 text-amber-700',
-    rose:   'bg-rose-50 border-rose-100 text-rose-700',
-    violet: 'bg-violet-50 border-violet-100 text-violet-700',
+  const palette = {
+    amber:  { icon: 'bg-amber-50 text-amber-600 border-amber-100', badge: 'bg-amber-100 text-amber-700', border: 'border-amber-200' },
+    rose:   { icon: 'bg-rose-50 text-rose-600 border-rose-100',    badge: 'bg-rose-100 text-rose-700',   border: 'border-rose-200' },
+    violet: { icon: 'bg-violet-50 text-violet-600 border-violet-100', badge: 'bg-violet-100 text-violet-700', border: 'border-violet-200' },
   };
+  const p = palette[color] || palette.amber;
+  const hasItems = rows.length > 0;
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
-        <div className={`p-2 rounded-lg ${colors[color]}`}>{icon}</div>
-        <div className="flex-1 min-w-0 text-left">
+    <div className={`bg-white rounded-2xl border ${hasItems ? p.border : 'border-slate-200'} overflow-hidden shadow-sm`}>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50/60 transition-colors text-left">
+        <div className={`p-2 rounded-xl border ${p.icon} flex-shrink-0`}>{icon}</div>
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <p className="font-semibold text-slate-800">{title}</p>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colors[color]}`}>{rows.length}</span>
+            <p className="font-semibold text-slate-800 text-sm">{title}</p>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${hasItems ? p.badge : 'bg-slate-100 text-slate-500'}`}>
+              {rows.length}
+            </span>
           </div>
-          <p className="text-xs text-slate-500">{subtitle}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>
         </div>
-        <ArrowRight size={16} className={`text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <ArrowRight size={15} className={`text-slate-300 flex-shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
         <div className="border-t border-slate-100">
           {rows.length === 0 ? (
-            <p className="text-sm text-slate-400 italic text-center py-6">Nothing here — good</p>
+            <div className="flex items-center gap-2 justify-center py-6 text-sm text-slate-400">
+              <CheckCircle2 size={16} className="text-emerald-500"/> All clear — nothing to action
+            </div>
           ) : (
             <div className="divide-y divide-slate-50">
               {rows.map(l => (
                 <Link key={l.id} to={`/leads?q=${encodeURIComponent(l.lead_id || l.client_name)}`}
-                  className="flex items-center gap-3 px-5 py-3 hover:bg-blue-50/40 transition-colors">
+                  className="flex items-center gap-3 px-5 py-3 hover:bg-blue-50/30 transition-colors group">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-800 truncate">{l.client_name}</p>
-                    <p className="text-xs text-slate-400 flex items-center gap-2">
-                      <span>{l.lead_id}</span>
-                      {l.destination && <><span>·</span><MapPin size={11} /> {l.destination}</>}
-                      {l.assigned_consultant && <><span>·</span> {l.assigned_consultant}</>}
+                    <p className="font-medium text-slate-800 truncate group-hover:text-blue-700 transition-colors">{l.client_name}</p>
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
+                      <span className="font-mono">{l.lead_id}</span>
+                      {l.destination && <><span className="text-slate-300">·</span><MapPin size={10} className="text-slate-300"/> {l.destination}</>}
+                      {l.assigned_consultant && <><span className="text-slate-300">·</span> {l.assigned_consultant}</>}
                     </p>
                   </div>
                   {renderMeta && renderMeta(l)}
-                  <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
+                  <ArrowRight size={13} className="text-slate-300 flex-shrink-0" />
                 </Link>
               ))}
             </div>
@@ -349,16 +382,22 @@ function AlertLane({ title, icon, color, subtitle, rows, renderMeta }) {
 function FeedTab({ feed }) {
   if (!feed || feed.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm">
-        Activity feed is empty — actions will appear here as they happen
+      <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
+        <Activity size={32} className="mx-auto text-slate-200 mb-2"/>
+        <p className="text-sm text-slate-400">Activity feed is empty — actions will appear here as they happen</p>
       </div>
     );
   }
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-        <h3 className="font-semibold text-slate-700 text-sm">Recent activity</h3>
-        <p className="text-xs text-slate-400">Live — refreshes every 30 seconds</p>
+    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+      <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-slate-700 text-sm">Live Activity Feed</h3>
+          <p className="text-xs text-slate-400">Auto-refreshes every 30 seconds</p>
+        </div>
+        <span className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-medium bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"/>LIVE
+        </span>
       </div>
       <div className="divide-y divide-slate-50 max-h-[640px] overflow-y-auto">
         {feed.map(a => <FeedItem key={a.id} a={a} />)}
@@ -370,24 +409,23 @@ function FeedTab({ feed }) {
 function FeedItem({ a }) {
   const meta = describeActivity(a);
   return (
-    <div className="flex items-start gap-3 px-5 py-3 hover:bg-slate-50/60">
-      <div className={`p-2 rounded-lg flex-shrink-0 ${meta.bg}`}>{meta.icon}</div>
+    <div className="flex items-start gap-3 px-5 py-3.5 hover:bg-slate-50/60 transition-colors group">
+      <div className={`p-2 rounded-xl flex-shrink-0 ${meta.bg}`}>{meta.icon}</div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-slate-700">
-          <strong className="text-slate-800">{a.actor_name || 'System'}</strong>{' '}
+        <p className="text-sm text-slate-700 leading-snug">
+          <strong className="text-slate-800 font-semibold">{a.actor_name || 'System'}</strong>{' '}
           {meta.verb}
-          {a.lead_name && <Link to={`/leads?q=${encodeURIComponent(a.lead_name)}`} className="text-blue-600 hover:underline ml-1">{a.lead_name}</Link>}
-          {meta.tail}
+          {a.lead_name && <Link to={`/leads?q=${encodeURIComponent(a.lead_name)}`} className="text-blue-600 hover:underline font-medium ml-1">{a.lead_name}</Link>}
+          {meta.tail && <span className="text-slate-600">{meta.tail}</span>}
         </p>
         {meta.detail && <p className="text-xs text-slate-400 mt-0.5">{meta.detail}</p>}
       </div>
-      <span className="text-xs text-slate-400 flex-shrink-0">{timeAgo(a.created_at)}</span>
+      <span className="text-[11px] text-slate-400 flex-shrink-0 tabular-nums">{timeAgo(a.created_at)}</span>
     </div>
   );
 }
 
 function describeActivity(a) {
-  const small = "size={14}";
   switch (a.type) {
     case 'lead_created':
       return { icon: <UserPlus size={14}/>, bg: 'bg-blue-50 text-blue-600', verb: 'added a new lead', tail: '', detail: a.details };

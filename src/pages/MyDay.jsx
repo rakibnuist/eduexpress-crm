@@ -252,68 +252,33 @@ export default function MyDay({ user }) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{greeting()}, {todayInfo.emp_name || user?.name || 'Consultant'}</p>
-          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2 mt-1">
-            <Sun size={24} className="text-amber-500" /> Daily Workspace & Reflections
+          <p className="text-xs text-amber-600 font-bold uppercase tracking-wider">{greeting()}, {todayInfo.emp_name || user?.name || 'Consultant'} 👋</p>
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5 mt-1">
+            <div className="p-1.5 bg-amber-500 rounded-lg"><Sun size={18} className="text-white"/></div>
+            Daily Workspace
           </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Log accomplishments, track auto-summarized activity, flag blockers, and organize tomorrow's goals
-          </p>
+          <p className="text-sm text-slate-500 mt-1">Log your day, track activity, and plan tomorrow</p>
         </div>
-        <div className="text-right text-xs text-slate-400 font-semibold bg-white border border-slate-200 rounded-xl px-3.5 py-2 shadow-sm">
-          <Calendar size={12} className="inline mr-1.5 text-slate-500" />
-          {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        <div className="flex items-center gap-2 text-sm font-semibold bg-white border border-slate-200 rounded-xl px-3.5 py-2 shadow-sm text-slate-600">
+          <Calendar size={14} className="text-slate-400" />
+          {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
         </div>
       </div>
 
       {/* Today's Activity & Performance Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 mt-2">
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Leads Contacted</span>
-            <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600"><PhoneCall size={14} /></div>
-          </div>
-          <p className="text-2xl font-black text-slate-800 leading-tight mt-2">{autoSummary?.leads || 0}</p>
-          <p className="text-[10px] text-slate-400 mt-1">Unique prospects today</p>
-        </div>
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Marked Positive</span>
-            <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600"><CheckCircle2 size={14} /></div>
-          </div>
-          <p className="text-2xl font-black text-emerald-600 leading-tight mt-2">{autoSummary?.positive || 0}</p>
-          <p className="text-[10px] text-slate-400 mt-1">High potential prospects</p>
-        </div>
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Office Visited</span>
-            <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600"><Building2 size={14} /></div>
-          </div>
-          <p className="text-2xl font-black text-amber-600 leading-tight mt-2">{autoSummary?.visited || 0}</p>
-          <p className="text-[10px] text-slate-400 mt-1">Face-to-face consults</p>
-        </div>
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Files Opened</span>
-            <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600"><FolderOpen size={14} /></div>
-          </div>
-          <p className="text-2xl font-black text-indigo-600 leading-tight mt-2">{autoSummary?.opened || 0}</p>
-          <p className="text-[10px] text-slate-400 mt-1">File processes opened</p>
-        </div>
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Not Interested</span>
-            <div className="p-1.5 rounded-lg bg-rose-50 text-rose-600"><XCircle size={14} /></div>
-          </div>
-          <p className="text-2xl font-black text-rose-500 leading-tight mt-2">{autoSummary?.negative || 0}</p>
-          <p className="text-[10px] text-slate-400 mt-1">Nurtures stopped</p>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <ActivityCard label="Leads Contacted" value={autoSummary?.leads || 0} sub="Unique today"
+          icon={<PhoneCall size={14}/>} gradient="from-blue-500 to-blue-700" iconBg="bg-blue-50 text-blue-600" valColor="text-slate-800" />
+        <ActivityCard label="Marked Positive" value={autoSummary?.positive || 0} sub="High potential"
+          icon={<CheckCircle2 size={14}/>} gradient="from-emerald-500 to-emerald-700" iconBg="bg-emerald-50 text-emerald-600" valColor="text-emerald-600" />
+        <ActivityCard label="Office Visits" value={autoSummary?.visited || 0} sub="Face-to-face"
+          icon={<Building2 size={14}/>} gradient="from-amber-500 to-orange-600" iconBg="bg-amber-50 text-amber-600" valColor="text-amber-600" />
+        <ActivityCard label="Files Opened" value={autoSummary?.opened || 0} sub="Applications"
+          icon={<FolderOpen size={14}/>} gradient="from-violet-500 to-violet-700" iconBg="bg-violet-50 text-violet-600" valColor="text-violet-600" />
+        <ActivityCard label="Not Interested" value={autoSummary?.negative || 0} sub="Nurtures stopped"
+          icon={<XCircle size={14}/>} gradient="from-rose-500 to-rose-700" iconBg="bg-rose-50 text-rose-600" valColor="text-rose-500" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -341,9 +306,12 @@ export default function MyDay({ user }) {
           )}
 
           {/* Log form */}
-          <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">{alreadyLogged ? 'Update today\'s log' : 'Log your day before you leave'}</h3>
+          <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between flex-wrap gap-2">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Pencil size={14} className="text-slate-500"/>
+                {alreadyLogged ? "Update today's log" : "Log your day before you leave"}
+              </h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -356,53 +324,54 @@ export default function MyDay({ user }) {
               </div>
             </div>
 
+            <div className="p-5 space-y-4">
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">What did you do today?</label>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">What did you do today?</label>
               <textarea rows={4} required value={form.accomplishments}
                 onChange={e => setForm(f => ({ ...f, accomplishments: e.target.value }))}
                 placeholder="e.g. Followed up with 8 China leads, sent docs to NJTech for 2 students, met Md Sarwar in office to verify SSC/HSC…"
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
 
-            {/* Premium Metrics Grid */}
-            <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-4 space-y-3">
+            {/* Performance Metrics Grid */}
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Today's Performance Metrics</p>
-                <span className="text-[9px] text-slate-400 font-medium">Verify or manually adjust these numbers</span>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Today's Metrics</p>
+                <span className="text-[9px] text-slate-400">Verify or adjust</span>
               </div>
-              
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
                 <MetricInput label="Leads Contacted" value={metrics.contacted} onChange={v => updateMetric('contacted', v)} icon={<PhoneCall size={13} className="text-blue-500" />} />
                 <MetricInput label="Follow-ups" value={metrics.followup} onChange={v => updateMetric('followup', v)} icon={<Clock size={13} className="text-slate-500" />} />
                 <MetricInput label="Marked Positive" value={metrics.positive} onChange={v => updateMetric('positive', v)} icon={<CheckCircle2 size={13} className="text-emerald-500" />} />
-                <MetricInput label="Marked Negative" value={metrics.negative} onChange={v => updateMetric('negative', v)} icon={<XCircle size={13} className="text-rose-505 text-rose-500" />} />
+                <MetricInput label="Marked Negative" value={metrics.negative} onChange={v => updateMetric('negative', v)} icon={<XCircle size={13} className="text-rose-500" />} />
                 <MetricInput label="Office Visits" value={metrics.visited} onChange={v => updateMetric('visited', v)} icon={<Building2 size={13} className="text-amber-500" />} />
                 <MetricInput label="Files Opened" value={metrics.opened} onChange={v => updateMetric('opened', v)} icon={<FolderOpen size={13} className="text-indigo-500" />} />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">Any blockers or issues?</label>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Any blockers or issues?</label>
               <textarea rows={2} value={form.challenges}
                 onChange={e => setForm(f => ({ ...f, challenges: e.target.value }))}
                 placeholder="e.g. AHNU portal down all day · waiting for offer letter from NCWU"
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">Plan for tomorrow</label>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Plan for tomorrow</label>
               <textarea rows={2} value={form.tomorrow_plan}
                 onChange={e => setForm(f => ({ ...f, tomorrow_plan: e.target.value }))}
                 placeholder="e.g. Call all 'positive' leads, finalise visa applications for Hungary cohort"
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-1">
-              {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 size={13}/> Saved</span>}
+            <div className="flex items-center justify-end gap-3">
+              {saved && <span className="text-xs text-emerald-600 flex items-center gap-1.5"><CheckCircle2 size={13}/> Saved!</span>}
               <button type="submit" disabled={saving || !form.accomplishments.trim()}
-                className="text-sm bg-blue-600 text-white px-5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2 select-none cursor-pointer">
-                <Send size={14}/> {saving ? 'Saving…' : (alreadyLogged ? 'Update log' : 'Submit & end day')}
+                className="text-sm bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2 font-semibold transition-colors">
+                <Send size={14}/> {saving ? 'Saving…' : (alreadyLogged ? 'Update log' : 'Submit log')}
               </button>
+            </div>
             </div>
           </form>
         </div>
@@ -417,7 +386,7 @@ export default function MyDay({ user }) {
               </p>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
                 attnLog 
-                  ? (attnLog.check_out ? 'bg-slate-100 text-slate-500' : 'bg-emerald-105 bg-emerald-100 text-emerald-700')
+                  ? (attnLog.check_out ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700')
                   : 'bg-amber-100 text-amber-700'
               }`}>
                 {attnLog 
@@ -488,22 +457,25 @@ export default function MyDay({ user }) {
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-4">
-            <p className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-2"><History size={14}/> Past 14 days</p>
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+              <History size={14} className="text-slate-500"/>
+              <p className="text-sm font-semibold text-slate-700">Past 14 days</p>
+            </div>
             {history.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No previous logs yet.</p>
+              <p className="text-xs text-slate-400 italic p-4">No previous logs yet.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y divide-slate-50">
                 {history.map(h => (
-                  <details key={h.id} className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
-                    <summary className="px-3 py-2 cursor-pointer text-xs font-medium text-slate-700 flex items-center justify-between list-none">
-                      <span>{h.date}</span>
-                      <ChevronRight size={12} className="text-slate-400 transition-transform group-open:rotate-90"/>
+                  <details key={h.id} className="group">
+                    <summary className="px-4 py-2.5 cursor-pointer text-xs flex items-center justify-between list-none hover:bg-slate-50/60 transition-colors">
+                      <span className="font-semibold text-slate-700">{h.date}</span>
+                      <ChevronRight size={12} className="text-slate-300 transition-transform group-open:rotate-90"/>
                     </summary>
-                    <div className="px-3 pb-2 pt-1 text-xs text-slate-650 whitespace-pre-wrap border-t border-slate-100">
-                      <p><strong>Did:</strong> {h.accomplishments}</p>
-                      {h.challenges && <p className="mt-1"><strong>Blockers:</strong> {h.challenges}</p>}
-                      {h.tomorrow_plan && <p className="mt-1"><strong>Tomorrow:</strong> {h.tomorrow_plan}</p>}
+                    <div className="px-4 pb-3 pt-1 text-xs text-slate-600 space-y-1 bg-slate-50/40 border-t border-slate-100">
+                      <p><strong className="text-slate-700">Did:</strong> {h.accomplishments}</p>
+                      {h.challenges && <p><strong className="text-slate-700">Blockers:</strong> {h.challenges}</p>}
+                      {h.tomorrow_plan && <p><strong className="text-slate-700">Tomorrow:</strong> {h.tomorrow_plan}</p>}
                     </div>
                   </details>
                 ))}
@@ -511,12 +483,28 @@ export default function MyDay({ user }) {
             )}
           </div>
 
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs text-slate-500">
-            <p className="font-semibold text-slate-700 mb-1">Why this matters</p>
-            <p>Your daily log feeds into the Performance Score on HR — Attendance + Office Work + auto-tracked activity. Logging consistently builds a streak 🔥.</p>
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-4">
+            <p className="font-semibold text-blue-900 text-sm mb-1 flex items-center gap-1.5">
+              <Sparkles size={13} className="text-blue-600"/> Why this matters
+            </p>
+            <p className="text-xs text-blue-700/80 leading-relaxed">Your daily log feeds into your Performance Score — Attendance + Office Work + auto-tracked activity. Logging consistently builds your streak 🔥.</p>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ActivityCard({ label, value, sub, icon, gradient, iconBg, valColor }) {
+  return (
+    <div className="relative overflow-hidden bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all group">
+      <div className={`absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl ${gradient} opacity-[0.07] rounded-bl-3xl pointer-events-none`}/>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400">{label}</span>
+        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+      </div>
+      <p className={`text-2xl font-extrabold leading-none ${valColor}`}>{value}</p>
+      <p className="text-[10px] text-slate-400 mt-1">{sub}</p>
     </div>
   );
 }

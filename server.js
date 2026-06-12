@@ -1644,18 +1644,24 @@ async function sendMessenger(channel, recipientId, text, type = 'text', mediaUrl
   return res.json();
 }
 
+// SHA-256 hash helper required by Meta CAPI for all PII fields
+const capiHash = (s) => s ? crypto.createHash('sha256').update(s.trim()).digest('hex') : undefined;
+
 async function sendCAPIEvent(eventName, leadData) {
   const pixelId = getConfig('pixel_id');
   const accessToken = getConfig('capi_token');
   if (!pixelId || !accessToken) return { skipped: true };
+  const normalizedPhone = leadData.phone ? leadData.phone.replace(/\D/g, '') : null;
+  const normalizedEmail = leadData.email ? leadData.email.toLowerCase().trim() : null;
   const payload = {
     data: [{
       event_name: eventName,
       event_time: Math.floor(Date.now() / 1000),
-      action_source: 'crm',
+      event_id: `${leadData.lead_id || 'L'}-${eventName}-${Date.now()}`,
+      action_source: 'system_generated',
       user_data: {
-        ph: leadData.phone ? [leadData.phone.replace(/\D/g, '')] : undefined,
-        em: leadData.email ? [leadData.email.toLowerCase()] : undefined,
+        ph: normalizedPhone ? [capiHash(normalizedPhone)] : undefined,
+        em: normalizedEmail ? [capiHash(normalizedEmail)] : undefined,
         country: ['bd'],
       },
       custom_data: { lead_id: leadData.lead_id, destination: leadData.destination },
@@ -1687,7 +1693,10 @@ app.get('/api/dashboard', (req, res) => {
   const metaLeads    = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
   const openConvs    = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='open'").get().c;
   const unreadMsgs   = db.prepare("SELECT SUM(unread_count) as s FROM conversations").get().s || 0;
-  res.json({ pipeline, total, followupToday, recentLeads, totalPaid, metaLeads, openConvs, unreadMsgs });
+  const newToday     = db.prepare("SELECT COUNT(*) as c FROM leads WHERE date_added=?").get(today).c;
+  const by_source    = db.prepare("SELECT lead_source as k, COUNT(*) as n FROM leads WHERE lead_source IS NOT NULL AND lead_source!='' GROUP BY lead_source ORDER BY n DESC LIMIT 6").all();
+  const by_dest      = db.prepare("SELECT destination as k, COUNT(*) as n FROM leads WHERE destination IS NOT NULL AND destination!='' GROUP BY destination ORDER BY n DESC LIMIT 8").all();
+  res.json({ pipeline, total, followupToday, recentLeads, totalPaid, metaLeads, openConvs, unreadMsgs, newToday, by_source, by_dest });
 });
 
 // ─────────────────────────────────────────────────────────

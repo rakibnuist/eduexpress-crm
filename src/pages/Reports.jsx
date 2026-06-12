@@ -10,7 +10,7 @@ import {
   TrendingDown, Loader2, CheckCircle2, Trophy, Sparkles, Calendar,
   GraduationCap, Wallet, Users, AlertCircle,
 } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 const fmt = (n) => {
   const v = Number(n || 0);
@@ -60,13 +60,14 @@ export default function Reports() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-4 border-b border-slate-200/80 pb-4 mb-2">
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-            <FileBarChart size={24} className="text-blue-600" /> Executive Digest & Performance Reports
+          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5">
+            <div className="p-1.5 bg-blue-600 rounded-lg"><FileBarChart size={18} className="text-white"/></div>
+            Reports
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            {data ? `${data.period.label} (vs ${data.period.previousLabel})` : 'Generating custom intelligence report...'}
+            {data ? `${data.period.label} · vs ${data.period.previousLabel}` : 'Generating report…'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -125,7 +126,7 @@ function ReportBody({ data, period }) {
 
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="Leads & Status Overview (Numbers)">
+        <Card title="Leads & Status Overview (Numbers)" accent="blue">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
             <Mini label="New Leads"      value={data.leads.new} />
             <Mini label="Contacted (Pos)" value={data.leads.by_status?.positive || 0} color="emerald" />
@@ -138,13 +139,13 @@ function ReportBody({ data, period }) {
           </p>
         </Card>
 
-        <Card title="Leads breakdown">
+        <Card title="Leads Breakdown" accent="emerald">
           <KvList label="By source"      rows={data.leads.by_source.map(r => ({ name: r.k, value: r.n }))} />
           <KvList label="By destination" rows={data.leads.by_destination.map(r => ({ name: r.k, value: r.n }))} />
           <p className="text-xs text-slate-500 mt-2">Conversion rate <strong className="text-slate-700">{data.leads.conversion_rate}%</strong> · {data.leads.enrolled} enrolled out of {data.leads.new}</p>
         </Card>
 
-        <Card title="Cashflow Overview">
+        <Card title="Cashflow Overview" accent="violet">
           <div className="grid grid-cols-5 gap-1.5 mb-3">
             <Mini label="Opening" value={fmt(data.cashflow.opening)} />
             <Mini label="In"      value={fmt(data.cashflow.in)}      color="emerald" />
@@ -158,7 +159,7 @@ function ReportBody({ data, period }) {
             <KvList label="Top paying clients"   rows={data.cashflow.top_clients.map(r => ({ name: r.k, value: fmt(r.v) }))} />}
         </Card>
 
-        <Card title="Team performance & Attendance">
+        <Card title="Team Performance & Attendance" accent="amber">
           <div className="grid grid-cols-5 gap-1.5 mb-4">
             <Mini label="Attendance"    value={`${data.attendance.attendance_pct}%`} />
             <Mini label="Late Entries"  value={data.attendance.late_count} color={data.attendance.late_count > 0 ? 'rose' : ''} />
@@ -183,7 +184,7 @@ function ReportBody({ data, period }) {
               </div>}
         </Card>
 
-        <Card title="Application activity">
+        <Card title="Application Activity" accent="rose">
           {data.applications.stages_advanced.length === 0
             ? <p className="text-xs text-slate-400 italic">No stage advances</p>
             : <KvList label="Stages advanced" rows={data.applications.stages_advanced.map(r => ({ name: r.stage, value: r.n }))} />}
@@ -195,15 +196,20 @@ function ReportBody({ data, period }) {
 
       {/* Highlights */}
       {data.highlights.length > 0 && (
-        <Card title="Highlights">
-          <ul className="space-y-1.5">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-blue-600"/>
+            <h3 className="font-bold text-blue-900 text-sm">Highlights & Key Insights</h3>
+          </div>
+          <ul className="space-y-2">
             {data.highlights.map((h, i) => (
-              <li key={i} className="text-sm text-slate-700 flex items-start gap-2">
-                <span>{h.icon}</span><span>{h.text}</span>
+              <li key={i} className="text-sm text-slate-700 flex items-start gap-2.5 bg-white/60 rounded-xl px-3 py-2 border border-blue-100/60">
+                <span className="text-base leading-none mt-0.5">{h.icon}</span>
+                <span>{h.text}</span>
               </li>
             ))}
           </ul>
-        </Card>
+        </div>
       )}
     </div>
   );
@@ -212,66 +218,93 @@ function ReportBody({ data, period }) {
 
 function Headline({ icon, label, value, delta, color }) {
   const palette = {
-    blue:    'bg-blue-50/80 text-blue-600 border border-blue-100/50',
-    emerald: 'bg-emerald-50/80 text-emerald-600 border border-emerald-100/50',
-    violet:  'bg-violet-50/80 text-violet-600 border border-violet-100/50',
-    amber:   'bg-amber-50/80 text-amber-600 border border-amber-100/50',
-    rose:    'bg-rose-50/80 text-rose-600 border border-rose-100/50',
+    blue:    { bg: 'from-blue-500 to-blue-700',    icon: 'bg-blue-50 text-blue-600' },
+    emerald: { bg: 'from-emerald-500 to-emerald-700', icon: 'bg-emerald-50 text-emerald-600' },
+    violet:  { bg: 'from-violet-500 to-violet-700',  icon: 'bg-violet-50 text-violet-600' },
+    amber:   { bg: 'from-amber-500 to-orange-600',   icon: 'bg-amber-50 text-amber-600' },
+    rose:    { bg: 'from-rose-500 to-rose-700',      icon: 'bg-rose-50 text-rose-600' },
   };
+  const p = palette[color] || palette.blue;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+    <div className="relative overflow-hidden bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
+      {/* Gradient accent in corner */}
+      <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl ${p.bg} opacity-[0.06] rounded-bl-[3rem] pointer-events-none group-hover:opacity-[0.1] transition-opacity`}/>
       <div className="flex justify-between items-start">
-        <div className={`p-2 rounded-xl w-fit ${palette[color] || 'bg-slate-50 text-slate-600'}`}>{icon}</div>
+        <div className={`p-2 rounded-xl ${p.icon}`}>{icon}</div>
         {delta != null && (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5 tracking-tight
-            ${delta >= 0 
-              ? 'bg-emerald-50 text-emerald-750 border-emerald-200/55' 
-              : 'bg-rose-50 text-rose-750 border-rose-200/55'}`}>
-            {delta >= 0 ? <TrendingUp size={10}/> : <TrendingDown size={10}/>} {Math.abs(delta)}%
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5
+            ${delta >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+            {delta >= 0 ? <TrendingUp size={9}/> : <TrendingDown size={9}/>} {Math.abs(delta)}%
           </span>
         )}
       </div>
-      <div className="mt-4">
+      <div className="mt-3">
         <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{label}</p>
-        <p className="text-xl font-extrabold text-slate-800 tracking-tight mt-1">{value}</p>
+        <p className="text-2xl font-extrabold text-slate-800 tracking-tight mt-0.5 leading-none">{value}</p>
       </div>
     </div>
   );
 }
 
-function Card({ title, children }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-      <h3 className="font-bold text-slate-700 text-sm mb-3.5">{title}</h3>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-function Mini({ label, value, color }) {
-  const palette = {
-    emerald: 'text-emerald-700',
-    rose:    'text-rose-700',
-    blue:    'text-blue-700',
-    amber:   'text-amber-700',
+function Card({ title, children, accent }) {
+  const accentColors = {
+    blue: 'border-blue-500',
+    emerald: 'border-emerald-500',
+    violet: 'border-violet-500',
+    amber: 'border-amber-500',
+    rose: 'border-rose-500',
   };
   return (
-    <div className="bg-slate-50 rounded-xl p-3">
-      <p className="text-[10px] uppercase tracking-wide text-slate-400 font-medium">{label}</p>
-      <p className={`text-lg font-bold ${palette[color] || 'text-slate-800'}`}>{value}</p>
+    <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm ${accent ? 'border-t-2 ' + (accentColors[accent] || 'border-t-blue-500') : ''}`}>
+      <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
+        <h3 className="font-bold text-slate-700 text-sm">{title}</h3>
+      </div>
+      <div className="p-5 space-y-3">{children}</div>
     </div>
   );
 }
+
+function Mini({ label, value, color }) {
+  const palette = {
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    rose:    'bg-rose-50 text-rose-700 border-rose-100',
+    blue:    'bg-blue-50 text-blue-700 border-blue-100',
+    amber:   'bg-amber-50 text-amber-700 border-amber-100',
+    violet:  'bg-violet-50 text-violet-700 border-violet-100',
+  };
+  const cls = palette[color] || 'bg-slate-50 text-slate-800 border-slate-100';
+  return (
+    <div className={`rounded-xl p-3 border ${cls}`}>
+      <p className="text-[9px] uppercase tracking-wide font-semibold opacity-70">{label}</p>
+      <p className="text-lg font-extrabold mt-0.5 leading-tight">{value}</p>
+    </div>
+  );
+}
+
 function KvList({ label, rows }) {
   if (!rows || rows.length === 0) return null;
+  // Try to parse numeric values for bar display
+  const numVals = rows.map(r => parseFloat(String(r.value).replace(/[^\d.]/g, '')) || 0);
+  const maxVal = Math.max(...numVals, 1);
+  const allNumeric = numVals.every(v => v > 0);
+
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wide text-slate-400 font-medium mb-1">{label}</p>
-      <div className="space-y-1">
+      {label && <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-2">{label}</p>}
+      <div className="space-y-1.5">
         {rows.map((r, i) => (
-          <div key={i} className="flex justify-between text-xs">
-            <span className="text-slate-700 truncate">{r.name}</span>
-            <span className="text-slate-500 font-medium tabular-nums">{r.value}</span>
+          <div key={i} className="group">
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-slate-700 font-medium truncate max-w-[60%]">{r.name}</span>
+              <span className="text-slate-600 font-semibold tabular-nums">{r.value}</span>
+            </div>
+            {allNumeric && (
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-400 rounded-full transition-all"
+                  style={{ width: `${Math.max((numVals[i] / maxVal) * 100, 3)}%` }} />
+              </div>
+            )}
           </div>
         ))}
       </div>
