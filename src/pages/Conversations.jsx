@@ -88,8 +88,14 @@ export default function Conversations({ user }) {
       setMessages(res || []);
       // Mark as read/clear unread count locally and on server unconditionally
       await api.markConversationAsRead(conv.id);
-      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
-      setSelectedConv(prev => prev && prev.id === conv.id ? { ...prev, unread_count: 0 } : prev);
+      setConversations(prev => prev.map(c => c.id === conv.id && c.unread_count !== 0 ? { ...c, unread_count: 0 } : c));
+      // Only create a new object if unread_count actually needs clearing —
+      // always spreading (even with same values) would produce a new reference
+      // and re-trigger this effect, causing an infinite loading loop.
+      setSelectedConv(prev => {
+        if (!prev || prev.id !== conv.id || prev.unread_count === 0) return prev;
+        return { ...prev, unread_count: 0 };
+      });
     } catch (err) {
       toast.error('Could not load messages: ' + err.message);
     } finally {
@@ -140,8 +146,11 @@ export default function Conversations({ user }) {
       }
       // Unconditionally mark as read on backend if the user is looking at this conversation
       await api.markConversationAsRead(conv.id);
-      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
-      setSelectedConv(prev => prev && prev.id === conv.id ? { ...prev, unread_count: 0 } : prev);
+      setConversations(prev => prev.map(c => c.id === conv.id && c.unread_count !== 0 ? { ...c, unread_count: 0 } : c));
+      setSelectedConv(prev => {
+        if (!prev || prev.id !== conv.id || prev.unread_count === 0) return prev;
+        return { ...prev, unread_count: 0 };
+      });
     } catch (err) {
       console.warn('Silent messages refresh failed:', err);
     }

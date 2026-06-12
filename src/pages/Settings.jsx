@@ -5,140 +5,148 @@ import ExcelImport from '../components/ExcelImport';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
+/* ─────────────────────────── MAIN SETTINGS PAGE ─────────────────────────── */
 export default function Settings() {
-  useEffect(() => { document.title = "System Control Center & Settings | EduExpress Core"; }, []);
+  useEffect(() => { document.title = "Settings | EduExpress Core"; }, []);
 
+  const [activeTab, setActiveTab] = useState('users');
   const [settings, setSettings] = useState(null);
 
   useEffect(() => { api.settings().then(setSettings); }, []);
 
-  if (!settings) return <div className="text-slate-400 text-center py-16">Loading…</div>;
+  const reloadSettings = () => api.settings().then(setSettings);
+
+  if (!settings) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="flex flex-col items-center gap-3 text-slate-400">
+        <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-semibold">Loading settings…</p>
+      </div>
+    </div>
+  );
+
+  const tabs = [
+    { id: 'users',       label: 'Users & Access',    icon: Shield,   desc: 'Manage login accounts and permissions' },
+    { id: 'integration', label: 'Integrations',      icon: Globe,    desc: 'WhatsApp, Messenger, and Meta API' },
+    { id: 'office',      label: 'Office & Hours',    icon: MapPin,   desc: 'Geofence, Wi-Fi, and attendance hours' },
+    { id: 'reference',   label: 'Reference Lists',   icon: Tag,      desc: 'Dropdowns used across the CRM' },
+    { id: 'tools',       label: 'Broadcast & Tools', icon: Megaphone,desc: 'Team broadcasts, data import, system info' },
+  ];
 
   return (
-    <div className="space-y-5 max-w-3xl">
-      {/* Header */}
-      <div className="border-b border-slate-200/80 pb-4 mb-2">
-        <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-          <Shield size={24} className="text-blue-600" /> System Control Center & Settings
-        </h2>
-        <p className="text-sm text-slate-500 mt-1">Configure database reference lists, geofence check-in ranges, broadcast staff memos, and edit user access permissions</p>
-      </div>
-
-      {/* User Management */}
-      <UserManagement consultants={settings.consultants || []} />
-
-      {/* Meta & WhatsApp Integrations */}
-      <MetaIntegrationSettings />
-
-      {/* Office settings — drives auto check-in / check-out + geofence */}
-      <OfficeSettings />
-
-      {/* Owner Broadcasts — sticky notes for the whole team */}
-      <BroadcastManager />
-
-      {/* Excel importer */}
-      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-        <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-blue-50 text-blue-700">
-          <Upload size={18} />
-          <span className="font-semibold text-sm">Import from Excel</span>
+    <div className="max-w-5xl">
+      {/* ── Page Header ── */}
+      <div className="flex items-start gap-4 pb-5 border-b border-slate-200 mb-0">
+        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow flex-shrink-0">
+          <Settings2 size={21} className="text-white" />
         </div>
-        <div className="p-5">
-          <ExcelImport />
+        <div>
+          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight leading-tight">System Settings</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Manage users, integrations, office configuration, and reference data</p>
         </div>
       </div>
 
-      {/* Office Info */}
-      <Card icon={<Info size={18} />} title="Office Info" color="blue">
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <InfoRow label="Organisation" value="EduExpress International" />
-          <InfoRow label="Core Version" value="1.0 · Web Edition" />
-          <InfoRow label="Office SSID" value="EduExpress International" />
-          <InfoRow label="Currency" value="BDT (৳)" />
-        </div>
-      </Card>
+      {/* ── Tab Navigation ── */}
+      <div className="border-b border-slate-200 -mb-px pt-0.5 overflow-x-auto">
+        <nav className="flex min-w-max" aria-label="Settings sections">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-semibold border-b-2 transition-all whitespace-nowrap
+                  ${isActive
+                    ? 'border-blue-600 text-blue-700 bg-gradient-to-b from-blue-50/60 to-transparent'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50 hover:border-slate-200'}`}
+              >
+                <Icon size={15} className={isActive ? 'text-blue-600' : 'text-slate-400'} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
-      {/* Consultants */}
-      <EditableCard
-        icon={<Users size={18} />}
-        title="Consultants"
-        color="violet"
-        listKey="settings_consultants"
-        items={settings.consultants || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+      {/* ── Tab Content ── */}
+      <div className="pt-6 space-y-5">
 
-      {/* Lead Statuses */}
-      <EditableCard
-        icon={<Tag size={18} />}
-        title="Lead Statuses"
-        color="sky"
-        listKey="settings_leadStatuses"
-        items={settings.leadStatuses || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+        {/* USERS & ACCESS */}
+        {activeTab === 'users' && (
+          <UserManagement consultants={settings.consultants || []} />
+        )}
 
-      {/* Destinations */}
-      <EditableCard
-        icon={<Globe size={18} />}
-        title="Destinations"
-        color="emerald"
-        listKey="settings_destinations"
-        items={settings.destinations || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+        {/* INTEGRATIONS */}
+        {activeTab === 'integration' && (
+          <MetaIntegrationSettings />
+        )}
 
-      {/* Lead Sources */}
-      <EditableCard
-        icon={<Wifi size={18} />}
-        title="Lead Sources"
-        color="orange"
-        listKey="settings_leadSources"
-        items={settings.leadSources || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+        {/* OFFICE & HOURS */}
+        {activeTab === 'office' && (
+          <OfficeSettings />
+        )}
 
-      {/* Payment Statuses */}
-      <EditableCard
-        icon={<CreditCard size={18} />}
-        title="Payment Statuses"
-        color="rose"
-        listKey="settings_paymentStatuses"
-        items={settings.paymentStatuses || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+        {/* REFERENCE LISTS */}
+        {activeTab === 'reference' && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
+              <Info size={16} className="flex-shrink-0 text-blue-500" />
+              <span>These lists power all dropdown menus across the CRM. Changes take effect immediately for all users.</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <EditableCard icon={<Users size={16} />} title="Consultants" color="violet"
+                listKey="settings_consultants" items={settings.consultants || []} onSaved={reloadSettings} />
+              <EditableCard icon={<Tag size={16} />} title="Lead Statuses" color="sky"
+                listKey="settings_leadStatuses" items={settings.leadStatuses || []} onSaved={reloadSettings} />
+              <EditableCard icon={<Globe size={16} />} title="Destinations" color="emerald"
+                listKey="settings_destinations" items={settings.destinations || []} onSaved={reloadSettings} />
+              <EditableCard icon={<Wifi size={16} />} title="Lead Sources" color="orange"
+                listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
+              <EditableCard icon={<CreditCard size={16} />} title="Payment Statuses" color="rose"
+                listKey="settings_paymentStatuses" items={settings.paymentStatuses || []} onSaved={reloadSettings} />
+              <EditableCard icon={<Clock size={16} />} title="File Stages" color="amber"
+                listKey="settings_fileStages" items={settings.fileStages || []} onSaved={reloadSettings} />
+              <EditableCard icon={<CreditCard size={16} />} title="Income Categories" color="blue"
+                listKey="settings_incomeCategories" items={settings.incomeCategories || []} onSaved={reloadSettings} />
+              <EditableCard icon={<CreditCard size={16} />} title="Expense Categories" color="rose"
+                listKey="settings_expenseCategories" items={settings.expenseCategories || []} onSaved={reloadSettings} />
+            </div>
+          </div>
+        )}
 
-      {/* File Stages */}
-      <EditableCard
-        icon={<Clock size={18} />}
-        title="File Stages"
-        color="amber"
-        listKey="settings_fileStages"
-        items={settings.fileStages || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+        {/* BROADCAST & TOOLS */}
+        {activeTab === 'tools' && (
+          <div className="space-y-5">
+            <BroadcastManager />
 
-      {/* Income Categories */}
-      <EditableCard
-        icon={<CreditCard size={18} />}
-        title="Income Categories"
-        color="blue"
-        listKey="settings_incomeCategories"
-        items={settings.incomeCategories || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+              <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-sky-50 text-sky-700">
+                <Upload size={17} />
+                <span className="font-semibold text-sm">Import from Excel</span>
+              </div>
+              <div className="p-5">
+                <ExcelImport />
+              </div>
+            </div>
 
-      {/* Expense Categories */}
-      <EditableCard
-        icon={<CreditCard size={18} />}
-        title="Expense Categories"
-        color="rose"
-        listKey="settings_expenseCategories"
-        items={settings.expenseCategories || []}
-        onSaved={() => api.settings().then(setSettings)}
-      />
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+              <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-slate-50 text-slate-600">
+                <Info size={17} />
+                <span className="font-semibold text-sm">System Information</span>
+              </div>
+              <div className="p-5">
+                <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                  <InfoRow label="Organisation" value="EduExpress International" />
+                  <InfoRow label="Core Version" value="1.0 · Web Edition" />
+                  <InfoRow label="Office Wi-Fi SSID" value="EduExpress International" />
+                  <InfoRow label="Currency" value="BDT (৳)" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-700">
-        💡 <strong>Note:</strong> These lists are dynamically saved to the database. Edits instantly apply to all drop-downs in the Core.
       </div>
     </div>
   );

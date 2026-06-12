@@ -7,7 +7,7 @@
      toast.info('Heads up');     // slate
    Auto-dismisses after 4 s. Click X to dismiss earlier.
 */
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 const ToastCtx = createContext({ push: () => {}, success: () => {}, error: () => {}, info: () => {} });
@@ -35,12 +35,14 @@ export function ToastProvider({ children }) {
 
   const dismiss = useCallback((id) => setItems(prev => prev.filter(t => t.id !== id)), []);
 
-  const api = {
+  // Stable reference — wrap in useMemo so consumers that include `toast` in
+  // useCallback/useEffect deps don't re-run on every toast notification.
+  const api = useMemo(() => ({
     push,
     success: (m, opts) => push('success', m, opts),
     error:   (m, opts) => push('error',   m, opts),
     info:    (m, opts) => push('info',    m, opts),
-  };
+  }), [push]);
 
   return (
     <ToastCtx.Provider value={api}>
