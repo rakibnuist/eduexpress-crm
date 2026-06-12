@@ -10,7 +10,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
 const DB_DIR = dirname(DB_PATH);
-
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
@@ -1574,6 +1573,11 @@ function createLeadFromContact(contactId, source, initialMessage) {
   return null;
 }
 
+
+function getWelcomeMessage() {
+  return db.prepare("SELECT content FROM quick_replies WHERE title='Greeting' LIMIT 1").get()?.content
+    || 'Hello! Thank you for contacting EduExpress International. How can we help you today? 🎓';
+}
 
 function saveInboundMessage(convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
   try {
@@ -3367,7 +3371,7 @@ const CONV_SELECT = `
 `;
 
 app.get('/api/conversations', (req, res) => {
-  const { status, channel_type, channel_id, search, page=1, limit=30 } = req.query;
+  const { status, channel_type, channel_id, search, lead_id, page=1, limit=30 } = req.query;
   const where=[]; const params={};
   if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
   if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
@@ -3579,9 +3583,9 @@ app.get('/api/conversations/:id/messages', (req, res) => {
     `SELECT * FROM (
        SELECT * FROM messages
        WHERE conversation_id=? ${beforeClause}
-       ORDER BY datetime(created_at) DESC, id DESC
+       ORDER BY created_at DESC, id DESC
        LIMIT ${lim}
-     ) ORDER BY datetime(created_at) ASC, id ASC`
+     ) ORDER BY created_at ASC, id ASC`
   ).all(req.params.id);
   res.json(msgs);
 });
@@ -3747,7 +3751,23 @@ app.post('/webhook/meta', async (req, res) => {
           else { content = `[${msg.type}]`; }
 
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
-          console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
+                  const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+        if (waInCount === 1) {
+          const welcomeText = getWelcomeMessage();
+          setImmediate(async () => {
+            try {
+              const waRes = await sendWhatsApp(channel, msg.from, welcomeText);
+              const waId = waRes.messages?.[0]?.id;
+              if (waId) {
+                db.prepare("INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,status) VALUES (?,?,?,?,?,'sent')")
+                  .run(conv.id, 'out', 'text', welcomeText, waId);
+                db.prepare("UPDATE conversations SET last_message=?,last_message_at=datetime('now') WHERE id=?").run(welcomeText.slice(0,120), conv.id);
+                console.log('✉️ Auto-welcome sent to WA ' + msg.from);
+              }
+            } catch(e) { console.error('Auto-welcome WA error:', e.message); }
+          });
+        }
+        console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
       }
     }
@@ -3800,6 +3820,21 @@ app.post('/webhook/meta', async (req, res) => {
                   if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
                     db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(whatsappChannel.consultant || 'Abdullah Al Rakib', lead.id);
                   }
+                                    // Auto-send welcome message to new Lead Ad lead
+                  setImmediate(async () => {
+                    try {
+                      const welcomeText = getWelcomeMessage();
+                      const waRes = await sendWhatsApp(whatsappChannel, lead.phone, welcomeText);
+                      const waId = waRes.messages?.[0]?.id;
+                      if (waId) {
+                        db.prepare("INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,status) VALUES (?,?,?,?,?,'sent')")
+                          .run(conv.id, 'out', 'text', welcomeText, waId);
+                        db.prepare("UPDATE conversations SET last_message=?,last_message_at=datetime('now') WHERE id=?").run(welcomeText.slice(0,120), conv.id);
+                        console.log('✉️ Auto-welcome sent to Lead Ad lead ' + lead.phone);
+                      }
+                    } catch(e) { console.error('Auto-welcome lead ad error:', e.message); }
+                  });
+
                   console.log(`[leadgen] Auto-created WhatsApp conversation for lead ${lead.lead_id}`);
                 }
               }
@@ -3840,6 +3875,16 @@ app.post('/webhook/meta', async (req, res) => {
         }
         if (!text) text = '[message]';
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
+                const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+        if (msInCount === 1) {
+          const welcomeText = getWelcomeMessage();
+          setImmediate(async () => {
+            try {
+              await sendMessenger(channel, senderId, welcomeText);
+              console.log('✉️ Auto-welcome sent to Messenger ' + senderId);
+            } catch(e) { console.error('Auto-welcome Messenger error:', e.message); }
+          });
+        }
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
     }
