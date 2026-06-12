@@ -2106,14 +2106,31 @@ app.post('/api/import/applications', (req, res, next) => requireAdmin(req, res, 
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
-// ─── ADMIN: wipe all leads (+ cascaded documents, uni-apps, activity_log) ───
+// ─── ADMIN: wipe all leads (+ documents, uni-apps, activity log, KPI targets) ───
+// Optional body: { conversations: true } → also wipes chat threads, messages & contacts.
+// Finance (income/expenses), employees, attendance, payroll, users & settings are NEVER touched.
 app.delete('/api/admin/wipe-leads', (req, res, next) => requireAdmin(req, res, () => {
   try {
+    const wipeConversations = !!(req.body && req.body.conversations);
     const count = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
-    db.prepare("DELETE FROM leads").run();
-    // Reset auto-increment so IDs start fresh
-    db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('leads','lead_documents','lead_university_applications','activity_log')").run();
-    res.json({ ok: true, deleted: count });
+
+    const wipe = db.transaction(() => {
+      db.prepare("DELETE FROM leads").run();                 // cascades documents + uni-apps
+      db.prepare("DELETE FROM activity_log").run();          // stale KPI / performance history
+      db.prepare("DELETE FROM kpi_targets").run();           // old monthly targets
+      const seqTables = ['leads','lead_documents','lead_university_applications','activity_log','kpi_targets'];
+      if (wipeConversations) {
+        db.prepare("DELETE FROM messages").run();
+        db.prepare("DELETE FROM conversations").run();
+        db.prepare("DELETE FROM contacts").run();
+        seqTables.push('messages','conversations','contacts');
+      }
+      // Reset auto-increment so IDs start fresh
+      db.prepare(`DELETE FROM sqlite_sequence WHERE name IN (${seqTables.map(() => '?').join(',')})`).run(...seqTables);
+    });
+    wipe();
+
+    res.json({ ok: true, deleted: count, conversationsWiped: wipeConversations });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

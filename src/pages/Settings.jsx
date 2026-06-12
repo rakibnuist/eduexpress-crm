@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2 } from 'lucide-react';
+import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2, Wifi } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
@@ -175,11 +175,12 @@ function DangerZone() {
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
+  const [withConversations, setWithConversations] = useState(false);
 
   const handleWipeLeads = async () => {
     const ok = await confirm({
       title: 'Delete ALL Leads & Applications?',
-      body: 'This will permanently delete every lead, document, university application, and related activity log from the database. This cannot be undone.',
+      body: `This will permanently delete every lead, document, university application, activity log, and KPI target${withConversations ? ', PLUS all chat conversations, messages and contacts' : ''}. Finance records, employees, attendance and payroll are kept. This cannot be undone.`,
       confirmLabel: 'Yes, delete everything',
       tone: 'danger',
     });
@@ -194,8 +195,8 @@ function DangerZone() {
     if (!sure) return;
     setBusy(true);
     try {
-      const res = await api.wipeLeads();
-      toast.success(`Deleted ${res.deleted} lead(s) and all associated records.`);
+      const res = await api.wipeLeads(withConversations ? { conversations: true } : {});
+      toast.success(`Deleted ${res.deleted} lead(s) and all associated records${res.conversationsWiped ? ' + all conversations' : ''}.`);
     } catch (e) {
       toast.error(e.message || 'Wipe failed');
     } finally {
@@ -213,7 +214,13 @@ function DangerZone() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-slate-800">Delete All Leads &amp; Applications</p>
-            <p className="text-xs text-slate-500 mt-0.5">Permanently removes every lead, document, university application, and activity log. Use this to clear test data before going live.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Permanently removes every lead, document, university application, activity log and KPI target. Finance, employees, attendance and payroll are never touched.</p>
+            <label className="flex items-center gap-2 mt-2 text-xs text-slate-600 cursor-pointer select-none">
+              <input type="checkbox" checked={withConversations} onChange={e => setWithConversations(e.target.checked)}
+                className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
+              Also wipe all chat conversations, messages &amp; contacts
+              <span className="text-slate-400">(Messenger/Instagram history can be re-imported via "Sync History"; WhatsApp history cannot be recovered)</span>
+            </label>
           </div>
           <button
             onClick={handleWipeLeads}
@@ -965,7 +972,7 @@ function MetaIntegrationSettings() {
                   </div>
                   
                   <div className="flex items-center gap-2">
-                    {ch.type === 'messenger' && (
+                    {(ch.type === 'messenger' || ch.type === 'instagram') && (
                       <button
                         onClick={() => syncHistory(ch)}
                         disabled={syncingId !== null}

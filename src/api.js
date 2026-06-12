@@ -128,8 +128,8 @@ export const api = {
   importCashflow:    (rows)    => req('/import/cashflow', { method: 'POST', body: JSON.stringify({ rows }) }),
   importApplications:(rows)    => req('/import/applications', { method: 'POST', body: JSON.stringify({ rows }) }),
 
-  // Admin: wipe all leads + cascaded data
-  wipeLeads: () => req('/admin/wipe-leads', { method: 'DELETE' }),
+  // Admin: wipe all leads + cascaded data (opts: { conversations: true } also wipes chats)
+  wipeLeads: (opts = {}) => req('/admin/wipe-leads', { method: 'DELETE', body: JSON.stringify(opts) }),
 
   // Staff↔student thread
   replyToStudent:    (id, t)   => req(`/leads/${id}/reply-to-student`, { method: 'POST', body: JSON.stringify({ text: t }) }),
