@@ -1218,10 +1218,12 @@ function runMigrations() {
 
   // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token
   try {
-    const newToken = 'EAAVoF1AFCwoBRtNAVfoUh9UMzdxtZBtsPpLq44ywxCUNHo7rZA70SwZA3ZCCKfdiUchZA5VWw3LnVTlDIiyqqbfOLVbWh1GSV7SVj3M7pR1m17GUXCPFYKd0kxspI0ZCoYrpw2ryfOkYo18SZAkJNSttD6kZAlDmERYFJhFTjZB9xMIZBaqO8ZCJRydcxFD6ZBGVj4ypxQZDZD';
+    const newToken = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';
     const info = db.prepare("UPDATE channels SET access_token = ?").run(newToken);
     db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
-    console.log(`[migration] Self-healed ${info.changes} channels and page_access_token with fresh System User token.`);
+    // Also store as CAPI token for Conversions API events
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
+    console.log(`[migration] Self-healed ${info.changes} channels, page_access_token, and capi_token with Global Access Token.`);
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
   }
@@ -1649,8 +1651,9 @@ const capiHash = (s) => s ? crypto.createHash('sha256').update(s.trim()).digest(
 
 async function sendCAPIEvent(eventName, leadData) {
   const pixelId = getConfig('pixel_id');
-  const accessToken = getConfig('capi_token');
-  if (!pixelId || !accessToken) return { skipped: true };
+  const accessToken = getConfig('capi_token') || getConfig('page_access_token');
+  if (!accessToken) return { skipped: true, reason: 'no_token' };
+  if (!pixelId) return { skipped: true, reason: 'no_pixel_id' };
   const normalizedPhone = leadData.phone ? leadData.phone.replace(/\D/g, '') : null;
   const normalizedEmail = leadData.email ? leadData.email.toLowerCase().trim() : null;
   const payload = {
@@ -2671,8 +2674,15 @@ app.get('/api/kpi/:month', (req, res) => {
 });
 app.put('/api/kpi/targets', (req, res) => {
   const { consultant, month, target_leads, target_enrolled, target_revenue } = req.body;
-  db.prepare(`INSERT INTO kpi_targets (consultant,month,target_leads,target_enrolled,target_revenue) VALUES (?,?,?,?,?) ON CONFLICT(consultant,month) DO UPDATE SET target_leads=excluded.target_leads,target_enrolled=excluded.target_enrolled,target_revenue=excluded.target_revenue`).run(consultant,month,target_leads||0,target_enrolled||0,target_revenue||0);
-  res.json({ ok:true });
+  if (!consultant || !month) return res.status(400).json({ error: 'consultant and month are required' });
+  try {
+    db.prepare(`INSERT INTO kpi_targets (consultant,month,target_leads,target_enrolled,target_revenue) VALUES (?,?,?,?,?) ON CONFLICT(consultant,month) DO UPDATE SET target_leads=excluded.target_leads,target_enrolled=excluded.target_enrolled,target_revenue=excluded.target_revenue`).run(consultant, month, Number(target_leads)||0, Number(target_enrolled)||0, Number(target_revenue)||0);
+    const saved = db.prepare("SELECT * FROM kpi_targets WHERE consultant=? AND month=?").get(consultant, month);
+    res.json({ ok: true, saved });
+  } catch(e) {
+    console.error('[kpi/targets]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────
@@ -2733,11 +2743,16 @@ function logPayrollExpense(row) {
   });
 }
 
+// The fixed payroll whitelist — only these 5 employees appear in payroll
+const PAYROLL_WHITELIST = ['Abdullah Al Rakib', 'Sakib Al Jubaer', 'Tahmid Imam', 'Taj Ahmed', 'Afsana Meme'];
+
 // List payroll entries for a month (auto-creates rows for active employees if missing)
 app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const wd = workingDaysInMonth(month);
-  const employees = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  // Only generate payroll for the 5 whitelisted employees who exist in the employees table
+  const allActive = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  const employees = allActive.filter(e => PAYROLL_WHITELIST.includes(e.name));
   const ensure = db.prepare(`INSERT OR IGNORE INTO payroll
     (month, emp_id, name, base_salary, working_days, days_worked, net_pay)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -2750,8 +2765,10 @@ app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
     recalc.run(present, wd, month, emp.emp_id, emp.name);
   }
 
-  const rows = db.prepare("SELECT * FROM payroll WHERE month=? ORDER BY name").all(month);
-  
+  // Only show rows for whitelisted employees
+  const placeholders = PAYROLL_WHITELIST.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT * FROM payroll WHERE month=? AND name IN (${placeholders}) ORDER BY name`).all(month, ...PAYROLL_WHITELIST);
+
   // Defensive deduplication to ensure same name is never shown twice in payroll
   const seen = new Set();
   const uniqueRows = [];

@@ -724,23 +724,49 @@ function AttendanceForm({ employees, onSave }) {
 }
 
 function TargetForm({ kpi, month, onSave }) {
-  const [form, setForm] = useState({ consultant: kpi.consultant, month, target_leads: kpi.target_leads, target_enrolled: kpi.target_enrolled, target_revenue: kpi.target_revenue });
+  const [form, setForm] = useState({
+    consultant: kpi.consultant,
+    month,
+    target_leads: kpi.target_leads || '',
+    target_enrolled: kpi.target_enrolled || '',
+    target_revenue: kpi.target_revenue || '',
+  });
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const toast = useToast();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   async function submit(e) {
-    e.preventDefault(); setSaving(true);
-    try { await api.setKpiTargets(form); onSave(); }
-    finally { setSaving(false); }
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      await api.setKpiTargets({
+        consultant: form.consultant,
+        month: form.month,
+        target_leads: Number(form.target_leads) || 0,
+        target_enrolled: Number(form.target_enrolled) || 0,
+        target_revenue: Number(form.target_revenue) || 0,
+      });
+      toast.success(`Targets saved for ${kpi.consultant}`);
+      onSave();
+    } catch(e) {
+      setErr(e.message);
+      toast.error('Failed to save targets: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-slate-500">Set monthly targets for <strong>{kpi.consultant}</strong> in <strong>{month}</strong></p>
-      {[['target_leads', 'Target Leads', 'number'], ['target_enrolled', 'Target File Opens', 'number'], ['target_revenue', 'Target Revenue (BDT)', 'number']].map(([k, l]) => (
+      {[['target_leads', 'Target New Leads'], ['target_enrolled', 'Target File Opens'], ['target_revenue', 'Target Revenue (BDT)']].map(([k, l]) => (
         <div key={k}>
           <label className="block text-xs font-medium text-slate-600 mb-1">{l}</label>
-          <input type="number" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={form[k] || ''} onChange={e => set(k, e.target.value)} />
+          <input type="number" min="0" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none"
+            value={form[k]} onChange={e => set(k, e.target.value)} placeholder="0" />
         </div>
       ))}
+      {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
       <div className="flex justify-end pt-1">
         <button type="submit" disabled={saving} className="bg-indigo-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60">
           {saving ? 'Saving…' : 'Save Targets'}

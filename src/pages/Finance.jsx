@@ -863,23 +863,37 @@ const PROFIT_SHARES = {
 
 function InvestorsTab() {
   const [data, setData] = useState(null);
-  useEffect(() => { api.cashflowInvestors().then(setData).catch(() => setData({ total: 0, contributions: [], by_person: [] })); }, []);
+  const [showInvestModal, setShowInvestModal] = useState(false);
+  const toast = useToast();
+
+  const load = () => api.cashflowInvestors().then(setData).catch(() => setData({ total: 0, contributions: [], by_person: [] }));
+  useEffect(() => { load(); }, []);
+
   if (!data) return <div className="text-slate-400 text-center py-16">Loading…</div>;
   const max = Math.max(...data.by_person.map(p => p.amount), 1);
 
   return (
     <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Total capital injected</p>
-        <p className="text-3xl font-bold text-slate-800 mt-1">{cFmt(data.total)}</p>
-        <p className="text-xs text-slate-400 mt-0.5">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
+      {/* Header card with Add Investment button */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Total capital injected</p>
+          <p className="text-3xl font-bold text-slate-800 mt-1">{cFmt(data.total)}</p>
+          <p className="text-xs text-slate-400 mt-0.5">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
+        </div>
+        <button
+          onClick={() => setShowInvestModal(true)}
+          className="flex items-center gap-2 bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-violet-700 shadow-sm transition-colors"
+        >
+          <Plus size={16} /> Add Investment
+        </button>
       </div>
 
       {data.by_person.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
           <PiggyBank size={32} className="text-slate-300 mx-auto mb-2" />
           <p className="text-slate-600 font-semibold">No investor entries yet</p>
-          <p className="text-xs text-slate-400 mt-1">Record an income entry with category <strong>Investment</strong> to track partner contributions here.</p>
+          <p className="text-xs text-slate-400 mt-1">Click <strong>Add Investment</strong> to record a partner capital contribution.</p>
         </div>
       ) : (
         <>
@@ -919,8 +933,7 @@ function InvestorsTab() {
             <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between">
               <div>
                 <p className="font-semibold text-slate-700 text-sm mb-1">Partnership Profit Sharing</p>
-                <p className="text-[11px] text-slate-400 mb-4">Official profit distribution schedule splits net profits annually in **September**.</p>
-                
+                <p className="text-[11px] text-slate-400 mb-4">Official profit distribution schedule splits net profits annually in September.</p>
                 <div className="space-y-3">
                   {Object.entries(PROFIT_SHARES).map(([name, val]) => (
                     <div key={name} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-50 bg-slate-50/40">
@@ -947,15 +960,18 @@ function InvestorsTab() {
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
               <p className="font-semibold text-slate-700 text-sm">All contributions</p>
+              <button onClick={() => setShowInvestModal(true)} className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-lg transition-colors">
+                <Plus size={13} /> Add Investment
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50/40 text-xs uppercase tracking-wider text-slate-500">
                   <tr>
                     <th className="text-left  px-4 py-2 font-semibold">Date</th>
-                    <th className="text-left  px-4 py-2 font-semibold">Person</th>
+                    <th className="text-left  px-4 py-2 font-semibold">Investor</th>
                     <th className="text-left  px-4 py-2 font-semibold">Reference</th>
                     <th className="text-right px-4 py-2 font-semibold">Amount</th>
                     <th className="text-left  px-4 py-2 font-semibold">Notes</th>
@@ -977,6 +993,123 @@ function InvestorsTab() {
           </div>
         </>
       )}
+
+      {/* Add Investment Modal */}
+      {showInvestModal && (
+        <Modal title="Record Investment" onClose={() => setShowInvestModal(false)}>
+          <InvestmentForm
+            onSave={() => { setShowInvestModal(false); load(); }}
+            onCancel={() => setShowInvestModal(false)}
+          />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+function InvestmentForm({ onSave, onCancel }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({
+    date: today,
+    client_name: '',
+    amount: '',
+    reference: '',
+    notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const toast = useToast();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.client_name || !form.amount) { setErr('Investor name and amount are required'); return; }
+    setSaving(true); setErr('');
+    try {
+      await api.createIncome({
+        date: form.date,
+        client_name: form.client_name,
+        amount: Number(form.amount),
+        category: 'Investment',
+        reference: form.reference || `Investment - ${form.date}`,
+        notes: form.notes,
+        payment_method: 'Bank Transfer',
+      });
+      toast.success(`Investment of ৳${Number(form.amount).toLocaleString()} recorded for ${form.client_name}`);
+      onSave();
+    } catch(e) {
+      setErr(e.message);
+      toast.error('Failed to record investment: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const partners = Object.keys(PROFIT_SHARES);
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <p className="text-xs text-slate-500">This will record the investment as an income entry under category <strong className="text-slate-700">Investment</strong> and immediately reflect in the Investors dashboard.</p>
+
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Investor / Partner *</label>
+        <div className="flex gap-2 flex-wrap mb-2">
+          {partners.map(p => (
+            <button key={p} type="button"
+              onClick={() => set('client_name', p)}
+              className={`text-xs px-3 py-1.5 rounded-lg border font-semibold transition-all ${form.client_name === p ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300'}`}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <input
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-100 focus:border-violet-400 outline-none"
+          placeholder="Or type investor name"
+          value={form.client_name}
+          onChange={e => set('client_name', e.target.value)}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Date *</label>
+          <input type="date" required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-100 focus:border-violet-400 outline-none"
+            value={form.date} onChange={e => set('date', e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Amount (BDT) *</label>
+          <input type="number" min="1" required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-100 focus:border-violet-400 outline-none"
+            placeholder="e.g. 100000"
+            value={form.amount} onChange={e => set('amount', e.target.value)} />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Reference / Transaction ID</label>
+        <input
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-100 focus:border-violet-400 outline-none"
+          placeholder="Bank transfer ref, cheque no., etc."
+          value={form.reference} onChange={e => set('reference', e.target.value)} />
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+        <textarea rows={2}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-100 focus:border-violet-400 outline-none resize-none"
+          placeholder="Optional note about this capital injection"
+          value={form.notes} onChange={e => set('notes', e.target.value)} />
+      </div>
+
+      {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg text-sm text-slate-600 border border-slate-200 hover:bg-slate-50">Cancel</button>
+        <button type="submit" disabled={saving} className="bg-violet-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:bg-violet-700 disabled:opacity-60">
+          {saving ? 'Recording…' : 'Record Investment'}
+        </button>
+      </div>
+    </form>
   );
 }
