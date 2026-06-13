@@ -3217,11 +3217,22 @@ const activeSyncs = new Set();
 // Helper to sync historical messages from Facebook/Instagram Page Channel
 async function syncChannelMessages(channelId, months = 6) {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
-  if (!channel || !channel.access_token) return { imported: 0, skipped: 0 };
+  if (!channel) return { imported: 0, skipped: 0 };
   if (channel.type !== 'messenger' && channel.type !== 'instagram') return { imported: 0, skipped: 0 };
 
-  const token   = channel.access_token;
-  const pageId  = channel.page_id;
+  // Fallback: use global page_access_token if channel-level token is missing
+  const token = channel.access_token || getConfig('page_access_token');
+  if (!token) {
+    console.error(`[sync] No access token for channel ${channel.name} (id=${channelId})`);
+    return { imported: 0, skipped: 0 };
+  }
+
+  const pageId = channel.page_id;
+  if (!pageId) {
+    console.error(`[sync] No page_id for channel ${channel.name} (id=${channelId}) — cannot call conversations API`);
+    return { imported: 0, skipped: 0 };
+  }
+
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
 
   const MAX_MESSAGES = 5000;
@@ -3230,7 +3241,13 @@ async function syncChannelMessages(channelId, months = 6) {
   async function fbGet(url) {
     const r = await fetch(url);
     const d = await r.json();
-    if (d.error) throw new Error(`FB API: ${d.error.message}`);
+    if (d.error) {
+      console.error(`[sync] FB API error: code=${d.error.code} subcode=${d.error.error_subcode} msg=${d.error.message}`);
+      throw new Error(`FB API: ${d.error.message}`);
+    }
+    if (!d.data) {
+      console.warn(`[sync] FB API returned no data field. Response keys: ${Object.keys(d).join(', ')}`);
+    }
     return { items: d.data || [], nextUrl: d.paging?.next || null };
   }
 
@@ -3287,14 +3304,21 @@ async function syncChannelMessages(channelId, months = 6) {
   const cutoffMs = since * 1000;
   const toSqlTime = (t) => t ? new Date(t).toISOString().replace('T', ' ').slice(0, 19) : null;
 
+  // Determine platform parameter for filtering
+  const platform = channel.type === 'instagram' ? 'instagram' : 'messenger';
+
   try {
     let convUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations`
-      + `?fields=updated_time,participants,snippet`
+      + `?platform=${platform}`
+      + `&fields=updated_time,participants,snippet`
       + `&limit=50&access_token=${token}`;
+
+    console.log(`[sync] Starting ${channel.name} (${platform}) pageId=${pageId} token=${token.slice(0,14)}...`);
 
     let stop = false;
     while (convUrl && !stop && imported + skipped < MAX_MESSAGES) {
       const { items: fbConvs, nextUrl } = await fbGet(convUrl);
+      console.log(`[sync] Got ${fbConvs.length} conversations from FB`);
       convUrl = nextUrl;
 
       for (const fbConv of fbConvs) {
@@ -3372,7 +3396,9 @@ async function syncChannelMessages(channelId, months = 6) {
 app.post('/api/channels/:id/sync', async (req, res) => {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
-  if (!channel.access_token) return res.status(400).json({ error: 'No access token on this channel' });
+  const effectiveToken = channel.access_token || getConfig('page_access_token');
+  if (!effectiveToken) return res.status(400).json({ error: 'No access token configured for this channel' });
+  if (!channel.page_id) return res.status(400).json({ error: 'No page_id set on this channel' });
   if (channel.type !== 'messenger' && channel.type !== 'instagram')
     return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
   if (activeSyncs.has(channel.id))
