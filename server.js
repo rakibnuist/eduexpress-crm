@@ -141,6 +141,9 @@ app.post('/api/auth/login', (req, res) => {
   // • Geo check   — enforced when office lat/lng are stored in config.
   //                 All browsers that grant location permission are gated by this.
   // If neither config is set the check is skipped (safe for initial setup).
+  // Admins may log in from anywhere — they are exempt from the office network
+  // and geofence gates (their password has already been verified above).
+  const enforceLocation = user.role !== 'admin';
   const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
   const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
 
@@ -153,7 +156,7 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   // SSID check: only when the client actually sent an SSID value
-  if (ssid && allowedSSIDs.length > 0) {
+  if (enforceLocation && ssid && allowedSSIDs.length > 0) {
     const ssidMatch = allowedSSIDs.some(s =>
       String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
     );
@@ -168,7 +171,7 @@ app.post('/api/auth/login', (req, res) => {
   // Geo check: enforced whenever office lat/lng are configured
   const officeLat = parseFloat(getConfig('office_lat'));
   const officeLng = parseFloat(getConfig('office_lng'));
-  if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
+  if (enforceLocation && Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
     const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
     if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
       return res.status(403).json({
