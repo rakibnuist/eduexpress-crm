@@ -284,6 +284,14 @@ const DATA_RESOURCES = [
     { k: 'drive_url', l: 'Drive link' }, { k: 'version', l: 'Version' }, { k: 'owner', l: 'Owner' } ] },
 ];
 
+// Google Drive folders (eduexpress6 shared "Marketing Data Center")
+const DRIVE_FOLDERS = {
+  parent:    'https://drive.google.com/drive/folders/1gBY_6WHR_pAgYXYTes_BdCwfteozWtjI',
+  brochures: 'https://drive.google.com/drive/folders/19m0Tb3DgTjNDFLoqSCy_KoSWwZ5dOX_F',
+  notices:   'https://drive.google.com/drive/folders/1uHMzRdvNjbXPVUgQxtCyoFEkkjuXPAYF',
+  sources:   'https://drive.google.com/drive/folders/1CP5pgDEAipMpPZ2rsqfDWAmXluJ7EcUJ',
+};
+
 function DataCenterTab() {
   const [sub, setSub] = useState(DATA_RESOURCES[0].id);
   const res = DATA_RESOURCES.find(r => r.id === sub);
@@ -297,6 +305,20 @@ function DataCenterTab() {
           </button>
         ))}
       </div>
+      {sub === 'kb/docs' && (
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-xl px-3 py-2.5 mb-4">
+          <div className="flex-1">
+            <b>To add a brochure or notice:</b> open the Drive folder, drag your file in, then copy its link
+            (right-click → Share → “Anyone with the link” → Copy link) and paste it into <b>Drive link</b> when you click Add.
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            <a href={DRIVE_FOLDERS.brochures} target="_blank" rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded-lg bg-white border border-blue-300 text-blue-700 font-medium hover:bg-blue-100 whitespace-nowrap">Open Brochures folder ↗</a>
+            <a href={DRIVE_FOLDERS.notices} target="_blank" rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded-lg bg-white border border-blue-300 text-blue-700 font-medium hover:bg-blue-100 whitespace-nowrap">Notices folder ↗</a>
+          </div>
+        </div>
+      )}
       <CrudTable key={res.id} resource={res.id} columns={res.cols} title={res.label} />
     </div>
   );
@@ -365,13 +387,17 @@ function CrudTable({ resource, columns, title, statusKey }) {
               <tbody>
                 {rows.map(row => (
                   <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    {columns.map(c => (
-                      <td key={c.k} className="px-3 py-2 align-top text-slate-700 max-w-[220px]">
+                    {columns.map(c => {
+                      const v = String(row[c.k] ?? '');
+                      const isUrl = /^https?:\/\//i.test(v);
+                      return (
+                      <td key={c.k} className="px-3 py-2 align-top text-slate-700">
                         {statusKey === c.k ? <Pill value={row[c.k]} />
-                          : c.long ? <span className="line-clamp-2 text-xs text-slate-600">{row[c.k]}</span>
-                          : <span className="whitespace-nowrap text-xs">{String(row[c.k] ?? '')}</span>}
+                          : isUrl ? <a href={v} target="_blank" rel="noopener noreferrer" title={v} className="block max-w-[200px] truncate text-xs text-blue-600 hover:underline">{v.replace(/^https?:\/\/(www\.)?/, '')}</a>
+                          : c.long ? <span className="line-clamp-2 text-xs text-slate-600 block max-w-[280px]">{v}</span>
+                          : <span title={v} className="block max-w-[200px] truncate text-xs">{v}</span>}
                       </td>
-                    ))}
+                    );})}
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button onClick={() => setEditing(row)} className="p-1 text-slate-400 hover:text-blue-600"><Pencil size={14} /></button>
                       <button onClick={() => del(row)} className="p-1 text-slate-300 hover:text-rose-500"><Trash2 size={14} /></button>
