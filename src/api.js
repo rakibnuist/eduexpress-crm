@@ -42,7 +42,7 @@ function toQuery(p) {
 export const api = {
   // Auth
   me:     ()                              => req('/auth/me'),
-  login:  (email, password, loc = null)   => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, lat: loc?.lat, lng: loc?.lng }) }),
+  login:  (email, password, loc = null, ssid = null) => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, lat: loc?.lat, lng: loc?.lng, ssid }) }),
   logout: ()                              => req('/auth/logout', { method: 'POST' }),
 
   // Office config

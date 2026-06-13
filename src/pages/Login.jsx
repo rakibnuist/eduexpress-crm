@@ -15,22 +15,30 @@ export default function Login({ onSuccess }) {
     setError('');
     setLoading(true);
 
-    // Best-effort geolocation — used by the server's office-geofence auto-attendance.
-    // If the user denies or the browser doesn't support it, login still works; the
-    // server simply falls back to "no geofence configured = always allow".
+    // Geo location is required for office-presence enforcement.
+    // If the user explicitly denies, bail early with a clear message.
     let loc = null;
+    let locationDenied = false;
     if (navigator.geolocation) {
       loc = await new Promise(resolve => {
         navigator.geolocation.getCurrentPosition(
           p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          () => resolve(null),
-          { timeout: 4000, maximumAge: 60000 }
+          err => { if (err.code === 1) locationDenied = true; resolve(null); },
+          { timeout: 6000, maximumAge: 60000 }
         );
       });
     }
 
+    if (locationDenied) {
+      setError('Location access is required to log in. Please allow location permission in your browser settings and try again.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const user = await api.login(email.trim(), password, loc);
+      // ssid is null for browsers (browsers cannot detect Wi-Fi SSID).
+      // When a native/PWA client passes it, the server validates it against the office list.
+      const user = await api.login(email.trim(), password, loc, null);
       // Surface the attendance result before handing off to the app
       const a = user.attendance;
       if (a?.ok && a.created)     sessionStorage.setItem('att_msg', `✓ Checked in at ${a.time}${a.status === 'Late' ? ' (Late)' : ''}`);
@@ -92,7 +100,7 @@ export default function Login({ onSuccess }) {
           </form>
 
           <p className="text-center text-[11px] text-slate-400 mt-6">
-            Allow location for automatic check-in when you sign in from the office.
+            Login requires office Wi-Fi (EduExpress / HTA) and location access.
           </p>
         </div>
 

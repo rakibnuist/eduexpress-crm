@@ -222,10 +222,18 @@ app.get('/api/auth/me', (req, res) => {
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
 const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
+// Internal API key for trusted services (n8n, automation scripts)
+const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
+
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
   if (AUTH_FREE.includes(req.path)) return next();
   if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
+  // Service-account bypass: trusted internal key (no location restriction)
+  if (req.headers['x-api-key'] === INTERNAL_API_KEY) {
+    req.user = { id: 0, role: 'super_admin', name: 'n8n Bot', email: 'bot@eduexpress.internal' };
+    return next();
+  }
   const payload = verifyToken(getCookie(req, AUTH_COOKIE));
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
   req.user = payload;
@@ -1655,6 +1663,20 @@ function getWelcomeMessage() {
   return db.prepare("SELECT content FROM quick_replies WHERE title='Greeting' LIMIT 1").get()?.content
     || 'Hello! Thank you for contacting EduExpress International. How can we help you today? 🎓';
 }
+
+// ── n8n AI Welcome Bot Integration ───────────────────────────────────────────
+// New messages are forwarded to n8n where Gemini generates a personalised reply.
+const N8N_WELCOME_WEBHOOK = 'https://vibeacademy.cloud/webhook/eduexpress-welcome';
+
+function forwardToN8N(data) {
+  fetch(N8N_WELCOME_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).catch(e => console.log('[n8n] forward warn:', e.message));
+  console.log(`[n8n] forwarded ${data.platform} conv:${data.conversationId} → AI welcome`);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function saveInboundMessage(convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
   try {
@@ -3910,19 +3932,13 @@ app.post('/webhook/meta', async (req, res) => {
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
                   const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (waInCount === 1) {
-          const welcomeText = getWelcomeMessage();
-          setImmediate(async () => {
-            try {
-              const waRes = await sendWhatsApp(channel, msg.from, welcomeText);
-              const waId = waRes.messages?.[0]?.id;
-              if (waId) {
-                db.prepare("INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,status) VALUES (?,?,?,?,?,'sent')")
-                  .run(conv.id, 'out', 'text', welcomeText, waId);
-                db.prepare("UPDATE conversations SET last_message=?,last_message_at=datetime('now') WHERE id=?").run(welcomeText.slice(0,120), conv.id);
-                console.log('✉️ Auto-welcome sent to WA ' + msg.from);
-              }
-            } catch(e) { console.error('Auto-welcome WA error:', e.message); }
-          });
+          // Forward to n8n — Gemini generates personalised AI welcome
+          setImmediate(() => forwardToN8N({
+            platform: 'whatsapp',
+            conversationId: conv.id,
+            senderName: profileName,
+            messageText: content || ''
+          }));
         }
         console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
@@ -3977,20 +3993,13 @@ app.post('/webhook/meta', async (req, res) => {
                   if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
                     db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(whatsappChannel.consultant || 'Abdullah Al Rakib', lead.id);
                   }
-                                    // Auto-send welcome message to new Lead Ad lead
-                  setImmediate(async () => {
-                    try {
-                      const welcomeText = getWelcomeMessage();
-                      const waRes = await sendWhatsApp(whatsappChannel, lead.phone, welcomeText);
-                      const waId = waRes.messages?.[0]?.id;
-                      if (waId) {
-                        db.prepare("INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,status) VALUES (?,?,?,?,?,'sent')")
-                          .run(conv.id, 'out', 'text', welcomeText, waId);
-                        db.prepare("UPDATE conversations SET last_message=?,last_message_at=datetime('now') WHERE id=?").run(welcomeText.slice(0,120), conv.id);
-                        console.log('✉️ Auto-welcome sent to Lead Ad lead ' + lead.phone);
-                      }
-                    } catch(e) { console.error('Auto-welcome lead ad error:', e.message); }
-                  });
+                                    // Forward to n8n — Gemini generates personalised AI welcome for Lead Ad
+                  setImmediate(() => forwardToN8N({
+                    platform: 'whatsapp',
+                    conversationId: conv.id,
+                    senderName: lead.client_name,
+                    messageText: 'New Lead Ad inquiry'
+                  }));
 
                   console.log(`[leadgen] Auto-created WhatsApp conversation for lead ${lead.lead_id}`);
                 }
@@ -4034,13 +4043,13 @@ app.post('/webhook/meta', async (req, res) => {
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
                 const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (msInCount === 1) {
-          const welcomeText = getWelcomeMessage();
-          setImmediate(async () => {
-            try {
-              await sendMessenger(channel, senderId, welcomeText);
-              console.log('✉️ Auto-welcome sent to Messenger ' + senderId);
-            } catch(e) { console.error('Auto-welcome Messenger error:', e.message); }
-          });
+          // Forward to n8n — Gemini generates personalised AI welcome
+          setImmediate(() => forwardToN8N({
+            platform: 'messenger',
+            conversationId: conv.id,
+            senderName: 'Messenger User', // DB will have real name shortly after
+            messageText: text || ''
+          }));
         }
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
