@@ -1078,6 +1078,76 @@ function setupSchema() { db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_conv      ON messages(conversation_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_conv_contact       ON conversations(contact_id);
   CREATE INDEX IF NOT EXISTS idx_conv_status        ON conversations(status, last_message_at);
+
+  -- ── MARKETING / SOCIAL AUTOMATION ──────────────────────
+  CREATE TABLE IF NOT EXISTS content_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week TEXT,
+    post_date TEXT,
+    slot_time TEXT,
+    page TEXT,                              -- china | bd | instagram | tiktok
+    pillar TEXT,
+    format TEXT,
+    hook TEXT,
+    body TEXT,
+    hashtags TEXT,
+    brief TEXT,
+    asset_url TEXT,
+    status TEXT DEFAULT 'drafted',          -- drafted|approved|edit|rejected|asset_ready|scheduled|published
+    rejection_reason TEXT,
+    published_url TEXT,
+    reach INTEGER,
+    engagement INTEGER,
+    source TEXT DEFAULT 'n8n',              -- n8n | manual | evergreen
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_content_week ON content_posts(week, page);
+  CREATE INDEX IF NOT EXISTS idx_content_status ON content_posts(status);
+
+  CREATE TABLE IF NOT EXISTS evergreen_bank (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_pool TEXT, pillar TEXT, body TEXT, hashtags TEXT, asset_url TEXT,
+    status TEXT DEFAULT 'approved',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS competitor_intel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_date TEXT, competitor TEXT, channel TEXT, observation TEXT,
+    link TEXT, our_angle TEXT, added_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS kb_universities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, country TEXT, city TEXT,
+    programs TEXT, intakes TEXT, tuition TEXT, lang_req TEXT,
+    admission_url TEXT, brochure_url TEXT, partner INTEGER DEFAULT 0,
+    notes TEXT, last_verified TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS kb_scholarships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, country TEXT, type TEXT,
+    coverage TEXT, eligibility TEXT, deadline TEXT, source_url TEXT,
+    status TEXT DEFAULT 'Open', last_verified TEXT, notes TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS kb_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, url TEXT, source_type TEXT,
+    use_for TEXT, date_added TEXT, notes TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS kb_docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, type TEXT, destination TEXT,
+    drive_url TEXT, version TEXT, owner TEXT, updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS brain_api_pool (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, priority INTEGER, provider TEXT, model TEXT,
+    cred_label TEXT, req_min INTEGER, req_day INTEGER,
+    used_today INTEGER DEFAULT 0, status TEXT DEFAULT 'active',
+    cooldown_until TEXT, notes TEXT
+  );
 `); }
 
 function runMigrations() {
@@ -4178,6 +4248,163 @@ app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
     return res.status(400).json({ error: 'invalid settings key' });
   }
   setConfig(key, JSON.stringify(value));
+  res.json({ ok: true });
+}));
+
+// ─────────────────────────────────────────────────────────
+// MARKETING / SOCIAL AUTOMATION  (admin + manager UI; n8n via x-api-key)
+// ─────────────────────────────────────────────────────────
+// Access guard: admin, manager, or trusted n8n service (super_admin via x-api-key).
+function requireMarketing(req, res, next) {
+  const r = req.user?.role;
+  if (r === 'admin' || r === 'manager' || r === 'super_admin') return next();
+  return res.status(403).json({ error: 'Marketing access required' });
+}
+// Keep only whitelisted, present keys from a request body.
+function pickFields(body, allowed) {
+  const out = {};
+  for (const k of allowed) if (body && body[k] !== undefined) out[k] = body[k];
+  return out;
+}
+// Generic CRUD for simple marketing tables.
+function marketingCrud(path, table, cols) {
+  app.get(`/api/marketing/${path}`, (req, res) => requireMarketing(req, res, () => {
+    res.json(db.prepare(`SELECT * FROM ${table} ORDER BY id DESC`).all());
+  }));
+  app.post(`/api/marketing/${path}`, (req, res) => requireMarketing(req, res, () => {
+    const data = pickFields(req.body, cols);
+    const keys = Object.keys(data);
+    if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+    const info = db.prepare(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map(k => data[k]));
+    res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(info.lastInsertRowid));
+  }));
+  app.put(`/api/marketing/${path}/:id`, (req, res) => requireMarketing(req, res, () => {
+    const data = pickFields(req.body, cols);
+    const keys = Object.keys(data);
+    if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+    db.prepare(`UPDATE ${table} SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`).run(...keys.map(k => data[k]), req.params.id);
+    res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
+  }));
+  app.delete(`/api/marketing/${path}/:id`, (req, res) => requireMarketing(req, res, () => {
+    db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  }));
+}
+
+const POST_COLS = ['week','post_date','slot_time','page','pillar','format','hook','body','hashtags','brief','asset_url','status','rejection_reason','published_url','reach','engagement','source'];
+
+// ── Content posts (weekly calendar) ──
+app.get('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
+  const { week, page, status } = req.query;
+  const where = [], params = [];
+  if (week)   { where.push('week=?');   params.push(week); }
+  if (page)   { where.push('page=?');   params.push(page); }
+  if (status) { where.push('status=?'); params.push(status); }
+  const sql = `SELECT * FROM content_posts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY post_date, slot_time`;
+  res.json(db.prepare(sql).all(...params));
+}));
+
+// n8n pulls what to publish: approved/asset_ready posts due today or earlier.
+app.get('/api/marketing/posts/due', (req, res) => requireMarketing(req, res, () => {
+  res.json(db.prepare(
+    `SELECT * FROM content_posts WHERE status IN ('approved','asset_ready') AND date(post_date) <= date('now') ORDER BY post_date, slot_time`
+  ).all());
+}));
+
+app.post('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
+  const data = pickFields(req.body, POST_COLS);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  const info = db.prepare(`INSERT INTO content_posts (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map(k => data[k]));
+  res.json(db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(info.lastInsertRowid));
+}));
+
+app.put('/api/marketing/posts/:id/status', (req, res) => requireMarketing(req, res, () => {
+  const { status, rejection_reason } = req.body || {};
+  const allowed = ['drafted','approved','edit','rejected','asset_ready','scheduled','published'];
+  if (!allowed.includes(status)) return res.status(400).json({ error: 'invalid status' });
+  db.prepare(`UPDATE content_posts SET status=?, rejection_reason=?, updated_at=datetime('now') WHERE id=?`)
+    .run(status, rejection_reason || null, req.params.id);
+  res.json(db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(req.params.id));
+}));
+
+app.put('/api/marketing/posts/:id/published', (req, res) => requireMarketing(req, res, () => {
+  const { published_url, reach, engagement } = req.body || {};
+  db.prepare(`UPDATE content_posts SET status='published', published_url=?, reach=?, engagement=?, updated_at=datetime('now') WHERE id=?`)
+    .run(published_url || null, reach ?? null, engagement ?? null, req.params.id);
+  res.json(db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(req.params.id));
+}));
+
+app.put('/api/marketing/posts/:id', (req, res) => requireMarketing(req, res, () => {
+  const data = pickFields(req.body, POST_COLS);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  db.prepare(`UPDATE content_posts SET ${keys.map(k => k + '=?').join(',')}, updated_at=datetime('now') WHERE id=?`)
+    .run(...keys.map(k => data[k]), req.params.id);
+  res.json(db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(req.params.id));
+}));
+
+app.delete('/api/marketing/posts/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM content_posts WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Bulk approve a whole week (drafted + edit -> approved).
+app.post('/api/marketing/posts/approve-week', (req, res) => requireMarketing(req, res, () => {
+  const { week } = req.body || {};
+  if (!week) return res.status(400).json({ error: 'week required' });
+  const info = db.prepare(`UPDATE content_posts SET status='approved', updated_at=datetime('now') WHERE week=? AND status IN ('drafted','edit')`).run(week);
+  logActivity({ type: 'content_week_approved', actor: req.user, to: week, details: { approved: info.changes } });
+  res.json({ ok: true, approved: info.changes });
+}));
+
+// n8n writes a generated week. Replaces only its own un-touched drafts so it never clobbers your edits/approvals.
+app.post('/api/marketing/plan/import', (req, res) => requireMarketing(req, res, () => {
+  const { week, posts } = req.body || {};
+  if (!week || !Array.isArray(posts)) return res.status(400).json({ error: 'week and posts[] required' });
+  db.prepare(`DELETE FROM content_posts WHERE week=? AND source='n8n' AND status='drafted'`).run(week);
+  let inserted = 0;
+  const stmt = db.prepare(`INSERT INTO content_posts (${POST_COLS.join(',')}) VALUES (${POST_COLS.map(() => '?').join(',')})`);
+  for (const p of posts) {
+    const row = { ...p, week, source: 'n8n', status: p.status || 'drafted' };
+    stmt.run(...POST_COLS.map(c => row[c] ?? null));
+    inserted++;
+  }
+  logActivity({ type: 'content_plan_imported', actor: req.user, to: week, details: { posts: inserted } });
+  if (typeof broadcast === 'function') broadcast('content_plan_ready', { week, count: inserted });
+  res.json({ ok: true, week, inserted });
+}));
+
+// ── Simple tables (evergreen, competitors, knowledge base) ──
+marketingCrud('evergreen', 'evergreen_bank', ['page_pool','pillar','body','hashtags','asset_url','status']);
+marketingCrud('competitors', 'competitor_intel', ['log_date','competitor','channel','observation','link','our_angle','added_by']);
+marketingCrud('kb/universities', 'kb_universities', ['name','country','city','programs','intakes','tuition','lang_req','admission_url','brochure_url','partner','notes','last_verified']);
+marketingCrud('kb/scholarships', 'kb_scholarships', ['name','country','type','coverage','eligibility','deadline','source_url','status','last_verified','notes']);
+marketingCrud('kb/sources', 'kb_sources', ['topic','url','source_type','use_for','date_added','notes']);
+marketingCrud('kb/docs', 'kb_docs', ['name','type','destination','drive_url','version','owner','updated_at']);
+
+// ── Brain API pool (rotation state; secrets stay in n8n) ──
+app.get('/api/marketing/brain', (req, res) => requireMarketing(req, res, () => {
+  res.json(db.prepare(`SELECT * FROM brain_api_pool ORDER BY priority`).all());
+}));
+app.post('/api/marketing/brain', (req, res) => requireMarketing(req, res, () => {
+  const cols = ['priority','provider','model','cred_label','req_min','req_day','used_today','status','cooldown_until','notes'];
+  const data = pickFields(req.body, cols);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  const info = db.prepare(`INSERT INTO brain_api_pool (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map(k => data[k]));
+  res.json(db.prepare(`SELECT * FROM brain_api_pool WHERE id=?`).get(info.lastInsertRowid));
+}));
+app.put('/api/marketing/brain/:id', (req, res) => requireMarketing(req, res, () => {
+  const cols = ['priority','provider','model','cred_label','req_min','req_day','used_today','status','cooldown_until','notes'];
+  const data = pickFields(req.body, cols);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  db.prepare(`UPDATE brain_api_pool SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`).run(...keys.map(k => data[k]), req.params.id);
+  res.json(db.prepare(`SELECT * FROM brain_api_pool WHERE id=?`).get(req.params.id));
+}));
+app.delete('/api/marketing/brain/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM brain_api_pool WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
 }));
 
