@@ -12,14 +12,17 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts';
 
-// ── helpers ──────────────────────────────────────────────
-function isoWeek(d = new Date()) {
-  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const dayNum = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - dayNum + 3);
-  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
-  const week = 1 + Math.round(((date - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
-  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+// ── helpers (month + week-of-month, e.g. "July 1st Week, 2026") ──
+const ORD = ['', '1st', '2nd', '3rd', '4th', '5th'];
+function weekOfMonth(d = new Date()) { return Math.min(5, Math.ceil(d.getDate() / 7)); }
+function curMonth(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function weekKey(ym, w) { return `${ym}-W${w}`; }            // stored value, e.g. 2026-07-W1
+function monthName(ym) { const [y, m] = ym.split('-'); return new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-US', { month: 'long' }); }
+function weekLabel(ym, w) { return `${monthName(ym)} ${ORD[w]} Week, ${ym.split('-')[0]}`; }
+function monthOptions(n = 6, d = new Date()) {
+  const out = [];
+  for (let i = 0; i < n; i++) { const dt = new Date(d.getFullYear(), d.getMonth() + i, 1); out.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`); }
+  return out;
 }
 
 const PAGE_BADGE = {
@@ -93,7 +96,9 @@ export default function Marketing() {
 function CalendarTab() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [week, setWeek] = useState(isoWeek());
+  const [ym, setYm] = useState(curMonth());
+  const [wom, setWom] = useState(weekOfMonth());
+  const week = weekKey(ym, wom);
   const [pageFilter, setPageFilter] = useState('');
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -121,7 +126,7 @@ function CalendarTab() {
     } catch (e) { toast.error(e.message); }
   };
   const approveWeek = async () => {
-    if (!await confirm({ title: `Approve all of ${week}?`, body: 'Approves every drafted/edited post for this week.', confirmLabel: 'Approve week' })) return;
+    if (!await confirm({ title: `Approve all of ${weekLabel(ym, wom)}?`, body: 'Approves every drafted/edited post for this week.', confirmLabel: 'Approve week' })) return;
     try { const r = await api.marketing.approveWeek(week); toast.success(`Approved ${r.approved} posts`); load(); }
     catch (e) { toast.error(e.message); }
   };
@@ -134,8 +139,14 @@ function CalendarTab() {
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <label className="text-xs text-slate-500">Week</label>
-        <input value={week} onChange={e => setWeek(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 w-28" placeholder="2026-W27" />
+        <select value={ym} onChange={e => setYm(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5">
+          {monthOptions().map(m => <option key={m} value={m}>{monthName(m)} {m.split('-')[0]}</option>)}
+        </select>
+        <select value={wom} onChange={e => setWom(Number(e.target.value))}
+          className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5">
+          {[1, 2, 3, 4, 5].map(w => <option key={w} value={w}>{ORD[w]} Week</option>)}
+        </select>
         <select value={pageFilter} onChange={e => setPageFilter(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5">
           <option value="">All pages</option>
@@ -151,7 +162,7 @@ function CalendarTab() {
 
       {loading ? <div className="py-16 text-center text-slate-400 text-sm">Loading…</div>
         : posts.length === 0 ? (
-          <EmptyState icon={<CalendarDays size={24} />} title={`No posts for ${week}`}
+          <EmptyState icon={<CalendarDays size={24} />} title={`No posts for ${weekLabel(ym, wom)}`}
             hint="When n8n imports a weekly plan it appears here for approval. You can also add one manually." />
         ) : (
           <div className="space-y-5">
