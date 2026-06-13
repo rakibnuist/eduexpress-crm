@@ -197,4 +197,19 @@ export const api = {
   sendMessage:     (convId, d)=> req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
   quickReplies:    ()        => req('/quick-replies'),
   convertLead:     (convId, d)=> req(`/conversations/${convId}/convert-lead`, { method: 'POST', body: JSON.stringify(d) }),
+
+  // Marketing / social automation
+  marketing: {
+    posts:         (p = {})  => req('/marketing/posts?' + toQuery(p)),
+    createPost:    (d)       => req('/marketing/posts', { method: 'POST', body: JSON.stringify(d) }),
+    updatePost:    (id, d)   => req(`/marketing/posts/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+    setPostStatus: (id, d)   => req(`/marketing/posts/${id}/status`, { method: 'PUT', body: JSON.stringify(d) }),
+    deletePost:    (id)      => req(`/marketing/posts/${id}`, { method: 'DELETE' }),
+    approveWeek:   (week)    => req('/marketing/posts/approve-week', { method: 'POST', body: JSON.stringify({ week }) }),
+    // Generic list/CRUD for: evergreen, competitors, kb/universities, kb/scholarships, kb/sources, kb/docs, brain
+    list:   (res)        => req(`/marketing/${res}`),
+    create: (res, d)     => req(`/marketing/${res}`, { method: 'POST', body: JSON.stringify(d) }),
+    update: (res, id, d) => req(`/marketing/${res}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+    remove: (res, id)    => req(`/marketing/${res}/${id}`, { method: 'DELETE' }),
+  },
 };

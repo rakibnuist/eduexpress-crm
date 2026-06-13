@@ -49,3 +49,16 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background:
   animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Shared input style — used by the Marketing module forms */
+.inp {
+  width: 100%;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  background: #fff;
+  color: #1e293b;
+  outline: none;
+}
+.inp:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(59, 130, 246, .15); }
+

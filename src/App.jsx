@@ -22,6 +22,7 @@ const Settings      = lazy(() => import('./pages/Settings'));
 const LegalNotice   = lazy(() => import('./pages/LegalNotice'));
 const StudentPortal = lazy(() => import('./pages/StudentPortal'));
 const Conversations = lazy(() => import('./pages/Conversations'));
+const Marketing     = lazy(() => import('./pages/Marketing'));
 
 function PageLoader() {
   return (
@@ -79,6 +80,7 @@ export default function App() {
                         <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
                         <Route path="/applications" element={<Applications user={user} />} />
                         <Route path="/conversations" element={<Conversations user={user} />} />
+                        {(user.role === 'admin' || user.role === 'manager') && <Route path="/marketing" element={<Marketing />} />}
                         {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
                         {user.role === 'admin' && <Route path="/hr" element={<HR user={user} />} />}
                         {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
