@@ -133,6 +133,60 @@ app.post('/api/auth/login', (req, res) => {
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid username/email or password' });
   }
+
+  // ── Network & Location enforcement ────────────────────────────────────────
+  // Login is only permitted from the office network and/or office location.
+  // • SSID check  — enforced when client sends an SSID value AND allowed list is configured.
+  //                 (Browsers cannot detect SSID, so this only fires from a native/PWA app.)
+  // • Geo check   — enforced when office lat/lng are stored in config.
+  //                 All browsers that grant location permission are gated by this.
+  // If neither config is set the check is skipped (safe for initial setup).
+  const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
+  const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
+
+  // Build allowed SSIDs list: JSON array in office_allowed_ssids, fallback to single office_wifi_ssid
+  let allowedSSIDs = [];
+  try { allowedSSIDs = JSON.parse(getConfig('office_allowed_ssids') || '[]'); } catch {}
+  if (!Array.isArray(allowedSSIDs) || allowedSSIDs.length === 0) {
+    const single = getConfig('office_wifi_ssid');
+    if (single) allowedSSIDs = [single];
+  }
+
+  // SSID check: only when the client actually sent an SSID value
+  if (ssid && allowedSSIDs.length > 0) {
+    const ssidMatch = allowedSSIDs.some(s =>
+      String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
+    );
+    if (!ssidMatch) {
+      return res.status(403).json({
+        error: 'Not connected to the office network. Please connect to the EduExpress or HTA Wi-Fi and try again.',
+        code: 'WRONG_NETWORK',
+      });
+    }
+  }
+
+  // Geo check: enforced whenever office lat/lng are configured
+  const officeLat = parseFloat(getConfig('office_lat'));
+  const officeLng = parseFloat(getConfig('office_lng'));
+  if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
+    const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
+      return res.status(403).json({
+        error: 'Location access is required to log in. Please allow location permission in your browser and try again.',
+        code: 'NO_LOCATION',
+      });
+    }
+    const distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
+    if (distFromOffice > officeRadius) {
+      return res.status(403).json({
+        error: `You must be at the office to log in. You are currently ${Math.round(distFromOffice)}m away.`,
+        code: 'OUTSIDE_OFFICE',
+        distance: Math.round(distFromOffice),
+      });
+    }
+  }
+  // ── End enforcement ────────────────────────────────────────────────────────
+
   db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
   const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
   setAuthCookie(res, token);
@@ -251,7 +305,7 @@ app.delete('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
 }));
 
 // ─── OFFICE CONFIG (open/close hours + geofence) ────────────────────────────
-const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m', 'office_wifi_ssid'];
+const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m', 'office_wifi_ssid', 'office_allowed_ssids'];
 app.get('/api/office-config', (req, res) => {
   const cfg = Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)]));
   res.json(cfg);
@@ -1227,6 +1281,20 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
   }
+
+  // Seed allowed office Wi-Fi SSIDs for login enforcement
+  try {
+    const ssids = [
+      'EduExpress International',
+      'EduExpress International_5G',
+      'H T A',
+      'H T A 5G',
+    ];
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('office_allowed_ssids', ?)").run(JSON.stringify(ssids));
+    console.log('[migration] office_allowed_ssids set:', ssids.join(', '));
+  } catch (e) {
+    console.error('[migration] Failed to seed office_allowed_ssids:', e.message);
+  }
 }
 
 function seedData() {
@@ -1442,9 +1510,16 @@ function autoCheckIn(user, opts = {}) {
   const today = new Date().toISOString().slice(0, 10);
   autoCloseStaleAttendance(emp, today);
 
-  // Office Wi-Fi SSID Verification
-  const officeSSID = getConfig('office_wifi_ssid');
-  const onOfficeWifi = officeSSID && opts.ssid && String(opts.ssid).toLowerCase().trim() === String(officeSSID).toLowerCase().trim();
+  // Office Wi-Fi SSID Verification (supports multi-SSID list)
+  let _allowedSSIDs = [];
+  try { _allowedSSIDs = JSON.parse(getConfig('office_allowed_ssids') || '[]'); } catch {}
+  if (!Array.isArray(_allowedSSIDs) || _allowedSSIDs.length === 0) {
+    const single = getConfig('office_wifi_ssid');
+    if (single) _allowedSSIDs = [single];
+  }
+  const onOfficeWifi = opts.ssid && _allowedSSIDs.some(s =>
+    String(s).toLowerCase().trim() === String(opts.ssid).toLowerCase().trim()
+  );
 
   // Already checked in today?
   const existing = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date=?").get(emp.emp_id, today);
