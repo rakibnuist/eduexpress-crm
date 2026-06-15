@@ -4365,7 +4365,16 @@ app.post('/api/marketing/posts/approve-week', (req, res) => requireMarketing(req
 app.post('/api/marketing/plan/import', (req, res) => requireMarketing(req, res, () => {
   const { week, posts } = req.body || {};
   if (!week || !Array.isArray(posts)) return res.status(400).json({ error: 'week and posts[] required' });
-  db.prepare(`DELETE FROM content_posts WHERE week=? AND source='n8n' AND status='drafted'`).run(week);
+  // Clear only the drafted n8n posts for the PAGES present in this import, so split
+  // per-page workflows (china / bd / tiktok) don't wipe each other's drafts. Falls back
+  // to clearing the whole week when posts span all pages (single combined import).
+  const pages = [...new Set((posts || []).map(p => p && p.page).filter(Boolean))];
+  if (pages.length) {
+    const ph = pages.map(() => '?').join(',');
+    db.prepare(`DELETE FROM content_posts WHERE week=? AND source='n8n' AND status='drafted' AND page IN (${ph})`).run(week, ...pages);
+  } else {
+    db.prepare(`DELETE FROM content_posts WHERE week=? AND source='n8n' AND status='drafted'`).run(week);
+  }
   let inserted = 0;
   const stmt = db.prepare(`INSERT INTO content_posts (${POST_COLS.join(',')}) VALUES (${POST_COLS.map(() => '?').join(',')})`);
   for (const p of posts) {
