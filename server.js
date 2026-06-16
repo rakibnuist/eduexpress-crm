@@ -5584,17 +5584,25 @@ app.post('/api/automation/rules', (req, res) => requireAdmin(req, res, () => {
 }));
 
 app.put('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
-  const { name, trigger_type, trigger_config, action_type, action_config, priority, active } = req.body || {};
+  const { name, trigger_type, trigger_config, action_type, action_config, priority, active, is_active } = req.body || {};
   const cur = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
+  const effectiveActive = is_active !== undefined ? (is_active ? 1 : 0) : (active !== undefined ? (active ? 1 : 0) : null);
   db.prepare(`UPDATE automation_rules SET name=COALESCE(?,name), trigger_type=COALESCE(?,trigger_type), trigger_config=COALESCE(?,trigger_config), action_type=COALESCE(?,action_type), action_config=COALESCE(?,action_config), priority=COALESCE(?,priority), active=COALESCE(?,active) WHERE id=?`)
-    .run(name ?? null, trigger_type ?? null, trigger_config ? JSON.stringify(trigger_config) : null, action_type ?? null, action_config ? JSON.stringify(action_config) : null, priority ?? null, active ?? null, req.params.id);
+    .run(name ?? null, trigger_type ?? null, trigger_config ? JSON.stringify(trigger_config) : null, action_type ?? null, action_config ? JSON.stringify(action_config) : null, priority ?? null, effectiveActive, req.params.id);
   res.json(db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id));
 }));
 
 app.delete('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
   db.prepare("DELETE FROM automation_rules WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+}));
+
+// Test automation rule
+app.post('/api/automation/rules/:id/test', (req, res) => requireAdmin(req, res, () => {
+  const rule = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id);
+  if (!rule) return res.status(404).json({ error: 'Rule not found' });
+  res.json({ ok: true, message: 'Rule test would be triggered here' });
 }));
 
 // Message Templates
@@ -5628,7 +5636,9 @@ app.delete('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
 // Contact Tags
 app.get('/api/tags', (req, res) => requireManagerOrAdmin(req, res, () => {
   const rows = db.prepare("SELECT * FROM contact_tags ORDER BY name").all();
-  res.json(rows);
+  const counts = db.prepare("SELECT tag_id, COUNT(*) as c FROM contact_tag_assignments GROUP BY tag_id").all();
+  const countMap = Object.fromEntries(counts.map(c => [c.tag_id, c.c]));
+  res.json(rows.map(r => ({ ...r, contact_count: countMap[r.id] || 0 })));
 }));
 
 app.post('/api/tags', (req, res) => requireAdmin(req, res, () => {
@@ -5645,6 +5655,15 @@ app.post('/api/tags', (req, res) => requireAdmin(req, res, () => {
 app.delete('/api/tags/:id', (req, res) => requireAdmin(req, res, () => {
   db.prepare("DELETE FROM contact_tags WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+}));
+
+app.get('/api/tags/:id/contacts', (req, res) => requireAdmin(req, res, () => {
+  const contacts = db.prepare(`
+    SELECT c.* FROM contacts c
+    JOIN contact_tag_assignments cta ON cta.contact_id = c.id
+    WHERE cta.tag_id = ?
+  `).all(req.params.id);
+  res.json({ contacts });
 }));
 
 // Conversation Notes
@@ -5705,6 +5724,16 @@ app.post('/api/broadcast-campaigns/:id/send', (req, res) => requireAdmin(req, re
 app.delete('/api/broadcast-campaigns/:id', (req, res) => requireAdmin(req, res, () => {
   db.prepare("DELETE FROM broadcast_recipients WHERE campaign_id=?").run(req.params.id);
   db.prepare("DELETE FROM broadcast_campaigns WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/broadcast-campaigns/:id/pause', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("UPDATE broadcast_campaigns SET status='paused' WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/broadcast-campaigns/:id/resume', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("UPDATE broadcast_campaigns SET status='sending' WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 }));
 
