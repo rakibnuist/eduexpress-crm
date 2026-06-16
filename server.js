@@ -1861,6 +1861,8 @@ function runMigrations() {
       { name: 'Document Checklist', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 📋\n\nPlease prepare the following documents for your application:\n\n1. Passport (valid for 6+ months)\n2. Academic transcripts & certificates\n3. Police clearance certificate\n4. Medical fitness certificate\n5. Bank statement (3–6 months)\n6. Passport-size photos (white background)\n\nSend them to {{consultant}} and we will start your application immediately!', variables: 'name,consultant', approved: 1 },
       { name: 'Follow-Up — No Response', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 👋\n\nWe noticed you haven\'t replied to our last message. We wanted to check if you need any help with your study abroad plans.\n\nFeel free to ask us anything — we are here to help! 🎓', variables: 'name', approved: 1 },
       { name: 'Application Submitted', category: 'Closing', language: 'English', content: 'Great news, {{name}}! 🎉\n\nYour application has been submitted to {{destination}}. We will update you once we receive the admission decision.\n\nNext steps:\n1. Wait for JW202 / admission letter\n2. Apply for visa\n3. Book flight & accommodation\n\nYour consultant {{consultant}} will guide you through each step. Stay tuned! ✈️', variables: 'name,destination,consultant', approved: 1 },
+      { name: 'Office Address & Contact', category: 'General', language: 'English', content: 'Hi {{name}}! 📍\n\nVisit our office at:\n\n🏢 EduExpress International\n📍 House #12, Road #7, Dhanmondi, Dhaka-1209, Bangladesh\n\n📞 Hotline: +880 1840-757595\n📧 Email: info@eduexpressint.com\n🌐 Website: eduexpressint.com\n\n🕐 Office Hours: Sunday–Thursday, 9:00 AM – 6:00 PM (Bangladesh Time)\n🗓️ Closed: Friday & Saturday\n\n📍 Google Maps: https://maps.google.com/?q=23.7452,90.3782\n\nWe look forward to meeting you! 🎓', variables: 'name', approved: 1 },
+      { name: 'Office Address — Bengali', category: 'General', language: 'Bengali', content: 'হাই {{name}}! 📍\n\nআমাদের অফিসে আসুন:\n\n🏢 EduExpress International\n📍 হাউস #12, রোড #7, ধানমন্ডি, ঢাকা-1209, বাংলাদেশ\n\n📞 হটলাইন: +880 1840-757595\n📧 ইমেইল: info@eduexpressint.com\n🌐 ওয়েবসাইট: eduexpressint.com\n\n🕐 অফিস সময়: রবিবার–বৃহস্পতিবার, সকাল ৯টা – সন্ধ্যা ৬টা\n🗓️ বন্ধ: শুক্রবার ও শনিবার\n\n📍 গুগল ম্যাপ: https://maps.google.com/?q=23.7452,90.3782\n\nআপনাকে দেখা পেয়ে খুশি হব! 🎓', variables: 'name', approved: 1 },
     ];
     const check = db.prepare("SELECT COUNT(*) as c FROM message_templates");
     const insert = db.prepare(`INSERT OR IGNORE INTO message_templates (name, category, language, content, variables, approved, usage_count)
@@ -1969,7 +1971,20 @@ function runMigrations() {
         5
       );
 
-      console.log('[migration] Seeded 5 default automation rules.');
+      // Rule 6: Office address and contact details auto-reply
+      const addressTemplate = db.prepare("SELECT id FROM message_templates WHERE name='Office Address & Contact' LIMIT 1").get();
+      if (addressTemplate) {
+        insertRule.run(
+          'Auto-Reply: Office Address & Contact',
+          'keyword',
+          JSON.stringify({ keywords: ['address', 'office', 'location', 'map', 'where is your office', 'direction', 'dhaka', 'dhanmondi', 'visit office', 'office address', 'contact details', 'how to reach', 'phone number'], match_type: 'contains' }),
+          'reply',
+          JSON.stringify({ template_id: addressTemplate.id }),
+          6
+        );
+      }
+
+      console.log('[migration] Seeded 6 default automation rules.');
     }
   } catch (e) {
     console.error('[migration] Failed to seed automation rules:', e.message);
