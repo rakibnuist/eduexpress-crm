@@ -1848,18 +1848,131 @@ function runMigrations() {
     console.error("[migration] Failed to apply new System User token:", e.message);
   }
 
-  // Seed allowed office Wi-Fi SSIDs for login enforcement
+  // Seed pre-built message templates for EduExpress study abroad business
   try {
-    const ssids = [
-      'EduExpress International',
-      'EduExpress International_5G',
-      'H T A',
-      'H T A 5G',
+    const seedTemplates = [
+      { name: 'Welcome — New Inquiry', category: 'Greeting', language: 'English', content: 'Hello {{name}}! Welcome to EduExpress International 🎓\n\nWe help students study in China, Malaysia, South Korea, Hungary, Malta, Cyprus, and Georgia.\n\nYour consultant {{consultant}} will assist you shortly. Please share your academic details so we can guide you better.\n\n📞 +880 1840-757595\n🌐 eduexpressint.com', variables: 'name,consultant', approved: 1 },
+      { name: 'Welcome — Bengali', category: 'Greeting', language: 'Bengali', content: 'আসসালামু আলাইকুম {{name}}! 🎓\n\nEduExpress International-এ আপনাকে স্বাগতম। আমরা চীন, মালয়েশিয়া, দক্ষিণ কোরিয়া, হাঙ্গেরি, মাল্টা, সাইপ্রাস এবং জর্জিয়ায় পড়াশোনার সুযোগ দিয়ে থাকি।\n\nআপনার কনসালট্যান্ট {{consultant}} শীঘ্রই আপনাকে সাহায্য করবেন। দয়া করে আপনার একাডেমিক তথ্য শেয়ার করুন।\n\n📞 +880 1840-757595', variables: 'name,consultant', approved: 1 },
+      { name: 'After-Hours Auto-Reply', category: 'Greeting', language: 'English', content: 'Hi {{name}}! 👋\n\nThank you for reaching out to EduExpress International. Our office is currently closed.\n\n🕐 Office Hours: Sunday–Thursday, 9:00 AM – 6:00 PM (Bangladesh Time)\n\nWe will get back to you as soon as we open. For urgent matters, please call: +880 1840-757595', variables: 'name', approved: 1 },
+      { name: 'After-Hours — Bengali', category: 'Greeting', language: 'Bengali', content: 'হাই {{name}}! 👋\n\nEduExpress International-এ যোগাযোগ করার জন্য ধন্যবাদ। আমাদের অফিস এখন বন্ধ।\n\n🕐 অফিস সময়: রবিবার–বৃহস্পতিবার, সকাল ৯টা – সন্ধ্যা ৬টা\n\nআমরা অফিস খোলার সাথে সাথেই আপনাকে জানাবো। জরুরি প্রয়োজনে কল করুন: +880 1840-757595', variables: 'name', approved: 1 },
+      { name: 'Fee Inquiry Reply', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 💰\n\nOur service fees vary by destination and university. Here is a general overview:\n\n🇨🇳 China: ৳50,000–৳80,000\n🇲🇾 Malaysia: ৳60,000–৳90,000\n🇰🇷 South Korea: ৳80,000–৳120,000\n🇭🇺 Hungary: ৳70,000–৳100,000\n\nTuition fees are separate and vary by program. Would you like to schedule a free consultation with {{consultant}}?', variables: 'name,consultant', approved: 1 },
+      { name: 'Scholarship Info', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 🏆\n\nWe have scholarship opportunities for many destinations!\n\n🇨🇳 China: CSC Scholarship (full tuition + stipend)\n🇭🇺 Hungary: Stipendium Hungaricum (full tuition + monthly allowance)\n🇰🇷 South Korea: KGSP (full tuition + living expenses)\n\nRequirements vary by program. Would you like us to assess your eligibility?', variables: 'name', approved: 1 },
+      { name: 'Office Visit Invitation', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 📍\n\nWe would love to meet you in person at our office:\n\nEduExpress International\nHouse #12, Road #7, Dhanmondi, Dhaka\n\nPlease visit us Sunday–Thursday, 9 AM–6 PM. We can discuss your study options, check your documents, and guide you step-by-step.\n\nSee you soon! 🎓', variables: 'name', approved: 1 },
+      { name: 'Document Checklist', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 📋\n\nPlease prepare the following documents for your application:\n\n1. Passport (valid for 6+ months)\n2. Academic transcripts & certificates\n3. Police clearance certificate\n4. Medical fitness certificate\n5. Bank statement (3–6 months)\n6. Passport-size photos (white background)\n\nSend them to {{consultant}} and we will start your application immediately!', variables: 'name,consultant', approved: 1 },
+      { name: 'Follow-Up — No Response', category: 'Follow-up', language: 'English', content: 'Hi {{name}}! 👋\n\nWe noticed you haven\'t replied to our last message. We wanted to check if you need any help with your study abroad plans.\n\nFeel free to ask us anything — we are here to help! 🎓', variables: 'name', approved: 1 },
+      { name: 'Application Submitted', category: 'Closing', language: 'English', content: 'Great news, {{name}}! 🎉\n\nYour application has been submitted to {{destination}}. We will update you once we receive the admission decision.\n\nNext steps:\n1. Wait for JW202 / admission letter\n2. Apply for visa\n3. Book flight & accommodation\n\nYour consultant {{consultant}} will guide you through each step. Stay tuned! ✈️', variables: 'name,destination,consultant', approved: 1 },
     ];
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('office_allowed_ssids', ?)").run(JSON.stringify(ssids));
-    console.log('[migration] office_allowed_ssids set:', ssids.join(', '));
+    const check = db.prepare("SELECT COUNT(*) as c FROM message_templates");
+    const insert = db.prepare(`INSERT OR IGNORE INTO message_templates (name, category, language, content, variables, approved, usage_count)
+      VALUES (?, ?, ?, ?, ?, ?, 0)`);
+    if (check.get().c === 0) {
+      for (const t of seedTemplates) {
+        insert.run(t.name, t.category, t.language, t.content, t.variables, t.approved);
+      }
+      console.log(`[migration] Seeded ${seedTemplates.length} pre-built message templates.`);
+    }
   } catch (e) {
-    console.error('[migration] Failed to seed office_allowed_ssids:', e.message);
+    console.error('[migration] Failed to seed templates:', e.message);
+  }
+
+  // Seed default contact tags for lead segmentation
+  try {
+    const seedTags = [
+      { name: 'China', color: '#ef4444' },
+      { name: 'Malaysia', color: '#f97316' },
+      { name: 'South Korea', color: '#84cc16' },
+      { name: 'Hungary', color: '#10b981' },
+      { name: 'Malta', color: '#06b6d4' },
+      { name: 'Cyprus', color: '#3b82f6' },
+      { name: 'Georgia', color: '#8b5cf6' },
+      { name: 'Scholarship', color: '#ec4899' },
+      { name: 'VIP', color: '#f59e0b' },
+      { name: 'B2B', color: '#64748b' },
+      { name: 'Priority', color: '#dc2626' },
+      { name: 'No Response', color: '#94a3b8' },
+    ];
+    const insertTag = db.prepare("INSERT OR IGNORE INTO contact_tags (name, color) VALUES (?, ?)");
+    for (const t of seedTags) {
+      insertTag.run(t.name, t.color);
+    }
+    console.log(`[migration] Seeded ${seedTags.length} contact tags.`);
+  } catch (e) {
+    console.error('[migration] Failed to seed tags:', e.message);
+  }
+
+  // Seed default automation rules for EduExpress
+  try {
+    const checkRules = db.prepare("SELECT COUNT(*) as c FROM automation_rules");
+    if (checkRules.get().c === 0) {
+      const insertRule = db.prepare(`INSERT INTO automation_rules (name, trigger_type, trigger_config, action_type, action_config, priority, active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))`);
+
+      // Rule 1: Welcome auto-reply for new WhatsApp conversations
+      const welcomeTemplate = db.prepare("SELECT id FROM message_templates WHERE name='Welcome — New Inquiry' LIMIT 1").get();
+      if (welcomeTemplate) {
+        insertRule.run(
+          'Welcome — New WhatsApp Inquiry',
+          'new_conversation',
+          '{}',
+          'reply',
+          JSON.stringify({ template_id: welcomeTemplate.id }),
+          8
+        );
+      }
+
+      // Rule 2: After-hours auto-reply (out of office hours)
+      const afterHoursTemplate = db.prepare("SELECT id FROM message_templates WHERE name='After-Hours Auto-Reply' LIMIT 1").get();
+      if (afterHoursTemplate) {
+        insertRule.run(
+          'After-Hours Office Reply',
+          'keyword',
+          JSON.stringify({ keywords: ['hello', 'hi', 'hey', 'asalamu', 'salam', 'assalamu'], match_type: 'contains' }),
+          'reply',
+          JSON.stringify({ template_id: afterHoursTemplate.id }),
+          7
+        );
+      }
+
+      // Rule 3: Fee inquiry auto-reply
+      const feeTemplate = db.prepare("SELECT id FROM message_templates WHERE name='Fee Inquiry Reply' LIMIT 1").get();
+      if (feeTemplate) {
+        insertRule.run(
+          'Auto-Reply: Fee Inquiry',
+          'keyword',
+          JSON.stringify({ keywords: ['fee', 'cost', 'price', 'tk', 'taka', 'charge', 'money'], match_type: 'contains' }),
+          'reply',
+          JSON.stringify({ template_id: feeTemplate.id }),
+          6
+        );
+      }
+
+      // Rule 4: Scholarship inquiry auto-reply
+      const scholarshipTemplate = db.prepare("SELECT id FROM message_templates WHERE name='Scholarship Info' LIMIT 1").get();
+      if (scholarshipTemplate) {
+        insertRule.run(
+          'Auto-Reply: Scholarship Inquiry',
+          'keyword',
+          JSON.stringify({ keywords: ['scholarship', 'full free', 'stipend', 'csc', 'stipendium'], match_type: 'contains' }),
+          'reply',
+          JSON.stringify({ template_id: scholarshipTemplate.id }),
+          6
+        );
+      }
+
+      // Rule 5: Auto-create lead for new conversations (no existing lead)
+      insertRule.run(
+        'Auto-Create Lead from New Chat',
+        'new_conversation',
+        '{}',
+        'create_lead',
+        '{}',
+        5
+      );
+
+      console.log('[migration] Seeded 5 default automation rules.');
+    }
+  } catch (e) {
+    console.error('[migration] Failed to seed automation rules:', e.message);
   }
 }
 
@@ -2299,6 +2412,211 @@ async function sendMessenger(channel, recipientId, text, type = 'text', mediaUrl
     body: JSON.stringify(bodyObj)
   });
   return res.json();
+}
+
+// ─── Automation Engine ────────────────────────────────────
+// Executes active automation rules when an inbound message arrives.
+
+function getBangladeshTime() {
+  const now = new Date();
+  const bangladesh = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }));
+  return bangladesh;
+}
+
+function isWithinOfficeHours() {
+  const bd = getBangladeshTime();
+  const day = bd.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const hour = bd.getHours();
+  // Bangladesh office: Sunday-Thursday, 9:00-18:00
+  if (day === 5) return false; // Friday (closed)
+  if (day === 6) return false; // Saturday (closed)
+  if (hour < 9 || hour >= 18) return false;
+  return true;
+}
+
+function substituteTemplateVars(content, vars) {
+  return content.replace(/\{\{(\w+)\}\}/g, (match, key) => vars[key] !== undefined ? vars[key] : match);
+}
+
+async function executeAutomationRules({ conversation, message, channel, contact }) {
+  if (!conversation || !message) return;
+
+  const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 ORDER BY priority DESC, id DESC").all();
+  if (!rules.length) return;
+
+  const msgText = (message.content || '').toLowerCase();
+  const isFirstInbound = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conversation.id).n <= 1;
+  const hasAgentReply = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='out' AND is_internal_note=0").get(conversation.id).n > 0;
+  const inOfficeHours = isWithinOfficeHours();
+  const lastAgentReply = db.prepare("SELECT created_at FROM messages WHERE conversation_id=? AND direction='out' AND is_internal_note=0 ORDER BY created_at DESC LIMIT 1").get(conversation.id);
+  const minutesSinceAgentReply = lastAgentReply ? (Date.now() - new Date(lastAgentReply.created_at).getTime()) / 60000 : Infinity;
+
+  for (const rule of rules) {
+    try {
+      let triggered = false;
+      const cfg = JSON.parse(rule.trigger_config || '{}');
+
+      // ── Trigger evaluation ──
+      switch (rule.trigger_type) {
+        case 'keyword': {
+          const keywords = (cfg.keywords || []).map(k => k.toLowerCase());
+          const matchType = cfg.match_type || 'contains';
+          if (matchType === 'exact') {
+            triggered = keywords.includes(msgText.trim());
+          } else {
+            triggered = keywords.some(k => msgText.includes(k));
+          }
+          break;
+        }
+        case 'new_conversation': {
+          triggered = isFirstInbound;
+          break;
+        }
+        case 'no_response': {
+          const delayMin = Number(cfg.delay) || 30;
+          triggered = hasAgentReply && minutesSinceAgentReply >= delayMin;
+          break;
+        }
+        case 'time_based': {
+          // Time-based rules are checked separately via cron, not on message arrival
+          triggered = false;
+          break;
+        }
+        case 'lead_status_change': {
+          // Handled separately via lead update hook
+          triggered = false;
+          break;
+        }
+      }
+
+      if (!triggered) continue;
+
+      // Log trigger
+      db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'triggered', ?, datetime('now'))").run(rule.id, conversation.id);
+
+      // ── Action execution ──
+      const actCfg = JSON.parse(rule.action_config || '{}');
+      let executed = false;
+
+      switch (rule.action_type) {
+        case 'reply': {
+          if (!actCfg.template_id) break;
+          const template = db.prepare("SELECT * FROM message_templates WHERE id=?").get(actCfg.template_id);
+          if (!template) { console.error(`[auto] Template ${actCfg.template_id} not found`); break; }
+
+          // Check if we already sent an auto-reply recently (avoid spam)
+          const lastAuto = db.prepare("SELECT created_at FROM messages WHERE conversation_id=? AND direction='out' AND sent_by='auto' ORDER BY created_at DESC LIMIT 1").get(conversation.id);
+          if (lastAuto) {
+            const minsSince = (Date.now() - new Date(lastAuto.created_at).getTime()) / 60000;
+            if (minsSince < 5) { console.log(`[auto] Skipping rule ${rule.id} — auto-reply sent ${minsSince.toFixed(0)}m ago`); break; }
+          }
+
+          // Build variables
+          const lead = conversation.lead_id ? db.prepare("SELECT * FROM leads WHERE id=?").get(conversation.lead_id) : null;
+          const vars = {
+            name: contact?.name || 'there',
+            destination: lead?.destination || 'our university',
+            program: lead?.program || 'your program',
+            consultant: lead?.assigned_consultant || conversation.assigned_to || 'our team',
+            phone: contact?.phone || '',
+            email: contact?.email || '',
+            channel: channel?.name || 'WhatsApp',
+          };
+          const replyText = substituteTemplateVars(template.content, vars);
+
+          // Send
+          let sent = null;
+          if (channel?.type === 'whatsapp' && contact?.phone) {
+            sent = await sendWhatsApp(channel, contact.phone, replyText);
+          } else if (channel?.type === 'messenger' && contact?.messenger_id) {
+            sent = await sendMessenger(channel, contact.messenger_id, replyText);
+          }
+
+          if (sent && !sent.error) {
+            const waMsgId = sent.messages?.[0]?.id || null;
+            db.prepare(`INSERT INTO messages (conversation_id, direction, type, content, wa_message_id, status, sent_by, created_at)
+              VALUES (?, 'out', 'text', ?, ?, 'delivered', 'auto', datetime('now'))`).run(conversation.id, replyText, waMsgId);
+            db.prepare("UPDATE message_templates SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id=?").run(template.id);
+            db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), last_message_direction='out' WHERE id=?").run(replyText, conversation.id);
+            broadcast('new_message', { conversation_id: conversation.id, message: { content: replyText, direction: 'out', sent_by: 'auto', created_at: new Date().toISOString() } });
+            executed = true;
+            console.log(`[auto] Rule ${rule.id} → auto-reply sent: "${replyText.slice(0, 60)}..."`);
+          } else if (sent?.error) {
+            console.error(`[auto] Rule ${rule.id} send failed:`, sent.error.message || sent.error);
+          }
+          break;
+        }
+
+        case 'assign': {
+          if (!actCfg.assignee) break;
+          const emp = db.prepare("SELECT * FROM employees WHERE id=? OR name=? LIMIT 1").get(actCfg.assignee, actCfg.assignee);
+          if (emp) {
+            db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?").run(emp.name, emp.id, conversation.id);
+            broadcast('conversation_updated', { id: conversation.id, assigned_to: emp.name, assigned_to_id: emp.id });
+            executed = true;
+          }
+          break;
+        }
+
+        case 'add_tag': {
+          if (!actCfg.tag) break;
+          const tag = db.prepare("SELECT * FROM contact_tags WHERE id=? OR name=? LIMIT 1").get(actCfg.tag, actCfg.tag);
+          if (tag && contact) {
+            db.prepare("INSERT OR IGNORE INTO contact_tag_assignments (contact_id, tag_id, assigned_by) VALUES (?, ?, 'auto')").run(contact.id, tag.id);
+            executed = true;
+          }
+          break;
+        }
+
+        case 'create_lead': {
+          if (!contact || conversation.lead_id) break;
+          const leadId = nextLeadId();
+          const src = channel?.name || channel?.type || 'Auto';
+          db.prepare(`INSERT INTO leads (lead_id, client_name, phone, email, lead_source, lead_status, source, notes, date_added)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(leadId, contact.name || 'Unknown', contact.phone || null, contact.email || null, src, 'New Lead', 'Auto', 'Created by automation rule', new Date().toISOString().slice(0,10));
+          const lead = db.prepare("SELECT * FROM leads WHERE lead_id=?").get(leadId);
+          if (lead) {
+            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conversation.id);
+            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, contact.id);
+            broadcast('new_lead', { lead });
+            executed = true;
+          }
+          break;
+        }
+
+        case 'send_webhook': {
+          if (!actCfg.webhook_url) break;
+          try {
+            await fetch(actCfg.webhook_url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event: 'automation_rule_triggered',
+                rule_id: rule.id,
+                rule_name: rule.name,
+                conversation_id: conversation.id,
+                contact: { name: contact?.name, phone: contact?.phone },
+                message: message.content,
+                timestamp: new Date().toISOString()
+              })
+            });
+            executed = true;
+          } catch (e) { console.error('[auto] Webhook failed:', e.message); }
+          break;
+        }
+      }
+
+      if (executed) {
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'executed', ?, datetime('now'))").run(rule.id, conversation.id);
+      }
+
+    } catch (e) {
+      console.error(`[auto] Rule ${rule.id} error:`, e.message);
+      try {
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'failed', ?, datetime('now'))").run(rule.id, conversation.id);
+      } catch {}
+    }
+  }
 }
 
 // ─── Automation Hub Helpers ───────────────────────────────
@@ -5250,6 +5568,11 @@ app.post('/webhook/meta', async (req, res) => {
           else { content = `[${msg.type}]`; }
 
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
+          // Run automation rules on the incoming message
+          const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+          if (savedMsg) {
+            executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+          }
           const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
           if (waInCount === 1) {
             // Forward to n8n — Gemini generates personalised AI welcome
@@ -5377,6 +5700,11 @@ app.post('/webhook/meta', async (req, res) => {
         }
         if (!text) text = '[message]';
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
+        // Run automation rules
+        const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+        if (savedMsg) {
+          executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+        }
         const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (msInCount === 1) {
           // Forward to n8n — Gemini generates personalised AI welcome
@@ -5599,12 +5927,87 @@ app.delete('/api/broadcast-campaigns/:id', (req, res) => requireAdmin(req, res, 
 
 // Automation Analytics
 app.get('/api/automation/stats', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   const totalTriggered = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='triggered'").get().c;
   const totalExecuted = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='executed'").get().c;
   const totalFailed = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='failed'").get().c;
-  const byRule = db.prepare("SELECT rule_id, event_type, COUNT(*) as c FROM automation_analytics GROUP BY rule_id, event_type").all();
+  const rulesTriggeredToday = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='triggered' AND date(created_at)=?").get(today).c;
+  const messagesSentToday = db.prepare("SELECT COUNT(*) as c FROM messages WHERE direction='out' AND date(created_at)=? AND sent_by='auto'").get(today).c;
+  const templatesUsedToday = db.prepare("SELECT COUNT(*) as c FROM message_templates WHERE usage_count > 0").get().c;
+  const activeConversations = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='open' AND last_message_at >= ?").get(sevenDaysAgo).c;
+
+  const messagesPerChannel = db.prepare(`
+    SELECT c.name, COUNT(*) as count
+    FROM messages m
+    JOIN conversations conv ON conv.id = m.conversation_id
+    JOIN channels c ON c.id = conv.channel_id
+    WHERE m.created_at >= ? AND m.direction='in'
+    GROUP BY c.id
+    ORDER BY count DESC
+  `).all(sevenDaysAgo);
+
+  const triggersOverTime = db.prepare(`
+    SELECT date(created_at) as date, COUNT(*) as count
+    FROM automation_analytics
+    WHERE event_type='triggered' AND created_at >= ?
+    GROUP BY date(created_at)
+    ORDER BY date
+  `).all(sevenDaysAgo);
+
+  const topRules = db.prepare(`
+    SELECT r.id, r.name, COUNT(*) as count
+    FROM automation_analytics a
+    JOIN automation_rules r ON r.id = a.rule_id
+    WHERE a.event_type='executed' AND a.created_at >= ?
+    GROUP BY r.id
+    ORDER BY count DESC
+    LIMIT 10
+  `).all(sevenDaysAgo);
+
+  // Average response time: time between first inbound and first outbound reply
+  const avgResponse = db.prepare(`
+    SELECT AVG(
+      (julianday(first_out.created_at) - julianday(first_in.created_at)) * 24 * 60
+    ) as avg_minutes
+    FROM (
+      SELECT conversation_id, MIN(created_at) as created_at
+      FROM messages
+      WHERE direction='in' AND created_at >= ?
+      GROUP BY conversation_id
+    ) first_in
+    JOIN (
+      SELECT conversation_id, MIN(created_at) as created_at
+      FROM messages
+      WHERE direction='out' AND is_internal_note=0
+      GROUP BY conversation_id
+    ) first_out ON first_in.conversation_id = first_out.conversation_id
+    WHERE first_out.created_at > first_in.created_at
+  `).get(sevenDaysAgo);
+
+  const totalConversations = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE last_message_at >= ?").get(sevenDaysAgo).c;
+  const archivedConversations = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='archived' AND last_message_at >= ?").get(sevenDaysAgo).c;
+  const resolutionRate = totalConversations > 0 ? Math.round((archivedConversations / totalConversations) * 100) : 0;
+
   const recent = db.prepare("SELECT * FROM automation_analytics ORDER BY id DESC LIMIT 50").all();
-  res.json({ totalTriggered, totalExecuted, totalFailed, byRule, recent });
+
+  res.json({
+    totalTriggered,
+    totalExecuted,
+    totalFailed,
+    rules_triggered_today: rulesTriggeredToday,
+    messages_sent_today: messagesSentToday,
+    templates_used_today: templatesUsedToday,
+    active_conversations: activeConversations,
+    messages_per_channel: messagesPerChannel,
+    triggers_over_time: triggersOverTime,
+    top_rules: topRules,
+    avg_response_time_minutes: Math.round(avgResponse?.avg_minutes || 0),
+    resolution_rate: resolutionRate,
+    byRule: db.prepare("SELECT rule_id, event_type, COUNT(*) as c FROM automation_analytics GROUP BY rule_id, event_type").all(),
+    recent,
+  });
 }));
 
 // ─────────────────────────────────────────────────────────

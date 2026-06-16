@@ -93,7 +93,7 @@ function RulesTab() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.automationRules().then(d => { setRules(d.rules || []); setLoading(false); })
+    api.automationRules().then(d => { setRules(Array.isArray(d) ? d : d.rules || []); setLoading(false); })
       .catch(e => { toast.error(e.message); setLoading(false); });
   }, [toast]);
 
@@ -252,9 +252,9 @@ function RuleModal({ mode, rule, onClose, onSave }) {
   const [tags, setTags] = useState([]);
 
   useEffect(() => {
-    api.templates().then(d => setTemplates(d.templates || [])).catch(() => {});
+    api.templates().then(d => setTemplates(Array.isArray(d) ? d : d.templates || [])).catch(() => {});
     api.employees().then(d => setEmployees(d || [])).catch(() => {});
-    api.tags().then(d => setTags(d.tags || [])).catch(() => {});
+    api.tags().then(d => setTags(Array.isArray(d) ? d : d.tags || [])).catch(() => {});
   }, []);
 
   const handleSave = () => {
@@ -424,7 +424,7 @@ function TemplatesTab() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.templates().then(d => { setTemplates(d.templates || []); setLoading(false); })
+    api.templates().then(d => { setTemplates(Array.isArray(d) ? d : d.templates || []); setLoading(false); })
       .catch(e => { toast.error(e.message); setLoading(false); });
   }, [toast]);
 
@@ -637,7 +637,7 @@ function BroadcastsTab() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.broadcastCampaigns().then(d => { setBroadcasts(d.broadcasts || []); setLoading(false); })
+    api.broadcastCampaigns().then(d => { setBroadcasts(Array.isArray(d) ? d : d.broadcasts || []); setLoading(false); })
       .catch(e => { toast.error(e.message); setLoading(false); });
   }, [toast]);
 
@@ -791,8 +791,8 @@ function BroadcastModal({ onClose, onSave }) {
   const [channels, setChannels] = useState([]);
 
   useEffect(() => {
-    api.templates().then(d => setTemplates(d.templates || [])).catch(() => {});
-    api.tags().then(d => setTags(d.tags || [])).catch(() => {});
+    api.templates().then(d => setTemplates(Array.isArray(d) ? d : d.templates || [])).catch(() => {});
+    api.tags().then(d => setTags(Array.isArray(d) ? d : d.tags || [])).catch(() => {});
     api.channels().then(d => setChannels(d || [])).catch(() => {});
   }, []);
 
@@ -928,7 +928,7 @@ function TagsTab() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.tags().then(d => { setTags(d.tags || []); setLoading(false); })
+    api.tags().then(d => { setTags(Array.isArray(d) ? d : d.tags || []); setLoading(false); })
       .catch(e => { toast.error(e.message); setLoading(false); });
   }, [toast]);
 
