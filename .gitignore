@@ -28,3 +28,29 @@ crm.db
 crm.db-shm
 crm.db-wal
 .jwt_secret
+
+# FUSE filesystem artifacts (macOS/SSHFS)
+.fuse_hidden*
+
+# IDE / AI assistant configs
+.claude/
+
+# Development scratch / debug scripts
+scratch/
+
+# Temporary notes / analysis files
+NEXT_TASKS.md
+*_ANALYSIS.md
+*_AUDIT_REPORT.md
+*_DOCUMENTATION.md
+
+# Seed data (not needed in production)
+seed_data.json
+
+# Database uploads
+uploads/*.pdf
+uploads/*.jpg
+uploads/*.png
+uploads/*.jpeg
+uploads/*.doc
+uploads/*.docx
