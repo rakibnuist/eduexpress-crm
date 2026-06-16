@@ -768,66 +768,65 @@ export default function Conversations({ user }) {
                 const meta = getChannelMeta(conv.channel_type);
                 const sla = getSlaColor(conv.last_message_at);
                 return (
-                  <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
-                    className={`w-full text-left px-3 py-3 flex gap-3 transition-all outline-none border-l-[3px] ${isSel ? 'bg-blue-50/60 border-l-blue-600' : 'bg-white hover:bg-slate-50/70 border-l-transparent'}`}>
-                    <div className="relative flex-shrink-0">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
-                        {initials(conv.contact_name || 'C')}
-                      </div>
-                      <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-md flex items-center justify-center border-[1.5px] border-white text-[8px] font-black text-white shadow-sm ${meta.bg}`}>
-                        {meta.icon}
-                      </span>
-                      {conv.is_priority && (
-                        <span className="absolute -top-1 -right-1 text-amber-500"><Star size={10} fill="currentColor" /></span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-1">
-                        <div className="flex items-center gap-1 min-w-0">
-                          <p className={`text-xs truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
-                            {conv.contact_name || conv.contact_phone || 'Contact'}
-                          </p>
-                          {conv.assigned_to && (
-                            <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 truncate max-w-[80px]">
-                              {initials(conv.assigned_to)}
-                            </span>
-                          )}
+                    <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
+                      className={`w-full text-left px-3 py-2.5 flex gap-3 transition-all outline-none border-l-[3px] ${isSel ? 'bg-blue-50/60 border-l-blue-600' : 'bg-white hover:bg-slate-50/70 border-l-transparent'}`}>
+                      <div className="relative flex-shrink-0">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
+                          {initials(conv.contact_name || 'C')}
                         </div>
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">{timeAgo(conv.last_message_at)}</span>
-                      </div>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        {conv.last_message_direction === 'out' && !conv.unread_count && (
-                          conv.last_message_status === 'read' ? <CheckCheck size={11} className="text-sky-400 flex-shrink-0" /> :
-                          conv.last_message_status === 'failed' ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" /> :
-                          <CheckCheck size={11} className="text-slate-300 flex-shrink-0" />
+                        <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-md flex items-center justify-center border-[1.5px] border-white text-[8px] font-black text-white shadow-sm ${meta.bg}`}>
+                          {meta.icon}
+                        </span>
+                        {conv.is_priority && (
+                          <span className="absolute -top-1 -right-1 text-amber-500"><Star size={10} fill="currentColor" /></span>
                         )}
-                        <p className={`text-[11px] truncate ${conv.unread_count > 0 ? 'font-semibold text-slate-800' : 'text-slate-400'}`}>
-                          {conv.last_message || 'No messages yet'}
-                        </p>
                       </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-[9px] font-bold uppercase tracking-wide truncate" style={{ color: conv.channel_color || meta.color }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className={`text-xs truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
+                              {conv.contact_name || conv.contact_phone || 'Contact'}
+                            </p>
+                            {conv.assigned_to && (
+                              <span className="text-[8px] text-blue-600 font-medium flex-shrink-0 truncate max-w-[60px]">
+                                {initials(conv.assigned_to)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="text-[10px] text-slate-400 whitespace-nowrap">{timeAgo(conv.last_message_at)}</span>
+                            {conv.unread_count > 0 && (
+                              <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-4 text-center shadow-sm">
+                                {conv.unread_count}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {conv.last_message_direction === 'out' && !conv.unread_count && (
+                            conv.last_message_status === 'read' ? <CheckCheck size={11} className="text-sky-400 flex-shrink-0" /> :
+                            conv.last_message_status === 'failed' ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" /> :
+                            <CheckCheck size={11} className="text-slate-300 flex-shrink-0" />
+                          )}
+                          <p className={`text-[11px] truncate ${conv.unread_count > 0 ? 'font-semibold text-slate-800' : 'text-slate-400'}`}>
+                            {conv.last_message || 'No messages yet'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                          <span className="text-[9px] font-medium text-slate-400 truncate">
                             {conv.channel_name || meta.label}
                           </span>
                           {(conv.tags || []).slice(0, 2).map(tag => (
-                            <span key={tag.id} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white flex-shrink-0" style={{ backgroundColor: tag.color || '#64748b' }}>
+                            <span key={tag.id} className="text-[8px] font-bold px-1.5 py-0.5 rounded-full text-white flex-shrink-0" style={{ backgroundColor: tag.color || '#64748b' }}>
                               {tag.name}
                             </span>
                           ))}
                           {(conv.tags || []).length > 2 && (
-                            <span className="text-[9px] text-slate-400 font-medium">+{(conv.tags || []).length - 2}</span>
+                            <span className="text-[8px] text-slate-400 font-medium">+{(conv.tags || []).length - 2}</span>
                           )}
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sla}`} title="SLA indicator" />
                         </div>
-                        {conv.unread_count > 0 && (
-                          <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-4 text-center shadow-sm">
-                            {conv.unread_count}
-                          </span>
-                        )}
                       </div>
-                    </div>
-                  </button>
+                    </button>
                 );
               })
             )}
@@ -923,7 +922,7 @@ export default function Conversations({ user }) {
                           const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                           return (
                             <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1`}>
-                              <div className={`max-w-[75%] lg:max-w-[65%] rounded-2xl px-4 py-2.5 shadow-sm border relative group flex flex-col gap-0.5
+                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-4 py-2.5 shadow-sm border relative group flex flex-col gap-0.5 min-w-0 overflow-hidden
                                 ${m.is_internal_note ? 'bg-amber-50 text-amber-900 rounded-tl-md border-amber-200 border-dashed' :
                                   isIn ? 'bg-white text-slate-800 rounded-tl-md border-slate-100/80' : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-tr-md border-transparent'}`}>
                                 {!isIn && m.sent_by && !m.is_internal_note && (
@@ -945,7 +944,7 @@ export default function Conversations({ user }) {
                                   <div className={`mb-1 p-3 rounded-xl flex items-center gap-2.5 border ${isIn ? 'bg-slate-50 border-slate-100' : 'bg-white/10 border-white/10'}`}>
                                     <FileText size={20} className={isIn ? 'text-slate-400' : 'text-sky-200'} />
                                     <div>
-                                      <p className="text-xs font-bold truncate max-w-[180px]">{m.content || 'Document'}</p>
+                                      <p className="text-xs font-bold truncate max-w-[160px]">{m.content || 'Document'}</p>
                                       <a href={getMediaUrl(m)} download target="_blank" rel="noreferrer" className={`text-[10px] font-bold underline ${isIn ? 'text-blue-600' : 'text-sky-200'}`}>Download</a>
                                     </div>
                                   </div>
@@ -957,7 +956,7 @@ export default function Conversations({ user }) {
                                   <video controls className="max-w-full max-h-56 rounded-xl mb-1" src={getMediaUrl(m)} />
                                 )}
                                 {(m.type === 'text' || !m.type || (!['image','document','audio','voice','video'].includes(m.type)) || (['image','video'].includes(m.type) && m.content && !['[Image]','[Video]'].includes(m.content) && m.content !== m.media_url)) && (
-                                  <p className="text-xs leading-relaxed whitespace-pre-wrap font-medium">{m.content}</p>
+                                  <p className="text-xs leading-relaxed whitespace-pre-wrap break-words font-medium">{m.content}</p>
                                 )}
                                 <div className={`flex items-center justify-end gap-1 text-[9px] font-semibold ${isIn ? 'text-slate-400' : 'text-sky-200/70'}`}>
                                   <span>{timeStr}</span>
