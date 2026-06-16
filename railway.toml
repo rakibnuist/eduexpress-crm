@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci --prefer-offline && npm run build"
+buildCommand = "npm run build"
 
 [deploy]
 startCommand = "NODE_ENV=production DB_PATH=/data/crm.db node server.js"
