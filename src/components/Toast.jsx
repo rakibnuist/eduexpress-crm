@@ -66,7 +66,7 @@ function ToastItem({ t, onClose }) {
       <div className="flex items-start gap-3 px-4 py-3">
         <Icon size={18} className={`${s.iconCls} flex-shrink-0 mt-0.5`} />
         <p className={`flex-1 text-sm font-medium ${s.text} whitespace-pre-wrap`}>{t.message}</p>
-        <button onClick={onClose} className={`${s.iconCls} hover:opacity-70`}><X size={15} /></button>
+        <button onClick={onClose} className={`${s.iconCls} hover:opacity-70`} aria-label="Close notification"><X size={15} /></button>
       </div>
       <div className={`h-0.5 ${s.bar}`} />
     </div>

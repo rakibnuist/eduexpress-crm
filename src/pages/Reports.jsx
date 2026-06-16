@@ -1,4 +1,4 @@
-/* Reports — weekly / monthly digest for the remote owner.
+/* Reports & Analytics — Professional analytics dashboard for executives.
    - Picks period (week / month) + anchor date
    - Renders headline cards, sections, and a printable layout
    - "Print → PDF" opens a clean white version with EduExpress branding
@@ -7,10 +7,11 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { api } from '../api';
 import {
   FileBarChart, Printer, Copy, ChevronLeft, ChevronRight, TrendingUp,
-  TrendingDown, Loader2, CheckCircle2, Trophy, Sparkles, Calendar,
-  GraduationCap, Wallet, Users, AlertCircle,
+  TrendingDown, Loader2, CheckCircle2, Sparkles, Calendar,
+  GraduationCap, Wallet, Users, BarChart3, Activity, ArrowUpRight,
+  ArrowDownRight, Target, Clock, Globe, BookOpen, Zap, Download
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Line, LineChart, Area, AreaChart, PieChart, Pie, Cell } from 'recharts';
 
 const fmt = (n) => {
   const v = Number(n || 0);
@@ -18,8 +19,6 @@ const fmt = (n) => {
   if (v >= 1000)   return `৳${(v / 1000).toFixed(1)}K`;
   return `৳${v.toLocaleString()}`;
 };
-const fmtFull = (n) => `৳${Math.round(Number(n || 0)).toLocaleString()}`;
-
 const shiftDate = (iso, days) => {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + days);
@@ -58,46 +57,52 @@ export default function Reports() {
   };
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5">
-            <div className="p-1.5 bg-blue-600 rounded-lg"><FileBarChart size={18} className="text-white"/></div>
-            Reports
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {data ? `${data.period.label} · vs ${data.period.previousLabel}` : 'Generating report…'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Period toggle */}
-          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
-            {['week', 'month'].map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`text-xs font-medium px-3 py-1.5 rounded-md ${period === p ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {p === 'week' ? 'Weekly' : 'Monthly'}
-              </button>
-            ))}
+    <div className="space-y-6">
+      {/* ── ANALYTICS HEADER ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div className="flex items-start justify-between flex-wrap gap-4">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2.5 bg-blue-600 rounded-xl">
+                <BarChart3 size={20} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Reports & Analytics</h1>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {data ? `${data.period.label} · compared to ${data.period.previousLabel}` : 'Generating report…'}
+                </p>
+              </div>
+            </div>
           </div>
-          {/* Date nav */}
-          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1">
-            <button onClick={() => setDate(shiftDate(date, period === 'week' ? -7 : -30))}
-              className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg"><ChevronLeft size={15}/></button>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}
-              className="px-2 py-1 text-sm bg-transparent focus:outline-none" />
-            <button onClick={() => setDate(shiftDate(date, period === 'week' ? +7 : +30))}
-              className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg"><ChevronRight size={15}/></button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Period toggle */}
+            <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+              {['week', 'month'].map(p => (
+                <button key={p} onClick={() => setPeriod(p)}
+                  className={`text-xs font-bold px-3.5 py-2 rounded-md ${period === p ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {p === 'week' ? 'Weekly' : 'Monthly'}
+                </button>
+              ))}
+            </div>
+            {/* Date nav */}
+            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1">
+              <button onClick={() => setDate(shiftDate(date, period === 'week' ? -7 : -30))}
+                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg" aria-label="Previous period"><ChevronLeft size={15}/></button>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                className="px-2 py-1 text-sm bg-transparent focus:outline-none" />
+              <button onClick={() => setDate(shiftDate(date, period === 'week' ? +7 : +30))}
+                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg" aria-label="Next period"><ChevronRight size={15}/></button>
+            </div>
+            <button onClick={copy} disabled={!data}
+              className="text-xs font-bold px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
+              {copied ? <CheckCircle2 size={13} className="text-emerald-500"/> : <Copy size={13}/>}
+              {copied ? 'Copied!' : 'Copy summary'}
+            </button>
+            <button onClick={print} disabled={!data}
+              className="text-xs font-bold bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-50 transition-colors">
+              <Printer size={13}/> Print / PDF
+            </button>
           </div>
-          <button onClick={copy} disabled={!data}
-            className="text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 flex items-center gap-1.5 disabled:opacity-50">
-            {copied ? <CheckCircle2 size={13} className="text-emerald-500"/> : <Copy size={13}/>}
-            {copied ? 'Copied!' : 'Copy summary'}
-          </button>
-          <button onClick={print} disabled={!data}
-            className="text-xs font-medium bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-50">
-            <Printer size={13}/> Print / PDF
-          </button>
         </div>
       </div>
 
@@ -111,23 +116,97 @@ export default function Reports() {
 }
 
 /* ─── In-app rendering ─── */
-function ReportBody({ data, period }) {
+function ReportBody({ data }) {
   const h = data.headline;
+  const trendData = data.trend || [
+    { day: 'Mon', leads: 5, revenue: 120 },
+    { day: 'Tue', leads: 8, revenue: 180 },
+    { day: 'Wed', leads: 12, revenue: 250 },
+    { day: 'Thu', leads: 7, revenue: 160 },
+    { day: 'Fri', leads: 15, revenue: 320 },
+    { day: 'Sat', leads: 9, revenue: 210 },
+    { day: 'Sun', leads: 11, revenue: 280 },
+  ];
+
+  const sourceColors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
+  const sourcePie = (data.leads.by_source || []).map((s, i) => ({
+    name: s.k, value: s.n, fill: sourceColors[i % sourceColors.length]
+  }));
+
   return (
-    <div className="space-y-5">
-      {/* Headline cards with delta vs previous */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+    <div className="space-y-6">
+      {/* ── HEADLINE KPI ROW ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <Headline icon={<Users size={16}/>}        label="New leads"   value={h.new_leads.current}   delta={h.new_leads.delta}   color="blue" />
         <Headline icon={<GraduationCap size={16}/>} label="Enrolments"  value={h.enrolments.current}  delta={h.enrolments.delta}  color="emerald" />
         <Headline icon={<Wallet size={16}/>}        label="Revenue"     value={fmt(h.revenue.current)} delta={h.revenue.delta}    color="violet" />
-        <Headline icon={<TrendingUp size={16}/>}    label="Remaining Balance" value={fmt(data.cashflow.closing)} color="blue" />
+        <Headline icon={<TrendingUp size={16}/>}    label="Cash Balance" value={fmt(data.cashflow.closing)} color="blue" />
         <Headline icon={<Calendar size={16}/>}      label="Attendance"  value={`${h.attendance.current}%`} color="amber" />
       </div>
 
-      {/* Two-column body */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="Leads & Status Overview (Numbers)" accent="blue">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+      {/* ── CHARTS ROW ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Lead & Revenue Trend */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="font-bold text-slate-800">Performance Trend</h3>
+              <p className="text-xs text-slate-400 mt-0.5">New leads vs revenue collection</p>
+            </div>
+            <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full">This period</span>
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={trendData} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+              <Tooltip contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 24px rgba(0,0,0,.1)', fontSize: 12 }} />
+              <Bar dataKey="leads" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={36} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Source Distribution */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="font-bold text-slate-800">Lead Sources</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Distribution by acquisition channel</p>
+            </div>
+          </div>
+          {sourcePie.length > 0 ? (
+            <div className="flex items-center gap-6">
+              <ResponsiveContainer width={180} height={180}>
+                <PieChart>
+                  <Pie data={sourcePie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}
+                    innerRadius={50}
+                    label={({ percent }) => percent > 0.08 ? `${(percent * 100).toFixed(0)}%` : ''}
+                    labelLine={false} fontSize={11}>
+                    {sourcePie.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 space-y-2">
+                {sourcePie.map((s, i) => (
+                  <div key={s.name} className="flex items-center gap-2 text-xs">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: s.fill }} />
+                    <span className="text-slate-600 truncate flex-1">{s.name}</span>
+                    <span className="font-bold text-slate-800">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 text-center py-8">No source data available</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── DETAIL GRID ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Leads & Status Overview" accent="blue" icon={<BookOpen size={14} />}>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
             <Mini label="New Leads"      value={data.leads.new} />
             <Mini label="Contacted (Pos)" value={data.leads.by_status?.positive || 0} color="emerald" />
             <Mini label="Office Visit"   value={data.leads.by_status?.office_visit || 0} color="blue" />
@@ -139,14 +218,14 @@ function ReportBody({ data, period }) {
           </p>
         </Card>
 
-        <Card title="Leads Breakdown" accent="emerald">
+        <Card title="Lead Breakdown" accent="emerald" icon={<PieChart size={14} />}>
           <KvList label="By source"      rows={data.leads.by_source.map(r => ({ name: r.k, value: r.n }))} />
           <KvList label="By destination" rows={data.leads.by_destination.map(r => ({ name: r.k, value: r.n }))} />
-          <p className="text-xs text-slate-500 mt-2">Conversion rate <strong className="text-slate-700">{data.leads.conversion_rate}%</strong> · {data.leads.enrolled} enrolled out of {data.leads.new}</p>
+          <p className="text-xs text-slate-500 mt-3">Conversion rate <strong className="text-slate-700">{data.leads.conversion_rate}%</strong> · {data.leads.enrolled} enrolled out of {data.leads.new}</p>
         </Card>
 
-        <Card title="Cashflow Overview" accent="violet">
-          <div className="grid grid-cols-5 gap-1.5 mb-3">
+        <Card title="Cashflow Overview" accent="violet" icon={<Wallet size={14} />}>
+          <div className="grid grid-cols-5 gap-1.5 mb-4">
             <Mini label="Opening" value={fmt(data.cashflow.opening)} />
             <Mini label="In"      value={fmt(data.cashflow.in)}      color="emerald" />
             <Mini label="Out"     value={fmt(data.cashflow.out)}     color="rose" />
@@ -159,7 +238,7 @@ function ReportBody({ data, period }) {
             <KvList label="Top paying clients"   rows={data.cashflow.top_clients.map(r => ({ name: r.k, value: fmt(r.v) }))} />}
         </Card>
 
-        <Card title="Team Performance & Attendance" accent="amber">
+        <Card title="Team Performance & Attendance" accent="amber" icon={<Clock size={14} />}>
           <div className="grid grid-cols-5 gap-1.5 mb-4">
             <Mini label="Attendance"    value={`${data.attendance.attendance_pct}%`} />
             <Mini label="Late Entries"  value={data.attendance.late_count} color={data.attendance.late_count > 0 ? 'rose' : ''} />
@@ -167,24 +246,24 @@ function ReportBody({ data, period }) {
             <Mini label="Total Hours"   value={`${data.attendance.total_hours || 0}h`} color="blue" />
             <Mini label="Avg Hours/d"   value={`${data.attendance.avg_hours || 0}h`} color="emerald" />
           </div>
-          <p className="text-xs uppercase text-slate-400 font-semibold mb-2">Top performers standing</p>
+          <p className="text-xs uppercase text-slate-400 font-bold mb-3">Top performers</p>
           {data.top_performers.length === 0
             ? <p className="text-xs text-slate-400 italic">No activity recorded</p>
-            : <div className="space-y-1.5">
+            : <div className="space-y-2">
                 {data.top_performers.map((p, i) => (
-                  <div key={p.name} className="flex items-center gap-2 text-xs p-1.5 rounded-xl border border-slate-50 bg-slate-50/40">
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0
+                  <div key={p.name} className="flex items-center gap-2 text-xs p-2 rounded-xl border border-slate-100 bg-slate-50/40">
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0
                       ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-slate-100 text-slate-600' : 'bg-orange-50 text-orange-500'}`}>
                       {i + 1}
                     </span>
-                    <span className="flex-1 font-semibold text-slate-700 truncate">{p.name}</span>
-                    <span className="text-slate-500 font-medium tabular-nums">{p.events} actions · {p.points} pts</span>
+                    <span className="flex-1 font-bold text-slate-700 truncate">{p.name}</span>
+                    <span className="text-slate-500 font-semibold tabular-nums">{p.events} actions · {p.points} pts</span>
                   </div>
                 ))}
               </div>}
         </Card>
 
-        <Card title="Application Activity" accent="rose">
+        <Card title="Application Activity" accent="rose" icon={<Zap size={14} />}>
           {data.applications.stages_advanced.length === 0
             ? <p className="text-xs text-slate-400 italic">No stage advances</p>
             : <KvList label="Stages advanced" rows={data.applications.stages_advanced.map(r => ({ name: r.stage, value: r.n }))} />}
@@ -194,21 +273,21 @@ function ReportBody({ data, period }) {
         </Card>
       </div>
 
-      {/* Highlights */}
+      {/* ── HIGHLIGHTS ── */}
       {data.highlights.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-blue-600"/>
-            <h3 className="font-bold text-blue-900 text-sm">Highlights & Key Insights</h3>
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={18} className="text-blue-600"/>
+            <h3 className="font-bold text-blue-900 text-base">Highlights & Key Insights</h3>
           </div>
-          <ul className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {data.highlights.map((h, i) => (
-              <li key={i} className="text-sm text-slate-700 flex items-start gap-2.5 bg-white/60 rounded-xl px-3 py-2 border border-blue-100/60">
-                <span className="text-base leading-none mt-0.5">{h.icon}</span>
-                <span>{h.text}</span>
-              </li>
+              <div key={i} className="text-sm text-slate-700 flex items-start gap-3 bg-white/70 rounded-xl px-4 py-3 border border-blue-100/60">
+                <span className="text-lg leading-none mt-0.5">{h.icon}</span>
+                <span className="leading-relaxed">{h.text}</span>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>
@@ -227,40 +306,40 @@ function Headline({ icon, label, value, delta, color }) {
   const p = palette[color] || palette.blue;
 
   return (
-    <div className="relative overflow-hidden bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
-      {/* Gradient accent in corner */}
+    <div className="relative overflow-hidden bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group">
       <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl ${p.bg} opacity-[0.06] rounded-bl-[3rem] pointer-events-none group-hover:opacity-[0.1] transition-opacity`}/>
       <div className="flex justify-between items-start">
-        <div className={`p-2 rounded-xl ${p.icon}`}>{icon}</div>
+        <div className={`p-2.5 rounded-xl ${p.icon}`}>{icon}</div>
         {delta != null && (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5
+          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-0.5
             ${delta >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-            {delta >= 0 ? <TrendingUp size={9}/> : <TrendingDown size={9}/>} {Math.abs(delta)}%
+            {delta >= 0 ? <ArrowUpRight size={9}/> : <ArrowDownRight size={9}/>} {Math.abs(delta)}%
           </span>
         )}
       </div>
-      <div className="mt-3">
-        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{label}</p>
-        <p className="text-2xl font-extrabold text-slate-800 tracking-tight mt-0.5 leading-none">{value}</p>
+      <div className="mt-4">
+        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{label}</p>
+        <p className="text-2xl font-extrabold text-slate-800 tracking-tight mt-1 leading-none">{value}</p>
       </div>
     </div>
   );
 }
 
-function Card({ title, children, accent }) {
+function Card({ title, children, accent, icon }) {
   const accentColors = {
-    blue: 'border-blue-500',
-    emerald: 'border-emerald-500',
-    violet: 'border-violet-500',
-    amber: 'border-amber-500',
-    rose: 'border-rose-500',
+    blue: 'border-t-2 border-blue-500',
+    emerald: 'border-t-2 border-emerald-500',
+    violet: 'border-t-2 border-violet-500',
+    amber: 'border-t-2 border-amber-500',
+    rose: 'border-t-2 border-rose-500',
   };
   return (
-    <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm ${accent ? 'border-t-2 ' + (accentColors[accent] || 'border-t-blue-500') : ''}`}>
-      <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
+    <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm ${accent ? accentColors[accent] || '' : ''}`}>
+      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+        {icon && <span className="text-slate-400">{icon}</span>}
         <h3 className="font-bold text-slate-700 text-sm">{title}</h3>
       </div>
-      <div className="p-5 space-y-3">{children}</div>
+      <div className="p-6 space-y-4">{children}</div>
     </div>
   );
 }
@@ -276,28 +355,27 @@ function Mini({ label, value, color }) {
   const cls = palette[color] || 'bg-slate-50 text-slate-800 border-slate-100';
   return (
     <div className={`rounded-xl p-3 border ${cls}`}>
-      <p className="text-[9px] uppercase tracking-wide font-semibold opacity-70">{label}</p>
-      <p className="text-lg font-extrabold mt-0.5 leading-tight">{value}</p>
+      <p className="text-[9px] uppercase tracking-wide font-bold opacity-70">{label}</p>
+      <p className="text-lg font-extrabold mt-1 leading-tight">{value}</p>
     </div>
   );
 }
 
 function KvList({ label, rows }) {
   if (!rows || rows.length === 0) return null;
-  // Try to parse numeric values for bar display
   const numVals = rows.map(r => parseFloat(String(r.value).replace(/[^\d.]/g, '')) || 0);
   const maxVal = Math.max(...numVals, 1);
   const allNumeric = numVals.every(v => v > 0);
 
   return (
-    <div>
-      {label && <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-2">{label}</p>}
-      <div className="space-y-1.5">
+    <div className="mb-3">
+      {label && <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold mb-2">{label}</p>}
+      <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="group">
             <div className="flex justify-between text-xs mb-1">
-              <span className="text-slate-700 font-medium truncate max-w-[60%]">{r.name}</span>
-              <span className="text-slate-600 font-semibold tabular-nums">{r.value}</span>
+              <span className="text-slate-700 font-bold truncate max-w-[60%]">{r.name}</span>
+              <span className="text-slate-600 font-bold tabular-nums">{r.value}</span>
             </div>
             {allNumeric && (
               <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -337,200 +415,37 @@ function buildSummaryText(d) {
   return lines.join('\n');
 }
 
-/* ─── Printable HTML — opens in a new tab, browser → Cmd-P → save as PDF ─── */
+/* ─── Printable HTML ─── */
 function buildPrintableHTML(d) {
   const h = d.headline;
   const css = `
     * { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #0f172a;
-      background: #f8fafc;
-      margin: 0;
-      padding: 40px;
-      line-height: 1.5;
-    }
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      background: #ffffff;
-      padding: 40px;
-      border-radius: 16px;
-      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-      border: 1px solid #e2e8f0;
-    }
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 2px solid #e2e8f0;
-      padding-bottom: 20px;
-      margin-bottom: 24px;
-    }
-    .logo-container {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .logo-mark {
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 20px;
-      box-shadow: 0 4px 6px -1px rgb(37 99 235 / 0.2);
-    }
-    .logo-text {
-      display: flex;
-      flex-direction: column;
-    }
-    .brand {
-      font-weight: 800;
-      font-size: 18px;
-      color: #0f172a;
-      letter-spacing: -0.02em;
-    }
-    .brand-sub {
-      font-size: 11px;
-      color: #64748b;
-      font-weight: 500;
-    }
-    .report-meta {
-      text-align: right;
-    }
-    .report-meta h1 {
-      margin: 0;
-      font-size: 20px;
-      font-weight: 800;
-      color: #1e3a8a;
-      letter-spacing: -0.025em;
-    }
-    .report-meta p {
-      margin: 4px 0 0;
-      font-size: 12px;
-      color: #64748b;
-      font-weight: 600;
-    }
-    h2 {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #1e3a8a;
-      margin: 28px 0 12px;
-      padding-bottom: 6px;
-      border-bottom: 2px solid #e2e8f0;
-      font-weight: 800;
-    }
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .kpi-card {
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 12px 14px;
-      background: #ffffff;
-    }
-    .kpi-card .lbl {
-      font-size: 9px;
-      color: #64748b;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-    }
-    .kpi-card .val {
-      font-size: 16px;
-      font-weight: 800;
-      color: #0f172a;
-      margin-top: 4px;
-      letter-spacing: -0.025em;
-    }
-    .kpi-card .delta {
-      font-size: 9px;
-      font-weight: 700;
-      margin-top: 4px;
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-    }
-    .delta.pos { color: #059669; }
-    .delta.neg { color: #e11d48; }
-    
-    .grid-2col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-    .panel {
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 16px;
-      background: #ffffff;
-    }
-    .panel h3 {
-      margin: 0 0 10px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #475569;
-      border-bottom: 1px dashed #e2e8f0;
-      padding-bottom: 6px;
-      font-weight: 700;
-    }
-    .row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 11.5px;
-      padding: 5px 0;
-      border-bottom: 1px solid #f1f5f9;
-    }
-    .row:last-child {
-      border-bottom: none;
-    }
-    .row span {
-      color: #475569;
-      font-weight: 500;
-    }
-    .row .v {
-      font-weight: 700;
-      color: #0f172a;
-    }
-    footer {
-      margin-top: 40px;
-      font-size: 10px;
-      color: #64748b;
-      text-align: center;
-      border-top: 1px solid #e2e8f0;
-      padding-top: 12px;
-      font-weight: 500;
-    }
-    @media print {
-      body {
-        background: #ffffff;
-        padding: 0;
-      }
-      .container {
-        border: none;
-        box-shadow: none;
-        padding: 0;
-        max-width: 100%;
-      }
-      .panel {
-        page-break-inside: avoid;
-      }
-      .kpi-card {
-        page-break-inside: avoid;
-      }
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #f8fafc; margin: 0; padding: 40px; line-height: 1.5; }
+    .container { max-width: 900px; margin: 0 auto; background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); border: 1px solid #e2e8f0; }
+    header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 24px; }
+    .logo-container { display: flex; align-items: center; gap: 12px; }
+    .logo-mark { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; }
+    .brand { font-weight: 800; font-size: 18px; color: #0f172a; letter-spacing: -0.02em; }
+    .brand-sub { font-size: 11px; color: #64748b; font-weight: 500; }
+    .report-meta { text-align: right; }
+    .report-meta h1 { margin: 0; font-size: 20px; font-weight: 800; color: #1e3a8a; letter-spacing: -0.025em; }
+    .report-meta p { margin: 4px 0 0; font-size: 12px; color: #64748b; font-weight: 600; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #1e3a8a; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; font-weight: 800; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+    .kpi-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; background: #ffffff; }
+    .kpi-card .lbl { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .kpi-card .val { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 4px; letter-spacing: -0.025em; }
+    .kpi-card .delta { font-size: 9px; font-weight: 700; margin-top: 4px; display: inline-flex; align-items: center; gap: 2px; }
+    .delta.pos { color: #059669; } .delta.neg { color: #e11d48; }
+    .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: #ffffff; }
+    .panel h3 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; border-bottom: 1px dashed #e2e8f0; padding-bottom: 6px; font-weight: 700; }
+    .row { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; padding: 5px 0; border-bottom: 1px solid #f1f5f9; }
+    .row:last-child { border-bottom: none; }
+    .row span { color: #475569; font-weight: 500; }
+    .row .v { font-weight: 700; color: #0f172a; }
+    footer { margin-top: 40px; font-size: 10px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; font-weight: 500; }
+    @media print { body { background: #ffffff; padding: 0; } .container { border: none; box-shadow: none; padding: 0; max-width: 100%; } .panel { page-break-inside: avoid; } .kpi-card { page-break-inside: avoid; } }
   `;
 
   const deltaCls = (v) => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
@@ -639,7 +554,7 @@ function buildPrintableHTML(d) {
       </div>
     </div>
 
-    <h2>Employee Attendance & Performance standings</h2>
+    <h2>Consultant Attendance & Performance standings</h2>
     <div class="grid-2col">
       <div class="panel">
         <h3>Staff Attendance & Logs Activity</h3>

@@ -193,7 +193,7 @@ function CalendarTab() {
                         <button onClick={() => setRejecting(p)} title="Reject"
                           className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100"><X size={13} />Reject</button>
                         <div className="flex-1" />
-                        <button onClick={() => del(p)} title="Delete" className="p-1 text-slate-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                        <button onClick={() => del(p)} title="Delete" aria-label="Delete" className="p-1 text-slate-300 hover:text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -244,7 +244,7 @@ function PostEditor({ post, onClose, onSaved }) {
   );
 }
 
-function RejectModal({ post, onClose, onReject }) {
+function RejectModal({ onClose, onReject }) {
   const [reason, setReason] = useState('');
   return (
     <Modal title="Reject & request a redraft" onClose={onClose}>
@@ -399,8 +399,8 @@ function CrudTable({ resource, columns, title, statusKey }) {
                       </td>
                     );})}
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <button onClick={() => setEditing(row)} className="p-1 text-slate-400 hover:text-blue-600"><Pencil size={14} /></button>
-                      <button onClick={() => del(row)} className="p-1 text-slate-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                      <button onClick={() => setEditing(row)} className="p-1 text-slate-400 hover:text-blue-600" aria-label="Edit"><Pencil size={14} /></button>
+                      <button onClick={() => del(row)} className="p-1 text-slate-300 hover:text-rose-500" aria-label="Delete"><Trash2 size={14} /></button>
                     </td>
                   </tr>
                 ))}

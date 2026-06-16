@@ -2,7 +2,7 @@
    Drag a lead card from one column into another → updates lead_status
    server-side with optimistic UI + toast. KPI strip on top shows
    overall pipeline health at a glance. */
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import Modal from '../components/Modal';
@@ -218,7 +218,7 @@ function LeadCard({ lead: l, onEdit, onOpen, onDragStart, onDragEnd, isDraggingS
           <p className="font-semibold text-sm text-slate-800 truncate">{l.client_name}</p>
           <p className="text-[11px] text-slate-400 font-mono">{l.lead_id}</p>
         </div>
-        <button onClick={onEdit} className="p-1 text-slate-300 hover:text-blue-500 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={onEdit} className="p-1 text-slate-300 hover:text-blue-500 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Edit">
           <Pencil size={12}/>
         </button>
       </div>

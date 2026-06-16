@@ -6,8 +6,7 @@ import { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { api } from '../api';
 import {
-  Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Trash2,
-  X, Banknote, GraduationCap,
+  Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X, Banknote, GraduationCap,
 } from 'lucide-react';
 
 const isLikelyMonthSheet = (name) =>
@@ -127,7 +126,7 @@ function parseCashflow(workbook, fileName) {
 }
 
 /* ─── Application parser — Bangladesh / China sheets in File Updates 2026 ─── */
-function parseApplications(workbook, fileName) {
+function parseApplications(workbook) {
   const rows = [];
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -158,15 +157,6 @@ function parseApplications(workbook, fileName) {
     if (cName === -1) continue;
 
     // Destination guess: sheet name (Bangladesh, China, …) — used when row lacks one
-    const destFromSheet = /china/i.test(sheetName) ? 'China' :
-                          /malta/i.test(sheetName) ? 'Malta' :
-                          /hungary/i.test(sheetName) ? 'Hungary' :
-                          /greece/i.test(sheetName) ? 'Greece' :
-                          /estonia/i.test(sheetName) ? 'Estonia' :
-                          /bangladesh|bd/i.test(sheetName) ? null : null;
-    // For 'Bangladesh' sheet, students are Bangladeshi but the study destination
-    // is implied as 'China' by the workbook context (most rows in Bangladesh
-    // sheet are MBBS/Bachelor heading to China).
     const studyDest = /china/i.test(sheetName) ? 'China'
                     : /malta/i.test(sheetName) ? 'Malta'
                     : 'China'; // sensible default for EduExpress workbook
@@ -277,7 +267,7 @@ function ImporterCard({ title, accept, icon, parse, submit, summaryFields, label
           <p className="text-xs text-slate-500">{accept}</p>
         </div>
         {(fileName || result) && (
-          <button onClick={cancel} className="p-1 text-slate-400 hover:text-rose-500 rounded"><X size={16}/></button>
+          <button onClick={cancel} className="p-1 text-slate-400 hover:text-rose-500 rounded" aria-label="Cancel import"><X size={16}/></button>
         )}
       </div>
 

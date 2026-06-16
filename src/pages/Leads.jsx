@@ -1,14 +1,13 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useSearchParams, Link, useNavigate, useLocation } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
 import { useToast } from '../components/Toast';
 import { 
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, X,
   LayoutGrid, Table as TableIcon, GripVertical, Phone, MapPin, User,
-  Calendar, DollarSign, Filter, Globe, CalendarDays, AlertCircle, CheckCircle2, XCircle, Building2, FolderOpen
+  Calendar, Filter, CalendarDays, Building2, FolderOpen, ArrowRight
 } from 'lucide-react';
 
 const STAGES = [
@@ -23,7 +22,7 @@ const STAGES = [
 
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
-export default function Leads({ user }) {
+export default function Leads() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlView = searchParams.get('view');
 
@@ -76,6 +75,8 @@ export default function Leads({ user }) {
   const [deleting, setDeleting] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [bulkAssignConsultant, setBulkAssignConsultant] = useState('');
   const searchRef = useRef();
   const navigate = useNavigate();
   const toast = useToast();
@@ -132,13 +133,6 @@ export default function Leads({ user }) {
     api.applicationMeta().then(d => setStages(d.stages)).catch(() => {});
   }, []);
 
-  const handleSetView = (v) => {
-    setView(v);
-    if (v === 'kanban') {
-      setFilters(f => ({ ...f, status: '', page: 1 }));
-    }
-  };
-
   function setFilter(key, val) {
     setFilters(f => ({ ...f, [key]: val, page: 1 }));
   }
@@ -170,19 +164,50 @@ export default function Leads({ user }) {
     }
   }
 
+  async function handleBulkAssign() {
+    if (!bulkAssignConsultant) {
+      toast.error('Please select a consultant');
+      return;
+    }
+    try {
+      const res = await api.bulkAssignLeads(selectedIds, bulkAssignConsultant);
+      setSelectedIds([]);
+      setBulkAssigning(false);
+      setBulkAssignConsultant('');
+      load();
+      toast.success(`Assigned ${res.updated} leads to ${bulkAssignConsultant}`);
+    } catch (e) {
+      toast.error(e.message || 'Could not assign leads');
+    }
+  }
+
   function exportCSV() {
     const list = view === 'kanban' ? Object.values(byStatus).flat() : data.leads;
+    if (!list.length) { toast.info('No leads to export'); return; }
     const headers = ['Lead ID', 'Name', 'Phone', 'Email', 'Destination', 'Education', 'GPA', 'English', 'Program', 'Source', 'Status', 'Consultant', 'Fee', 'Paid', 'Balance', 'Payment', 'Follow-up', 'Notes'];
+    const escape = (v) => {
+      const s = v == null ? '' : String(v);
+      if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    };
     const rows = list.map(l => [
       l.lead_id, l.client_name, l.phone, l.email, l.destination, l.last_education, l.gpa, l.english_score,
       l.program, l.lead_source, l.lead_status, l.assigned_consultant, l.service_fee, l.paid, l.balance,
-      l.payment_status, l.next_followup, (l.notes || '').replace(/,/g, ';')
-    ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+      l.payment_status, l.next_followup, l.notes
+    ].map(escape));
+    const csv = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.href = url;
     a.download = `leads_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${list.length} leads to CSV`);
   }
 
   const stats = useMemo(() => {
@@ -268,9 +293,14 @@ export default function Leads({ user }) {
         <div className="flex items-center gap-3">
           <div className="flex gap-2">
             {selectedIds.length > 0 && (
-              <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm select-none cursor-pointer">
-                <Trash2 size={15} /> Delete Selected ({selectedIds.length})
-              </button>
+              <>
+                <button onClick={() => setBulkAssigning(true)} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-100 transition-colors shadow-sm select-none cursor-pointer">
+                  <User size={15} /> Assign Consultant ({selectedIds.length})
+                </button>
+                <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm select-none cursor-pointer">
+                  <Trash2 size={15} /> Delete Selected ({selectedIds.length})
+                </button>
+              </>
             )}
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
               <Download size={15} /> Export CSV
@@ -332,12 +362,12 @@ export default function Leads({ user }) {
           <div className="relative flex-1 min-w-48">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input ref={searchRef}
-              className="pl-10 pr-9 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
+              className="pl-10 pr-9 h-10 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
               placeholder="Search leads by name, phone, ID, email..."
               value={filters.search}
               onChange={e => setFilter('search', e.target.value)} />
             {filters.search && (
-              <button onClick={() => setFilter('search', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-all">
+              <button onClick={() => setFilter('search', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-all" aria-label="Clear search">
                 <X size={13} />
               </button>
             )}
@@ -502,7 +532,14 @@ export default function Leads({ user }) {
                         />
                       </td>
 
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-semibold">{l.assigned_consultant || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-semibold">
+                        {l.employee_name ? (
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-400" />
+                            {l.employee_name}
+                          </span>
+                        ) : l.assigned_consultant || '—'}
+                      </td>
                       <td className="py-3 px-3.5 text-right text-slate-600 text-xs font-semibold tabular-nums">{l.service_fee ? '৳' + l.service_fee.toLocaleString() : '—'}</td>
                       <td className="py-3 px-3.5 text-right text-emerald-600 text-xs font-bold tabular-nums bg-emerald-50/30">{l.paid ? '৳' + l.paid.toLocaleString() : '—'}</td>
                       <td className="py-3 px-3.5 text-right text-xs font-bold tabular-nums">
@@ -525,8 +562,19 @@ export default function Leads({ user }) {
                       </td>
                       <td className="py-3 px-3.5">
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Pencil size={13} /></button>
-                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={13} /></button>
+                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" aria-label="Edit lead"><Pencil size={13} /></button>
+                          {l.lead_status === 'File Opened' || l.lead_status === 'Enrolled' ? (
+                            <Link to={`/applications?search=${l.lead_id}`} className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View in Applications"><FolderOpen size={13} /></Link>
+                          ) : (
+                            <button onClick={async () => {
+                              try {
+                                await api.updateLead(l.id, { ...l, lead_status: 'File Opened', application_stage: 'documents' });
+                                toast.success(`${l.client_name} moved to Applications`);
+                                load();
+                              } catch (err) { toast.error(err.message || 'Could not convert'); }
+                            }} className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="Convert to Application"><ArrowRight size={13} /></button>
+                          )}
+                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" aria-label="Delete lead"><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -572,7 +620,7 @@ export default function Leads({ user }) {
       ) : (
         /* KANBAN BOARD VIEW */
         <div className="flex gap-4 overflow-x-auto pb-5 -mx-2 px-2" style={{ minHeight: '66vh' }}>
-          {STAGES.map(({ status, col, border, light, ring }) => {
+          {STAGES.map(({ status, col, border, ring }) => {
             const leads = byStatus[status] || [];
             const dueTodayCount = leads.filter(l => l.next_followup === today).length;
             const totalValue   = leads.reduce((s, l) => s + (l.service_fee || 0), 0);
@@ -620,7 +668,7 @@ export default function Leads({ user }) {
                       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(l, status); }}
                       onDragEnd={onDragEnd}
                       onClick={() => navigate(`/leads/${l.id}`)}
-                      className={`group relative rounded-2xl border p-3.5 transition-all bg-white hover:shadow-md cursor-pointer hover:border-slate-350
+                      className={`group relative rounded-2xl border p-3.5 transition-all bg-white hover:shadow-md cursor-pointer hover:border-slate-300
                         ${l.next_followup === today ? 'border-amber-300 bg-amber-50/20 ring-1 ring-amber-200'
                           : l.next_followup && l.next_followup < today && l.lead_status !== 'Enrolled' && l.lead_status !== 'Not Interested' ? 'border-rose-200 bg-rose-50/10 ring-1 ring-rose-100'
                           : 'border-slate-100'}
@@ -655,10 +703,10 @@ export default function Leads({ user }) {
                           <p className="text-[10px] text-slate-400 font-mono font-semibold mt-0.5">{l.lead_id}</p>
                         </div>
                         <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer" aria-label="Edit lead">
                             <Pencil size={12}/>
                           </button>
-                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-rose-600 flex-shrink-0 rounded-lg hover:bg-rose-55 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer">
+                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-rose-600 flex-shrink-0 rounded-lg hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer" aria-label="Delete lead">
                             <Trash2 size={12}/>
                           </button>
                         </div>
@@ -742,7 +790,7 @@ export default function Leads({ user }) {
                               toast.error(`Failed to change status: ${err.message}`);
                             }
                           }}
-                          className="w-full text-[10px] font-extrabold py-1 px-2 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-150 text-slate-600 hover:text-blue-600 cursor-pointer focus:outline-none transition-all"
+                          className="w-full text-[10px] font-extrabold py-1 px-2 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-blue-600 cursor-pointer focus:outline-none transition-all"
                         >
                           {settings?.leadStatuses?.map(st => (
                             <option key={st} value={st} className="bg-white text-slate-800 font-semibold">{st}</option>
@@ -792,12 +840,38 @@ export default function Leads({ user }) {
       {bulkDeleting && (
         <Modal title="Delete Selected Leads?" onClose={() => setBulkDeleting(false)}>
           <div className="p-4 space-y-4">
-            <p className="text-sm text-slate-655">
+            <p className="text-sm text-slate-600">
               Are you sure you want to permanently delete the <strong>{selectedIds.length}</strong> selected lead records? This action will remove them from all pipeline views and cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setBulkDeleting(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer select-none">Cancel</button>
               <button onClick={handleBulkDelete} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 cursor-pointer select-none">Delete All</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {bulkAssigning && (
+        <Modal title="Assign Consultant to Selected Leads" onClose={() => setBulkAssigning(false)}>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              Choose a consultant to assign to <strong>{selectedIds.length}</strong> selected leads.
+            </p>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Consultant</label>
+              <select
+                value={bulkAssignConsultant}
+                onChange={e => setBulkAssignConsultant(e.target.value)}
+                className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:outline-none cursor-pointer"
+              >
+                <option value="">Select a consultant...</option>
+                {settings?.consultants?.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setBulkAssigning(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer select-none">Cancel</button>
+              <button onClick={handleBulkAssign} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 cursor-pointer select-none">Assign</button>
             </div>
           </div>
         </Modal>
@@ -809,7 +883,7 @@ export default function Leads({ user }) {
 function FilterSelect({ value, onChange, options, placeholder }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)}
-      className={`px-3.5 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 focus:outline-none
+      className={`h-10 min-w-[140px] px-3.5 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 focus:outline-none
         ${value ? 'border-blue-300 text-blue-700 font-medium bg-blue-50/20' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
       <option value="">{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -821,7 +895,7 @@ function Chip({ children, onClear }) {
   return (
     <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full border border-blue-100">
       {children}
-      <button onClick={onClear} className="hover:bg-blue-100 rounded-full p-0.5 cursor-pointer"><X size={11} /></button>
+      <button onClick={onClear} className="hover:bg-blue-100 rounded-full p-0.5 cursor-pointer" aria-label="Clear search"><X size={11} /></button>
     </span>
   );
 }
@@ -829,14 +903,14 @@ function Chip({ children, onClear }) {
 function InlineStatusSelect({ value, onChange, options }) {
   const colors = {
     'New Lead': 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
-    'No Response': 'bg-slate-50 text-slate-605 border-slate-200 hover:bg-slate-100',
+    'No Response': 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100',
     'Positive': 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
     'Office Visited': 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
     'File Opened': 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
-    'Enrolled': 'bg-green-50 text-green-755 text-green-700 border-green-200 hover:bg-green-100',
+    'Enrolled': 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100',
     'Not Interested': 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
   };
-  const cls = colors[value] || 'bg-slate-50 text-slate-650 border-slate-200 hover:bg-slate-100';
+  const cls = colors[value] || 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100';
   return (
     <select
       value={value}
@@ -853,17 +927,17 @@ function InlineStatusSelect({ value, onChange, options }) {
 
 const STAGE_COLORS_LIST = [
   { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-700 hover:bg-slate-100' },
-  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-805 text-blue-800 hover:bg-blue-100' },
-  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-850 text-violet-800 hover:bg-violet-100' },
-  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-850 text-amber-800 hover:bg-amber-100' },
-  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-850 text-orange-800 hover:bg-orange-100' },
-  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-850 text-teal-800 hover:bg-teal-100' },
-  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-850 text-emerald-800 hover:bg-emerald-100' },
-  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-850 text-green-800 hover:bg-green-100' },
-  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-850 text-indigo-800 hover:bg-indigo-100' },
-  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-850 text-fuchsia-800 hover:bg-fuchsia-100' },
-  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-850 text-pink-800 hover:bg-pink-100' },
-  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-850 text-sky-800 hover:bg-sky-100' },
+  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800 hover:bg-blue-100' },
+  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-800 hover:bg-violet-100' },
+  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-800 hover:bg-amber-100' },
+  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-800 hover:bg-orange-100' },
+  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-800 hover:bg-teal-100' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800 hover:bg-emerald-100' },
+  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-800 hover:bg-green-100' },
+  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-800 hover:bg-indigo-100' },
+  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-800 hover:bg-fuchsia-100' },
+  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-800 hover:bg-pink-100' },
+  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-800 hover:bg-sky-100' },
 ];
 
 function InlineStageSelect({ value, onChange, stages }) {

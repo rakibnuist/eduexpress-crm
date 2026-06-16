@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2, Wifi } from 'lucide-react';
+import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2, Wifi, Funnel, FileText, CheckCircle2, Search, GripVertical, Building, Briefcase, Lock, Bell, Database, HardDrive, Activity, Music } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
@@ -25,11 +25,12 @@ export default function Settings() {
   );
 
   const tabs = [
-    { id: 'users',       label: 'Users & Access',    icon: Shield,   desc: 'Manage login accounts and permissions' },
+    { id: 'users',       label: 'Users & Access',    icon: Shield,   desc: 'Manage login accounts, roles, and permissions' },
+    { id: 'company',     label: 'Company Profile',   icon: Building, desc: 'Branding, business rules, and organisation info' },
     { id: 'integration', label: 'Integrations',      icon: Globe,    desc: 'WhatsApp, Messenger, and Meta API' },
     { id: 'office',      label: 'Office & Hours',    icon: MapPin,   desc: 'Geofence, Wi-Fi, and attendance hours' },
     { id: 'reference',   label: 'Reference Lists',   icon: Tag,      desc: 'Dropdowns used across the CRM' },
-    { id: 'tools',       label: 'Broadcast & Tools', icon: Megaphone,desc: 'Team broadcasts, data import, system info' },
+    { id: 'tools',       label: 'Broadcast & Tools', icon: Megaphone,desc: 'Team broadcasts, data import, system health' },
   ];
 
   return (
@@ -86,6 +87,11 @@ export default function Settings() {
           <OfficeSettings />
         )}
 
+        {/* COMPANY PROFILE */}
+        {activeTab === 'company' && (
+          <CompanyProfileSettings />
+        )}
+
         {/* REFERENCE LISTS */}
         {activeTab === 'reference' && (
           <div className="space-y-5">
@@ -96,6 +102,8 @@ export default function Settings() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <EditableCard icon={<Users size={16} />} title="Consultants" color="violet"
                 listKey="settings_consultants" items={settings.consultants || []} onSaved={reloadSettings} />
+              <EditableCard icon={<Funnel size={16} />} title="Lead Sources" color="orange"
+                listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
               <EditableCard icon={<Tag size={16} />} title="Lead Statuses" color="sky"
                 listKey="settings_leadStatuses" items={settings.leadStatuses || []} onSaved={reloadSettings} />
               <EditableCard icon={<Globe size={16} />} title="Destinations" color="emerald"
@@ -109,6 +117,13 @@ export default function Settings() {
               <EditableCard icon={<CreditCard size={16} />} title="Expense Categories" color="rose"
                 listKey="settings_expenseCategories" items={settings.expenseCategories || []} onSaved={reloadSettings} />
             </div>
+
+            {/* Document Templates per Destination */}
+            <DocTemplateManager destinations={settings.destinations || []}
+              templates={settings.docTemplates || {}} onSaved={reloadSettings} />
+
+            {/* Roles & Designations */}
+            <RolesDesignationsCard employees={settings.employees || []} />
           </div>
         )}
 
@@ -116,18 +131,21 @@ export default function Settings() {
         {activeTab === 'tools' && (
           <div className="space-y-5">
             <BroadcastManager />
+            <SystemHealthCard />
 
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
               <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-slate-50 text-slate-600">
-                <Info size={17} />
-                <span className="font-semibold text-sm">System Information</span>
+                <Briefcase size={17} />
+                <span className="font-semibold text-sm">Organisation & System</span>
               </div>
               <div className="p-5">
-                <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
-                  <InfoRow label="Organisation" value="EduExpress International" />
-                  <InfoRow label="Core Version" value="1.0 · Web Edition" />
-                  <InfoRow label="Office Wi-Fi SSID" value="EduExpress International" />
-                  <InfoRow label="Currency" value="BDT (৳)" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                  <InfoRow label="Organisation" value="EduExpress International" icon={<Building size={14} className="text-slate-400" />} />
+                  <InfoRow label="Core Version" value="v2.1 · Web Edition" icon={<Activity size={14} className="text-slate-400" />} />
+                  <InfoRow label="Office Wi-Fi SSID" value={settings.office_wifi_ssid || 'Not configured'} icon={<Wifi size={14} className="text-slate-400" />} />
+                  <InfoRow label="Currency" value="BDT (৳) — Bangladeshi Taka" icon={<CreditCard size={14} className="text-slate-400" />} />
+                  <InfoRow label="Database" value="SQLite (sql.js) · In-memory with WAL" icon={<Database size={14} className="text-slate-400" />} />
+                  <InfoRow label="Data Retention" value="Finance & HR kept forever · Leads wipeable" icon={<HardDrive size={14} className="text-slate-400" />} />
                 </div>
               </div>
             </div>
@@ -141,32 +159,14 @@ export default function Settings() {
   );
 }
 
-function Card({ icon, title, color, children }) {
-  const colors = {
-    blue: 'bg-blue-50 text-blue-600 border-blue-100',
-    violet: 'bg-violet-50 text-violet-600 border-violet-100',
-    sky: 'bg-sky-50 text-sky-600 border-sky-100',
-    emerald: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-    orange: 'bg-orange-50 text-orange-600 border-orange-100',
-    rose: 'bg-rose-50 text-rose-600 border-rose-100',
-    amber: 'bg-amber-50 text-amber-600 border-amber-100',
-  };
+function InfoRow({ label, value, icon }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-      <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${colors[color]}`}>
-        {icon}
-        <span className="font-semibold text-sm">{title}</span>
+    <div className="flex items-start gap-2">
+      {icon && <div className="mt-0.5">{icon}</div>}
+      <div>
+        <p className="text-xs text-slate-400 font-medium">{label}</p>
+        <p className="text-slate-700 font-medium mt-0.5">{value}</p>
       </div>
-      <div className="p-5">{children}</div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }) {
-  return (
-    <div>
-      <p className="text-xs text-slate-400 font-medium">{label}</p>
-      <p className="text-slate-700 font-medium mt-0.5">{value}</p>
     </div>
   );
 }
@@ -180,7 +180,7 @@ function DangerZone() {
   const handleWipeLeads = async () => {
     const ok = await confirm({
       title: 'Delete ALL Leads & Applications?',
-      body: `This will permanently delete every lead, document, university application, activity log, and KPI target${withConversations ? ', PLUS all chat conversations, messages and contacts' : ''}. Finance records, employees, attendance and payroll are kept. This cannot be undone.`,
+      body: `This will permanently delete every lead, document, university application, activity log, and KPI target${withConversations ? ', PLUS all chat conversations, messages and contacts' : ''}. Finance records, consultants, attendance and payroll are kept. This cannot be undone.`,
       confirmLabel: 'Yes, delete everything',
       tone: 'danger',
     });
@@ -214,7 +214,7 @@ function DangerZone() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-slate-800">Delete All Leads &amp; Applications</p>
-            <p className="text-xs text-slate-500 mt-0.5">Permanently removes every lead, document, university application, activity log and KPI target. Finance, employees, attendance and payroll are never touched.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Permanently removes every lead, document, university application, activity log and KPI target. Finance, consultants, attendance and payroll are never touched.</p>
             <label className="flex items-center gap-2 mt-2 text-xs text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={withConversations} onChange={e => setWithConversations(e.target.checked)}
                 className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
@@ -240,12 +240,18 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
   const [editing, setEditing] = useState(false);
   const [list, setList] = useState(items);
   const [input, setInput] = useState('');
+  const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
     setList(items);
   }, [items]);
+
+  const filteredList = useMemo(() => {
+    if (!search.trim()) return list;
+    return list.filter(item => item.toLowerCase().includes(search.toLowerCase()));
+  }, [list, search]);
 
   const add = (e) => {
     e.preventDefault();
@@ -261,6 +267,14 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
 
   const remove = (index) => {
     setList(list.filter((_, i) => i !== index));
+  };
+
+  const move = (index, direction) => {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= list.length) return;
+    const newList = [...list];
+    [newList[index], newList[newIndex]] = [newList[newIndex], newList[index]];
+    setList(newList);
   };
 
   const save = async () => {
@@ -280,6 +294,7 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
   const cancel = () => {
     setList(items);
     setInput('');
+    setSearch('');
     setEditing(false);
   };
 
@@ -303,7 +318,7 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
         {!editing ? (
           <button
             onClick={() => setEditing(true)}
-            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-current hover:bg-white/30 transition-colors"
+            className="flex items-center gap-1 text-xs font-semibold px-2.5 h-8 rounded-lg border border-current hover:bg-white/30 transition-colors"
           >
             <Pencil size={11} /> Edit List
           </button>
@@ -312,14 +327,14 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
             <button
               onClick={cancel}
               disabled={saving}
-              className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-white bg-white font-medium"
+              className="text-xs px-2.5 h-8 rounded-lg border border-slate-300 text-slate-600 hover:bg-white bg-white font-medium"
             >
               Cancel
             </button>
             <button
               onClick={save}
               disabled={saving}
-              className="text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold flex items-center gap-1"
+              className="text-xs px-3 h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold flex items-center gap-1"
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -329,44 +344,68 @@ function EditableCard({ icon, title, color, listKey, items = [], onSaved }) {
 
       <div className="p-5 space-y-4">
         {editing && (
-          <form onSubmit={add} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder={`Add new item…`}
-              className="flex-grow border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/25"
-            />
-            <button
-              type="submit"
-              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1"
-            >
-              <Plus size={13} /> Add
-            </button>
-          </form>
+          <>
+            <form onSubmit={add} className="flex gap-2">
+              <input
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                placeholder={`Add new item…`}
+                className="flex-grow h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+              />
+              <button
+                type="submit"
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 h-10 rounded-xl flex items-center gap-1"
+              >
+                <Plus size={13} /> Add
+              </button>
+            </form>
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search in list…"
+                className="w-full h-10 pl-9 pr-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+              />
+            </div>
+            <p className="text-[10px] text-slate-400">{filteredList.length} of {list.length} shown · Use arrows to reorder</p>
+          </>
         )}
 
         <div className="flex flex-wrap gap-2">
-          {list.length === 0 ? (
-            <p className="text-slate-400 text-xs italic py-2">No items in the list</p>
+          {filteredList.length === 0 ? (
+            <p className="text-slate-400 text-xs italic py-2">{search ? 'No matching items' : 'No items in the list'}</p>
           ) : (
-            list.map((item, idx) => (
-              <span
-                key={item}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-all ${c.tag}`}
-              >
-                {item}
-                {editing && (
-                  <button
-                    type="button"
-                    onClick={() => remove(idx)}
-                    className="p-0.5 rounded-full hover:bg-black/10 text-current/70 hover:text-current transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </span>
-            ))
+            filteredList.map((item, idx) => {
+              const originalIndex = list.indexOf(item);
+              return (
+                <span
+                  key={item}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-all ${c.tag}`}
+                >
+                  {editing && (
+                    <div className="flex items-center gap-0.5">
+                      <button type="button" onClick={() => move(originalIndex, -1)} disabled={originalIndex === 0}
+                        className="p-0.5 rounded hover:bg-black/10 disabled:opacity-30" title="Move up"><GripVertical size={10} className="rotate-90" /></button>
+                      <button type="button" onClick={() => move(originalIndex, 1)} disabled={originalIndex >= list.length - 1}
+                        className="p-0.5 rounded hover:bg-black/10 disabled:opacity-30" title="Move down"><GripVertical size={10} className="-rotate-90" /></button>
+                    </div>
+                  )}
+                  {item}
+                  {editing && (
+                    <button
+                      type="button"
+                      onClick={() => remove(originalIndex)}
+                      className="p-0.5 rounded-full hover:bg-black/10 text-current/70 hover:text-current transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </span>
+              );
+            })
           )}
         </div>
       </div>
@@ -404,12 +443,26 @@ function UserManagement({ consultants }) {
     catch (e) { toast.error(e.message); }
   };
 
+  const roleBadge = (role) => {
+    const map = {
+      founder_ceo: { bg: 'bg-purple-100 text-purple-700 border-purple-200', label: 'Founder & CEO' },
+      managing_director: { bg: 'bg-indigo-100 text-indigo-700 border-indigo-200', label: 'Managing Director' },
+      investor: { bg: 'bg-emerald-100 text-emerald-700 border-emerald-200', label: 'Investor' },
+      consultant: { bg: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Consultant' },
+      application_manager: { bg: 'bg-amber-100 text-amber-700 border-amber-200', label: 'App Manager' },
+      marketing_manager: { bg: 'bg-rose-100 text-rose-700 border-rose-200', label: 'Marketing Manager' },
+    };
+    const r = map[role] || { bg: 'bg-slate-100 text-slate-600 border-slate-200', label: role };
+    return <span key={role} className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${r.bg}`}>{r.label}</span>;
+  };
+
   return (
     <>
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
         <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-indigo-50 text-indigo-600 border-indigo-100">
           <Shield size={18} />
           <span className="font-semibold text-sm flex-1">Users & Access</span>
+          <span className="text-xs text-indigo-500 font-medium">{users.filter(u => u.active).length} active</span>
           <button onClick={() => setModal({ mode: 'add' })}
             className="flex items-center gap-1.5 text-xs font-medium bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
             <Plus size={13} /> Add User
@@ -429,17 +482,17 @@ function UserManagement({ consultants }) {
                     {(u.name || u.email).split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-slate-800 text-sm truncate">{u.name || u.email}</p>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase
-                        ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {u.role}
-                      </span>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {(u.roles || [u.role]).map(roleBadge)}
+                      </div>
                       {!u.active && <span className="text-[10px] font-bold bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full uppercase">Disabled</span>}
                     </div>
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap">
                       <Mail size={11} /> {u.email}
                       {u.consultant_name && <span className="ml-1">· Maps to <strong>{u.consultant_name}</strong></span>}
+                      {u.emp_id && <span className="ml-1">· Linked consultant <strong>#{u.emp_id}</strong></span>}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
@@ -448,16 +501,16 @@ function UserManagement({ consultants }) {
                       {u.active ? 'Disable' : 'Enable'}
                     </button>
                     <button onClick={() => setModal({ mode: 'edit', user: u })}
-                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" aria-label="Edit user"><Pencil size={14} /></button>
                     <button onClick={() => remove(u)}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg" aria-label="Delete user"><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
             </div>
           )}
           <p className="text-xs text-slate-400 mt-3">
-            💡 The <strong>Consultant Name</strong> on a user must match the <em>Assigned Consultant</em> field on a lead for it to appear in their inbox.
+            💡 The <strong>Consultant Name</strong> on a user must match the <em>Assigned Consultant</em> field on a lead for it to appear in their inbox. Multi-role users get combined permissions from all assigned roles.
           </p>
         </div>
       </div>
@@ -477,7 +530,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
   const [form, setForm] = useState({
     email: u.email || '',
     name: u.name || '',
-    role: u.role || 'consultant',
+    roles: u.roles || (u.role ? [u.role] : []),
     consultant_name: u.consultant_name || '',
     emp_id: u.emp_id || '',
     password: '',
@@ -488,14 +541,31 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
 
   useEffect(() => { api.employees().then(setEmployees).catch(() => {}); }, []);
 
+  const allRoles = [
+    { key: 'founder_ceo', label: 'Founder & CEO', desc: 'Full access — everything including China data' },
+    { key: 'managing_director', label: 'Managing Director', desc: 'Full access except China data' },
+    { key: 'investor', label: 'Investor', desc: 'Read-only executive view, no chat' },
+    { key: 'application_manager', label: 'Application Manager', desc: 'All applications + China data, no Finance/HR' },
+    { key: 'marketing_manager', label: 'Marketing Manager', desc: 'Marketing + automation + all chats' },
+    { key: 'consultant', label: 'Consultant', desc: 'Own leads only, Bangladesh pipeline' },
+  ];
+
+  const toggleRole = (roleKey) => {
+    setForm(f => {
+      const has = f.roles.includes(roleKey);
+      const next = has ? f.roles.filter(r => r !== roleKey) : [...f.roles, roleKey];
+      return { ...f, roles: next };
+    });
+  };
+
   const save = async (e) => {
     e.preventDefault();
     setError(''); setSaving(true);
     try {
       const payload = {
         name: form.name,
-        role: form.role,
-        consultant_name: form.role === 'consultant' ? form.consultant_name : null,
+        roles: form.roles,
+        consultant_name: form.roles.includes('consultant') ? form.consultant_name : null,
         emp_id: form.emp_id || null,
       };
       if (editing) {
@@ -513,12 +583,12 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
           <h3 className="font-bold text-slate-800">{editing ? 'Edit user' : 'Add user'}</h3>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={18} /></button>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg" aria-label="Close"><X size={18} /></button>
         </div>
-        <form onSubmit={save} className="p-5 space-y-3">
+        <form onSubmit={save} className="p-5 space-y-4">
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Email</label>
             <input type="email" required disabled={editing}
@@ -530,18 +600,44 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
             <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
           </div>
+
+          {/* Multi-role selection */}
           <div>
-            <label className="text-xs font-semibold text-slate-600 mb-1 block">Role</label>
-            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
-              <option value="consultant">Consultant — sees only their assigned leads</option>
-              <option value="manager">Application Manager — manages all applications & docs (no Finance/HR/Settings)</option>
-              <option value="admin">Admin — full access</option>
-            </select>
+            <label className="text-xs font-semibold text-slate-600 mb-2 block">Roles <span className="text-slate-400 font-normal">(select all that apply)</span></label>
+            <div className="grid grid-cols-1 gap-2">
+              {allRoles.map(r => {
+                const active = form.roles.includes(r.key);
+                const map = {
+                  founder_ceo: 'border-purple-200 bg-purple-50 text-purple-700',
+                  managing_director: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+                  investor: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                  application_manager: 'border-amber-200 bg-amber-50 text-amber-700',
+                  marketing_manager: 'border-rose-200 bg-rose-50 text-rose-700',
+                  consultant: 'border-blue-200 bg-blue-50 text-blue-700',
+                };
+                const cls = map[r.key] || 'border-slate-200 bg-slate-50 text-slate-600';
+                return (
+                  <button key={r.key} type="button" onClick={() => toggleRole(r.key)}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all ${active ? `${cls} ring-1 ring-offset-1` : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${active ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
+                      {active && <CheckCircle2 size={13} className="text-white" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-bold ${active ? '' : 'text-slate-700'}`}>{r.label}</p>
+                      <p className="text-[10px] text-slate-400 leading-tight">{r.desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {form.roles.length === 0 && (
+              <p className="text-xs text-rose-600 mt-1">Select at least one role</p>
+            )}
           </div>
-          {form.role === 'consultant' && (
+
+          {form.roles.includes('consultant') && (
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant name (must match leads' assigned consultant)</label>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant name <span className="text-slate-400 font-normal">(must match leads' assigned consultant)</span></label>
               <input list="consultants-list" value={form.consultant_name}
                 onChange={e => setForm(f => ({ ...f, consultant_name: e.target.value }))}
                 placeholder="e.g. Shazid Hasan"
@@ -553,7 +649,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
           )}
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">
-              Linked employee <span className="text-slate-400 font-normal">(enables auto check-in on login)</span>
+              Linked consultant <span className="text-slate-400 font-normal">(enables auto check-in on login)</span>
             </label>
             <select value={form.emp_id} onChange={e => setForm(f => ({ ...f, emp_id: e.target.value }))}
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
@@ -577,7 +673,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
 
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={saving}
+            <button type="submit" disabled={saving || form.roles.length === 0}
               className="text-sm px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2">
               {saving && <Loader2 size={14} className="animate-spin" />}
               {saving ? 'Saving…' : editing ? 'Save changes' : 'Create user'}
@@ -676,7 +772,7 @@ function OfficeSettings() {
               <label className="text-xs font-semibold text-slate-600 mb-1 block">Office Wi-Fi SSID</label>
               <input value={form.office_wifi_ssid || ''} onChange={e => update('office_wifi_ssid', e.target.value)}
                 placeholder="e.g. EduExpress_Office_5G" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" />
-              <p className="text-[11px] text-slate-400 mt-1">Employees opening the CRM on this network will be automatically checked in.</p>
+              <p className="[11px] text-slate-400 mt-1">Consultants opening the CRM on this network will be automatically checked in.</p>
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1 block">Auto Wi-Fi Attendance Status</label>
@@ -816,7 +912,7 @@ function BroadcastManager() {
                   <p className="text-sm whitespace-pre-wrap pr-7">{b.message}</p>
                   <p className="text-[11px] mt-2 opacity-70">— {b.author_name} · {b.created_at}</p>
                   <button onClick={() => remove(b.id)}
-                    className="absolute top-2 right-2 p-1 opacity-50 hover:opacity-100"><Trash2 size={14}/></button>
+                    className="absolute top-2 right-2 p-1 opacity-50 hover:opacity-100" aria-label="Remove broadcast"><Trash2 size={14}/></button>
                 </div>
               );
             })}
@@ -841,6 +937,7 @@ function MetaIntegrationSettings() {
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
+  const syncTimeoutRef = useRef(null); // fallback timeout to reset syncing state
   const [modal, setModal] = useState(null); // null | { mode:'add' }
   const toast = useToast();
   const confirm = useConfirm();
@@ -905,16 +1002,56 @@ function MetaIntegrationSettings() {
   const syncHistory = async (channel) => {
     setSyncingId(channel.id);
     toast.info(`Starting historic conversations sync for ${channel.name}…`);
+    // Fallback: auto-reset after 60s if SSE never fires (server crash, etc.)
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(() => {
+      setSyncingId(null);
+      toast.warning(`Sync timed out for ${channel.name}. Check server logs.`);
+    }, 60000);
     try {
       const res = await api.syncChannel(channel.id);
-      toast.success(`✓ Sync complete: Imported ${res.imported || 0} messages!`);
-      loadData();
+      if (res.ok && res.started) {
+        toast.success(`✓ Sync started for ${res.channel || channel.name}. Watch for updates.`);
+      } else if (res.imported !== undefined) {
+        toast.success(`✓ Sync complete: Imported ${res.imported} messages!`);
+        loadData();
+      }
     } catch (e) {
       toast.error(`Sync error: ${e.message}`);
-    } finally {
       setSyncingId(null);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     }
   };
+
+  // SSE listener for sync progress / completion / errors
+  useEffect(() => {
+    const es = new EventSource('/api/events');
+    es.addEventListener('sync_done', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setSyncingId(prev => prev === data.channel_id ? null : prev);
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        toast.success(`Sync done for ${data.channel}: ${data.imported} messages imported, ${data.skipped} skipped`);
+        loadData();
+      } catch (err) { console.error('SSE sync_done error:', err); }
+    });
+    es.addEventListener('sync_error', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setSyncingId(prev => prev === data.channel_id ? null : prev);
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        toast.error(`Sync failed for ${data.channel}: ${data.error}`);
+      } catch (err) { console.error('SSE sync_error error:', err); }
+    });
+    es.addEventListener('sync_progress', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        toast.info(`Syncing ${data.channel}… ${data.conversations} conversations, ${data.imported} messages`, { duration: 3000 });
+      } catch (err) { console.error('SSE sync_progress error:', err); }
+    });
+    es.onerror = (err) => { console.error('SSE error:', err); };
+    return () => { es.close(); if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current); };
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -922,7 +1059,7 @@ function MetaIntegrationSettings() {
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
         <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-emerald-50 text-emerald-800 border-emerald-100">
           <Globe size={18} />
-          <span className="font-semibold text-sm flex-grow">Meta Integration Channels (WhatsApp & Messenger)</span>
+          <span className="font-semibold text-sm flex-grow">Meta & TikTok Integration Channels</span>
           <button
             onClick={() => setModal({ mode: 'add' })}
             className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-colors"
@@ -932,7 +1069,7 @@ function MetaIntegrationSettings() {
         </div>
         <div className="p-5 space-y-4">
           <p className="text-xs text-slate-400">
-            Configure integration channels to listen to WhatsApp Business Cloud API messages or Facebook Messenger DMs. 
+            Configure integration channels to listen to WhatsApp Business Cloud API, Facebook Messenger, Instagram Direct, and TikTok DMs. 
             All new conversation inquiries on these channels will automatically create a <strong>"New Lead"</strong> in the pipeline instantly!
           </p>
 
@@ -948,31 +1085,36 @@ function MetaIntegrationSettings() {
                 <div key={ch.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
-                      ${ch.type === 'whatsapp' ? 'bg-emerald-500 shadow-emerald-100' 
-                        : ch.type === 'messenger' ? 'bg-blue-500 shadow-blue-100' 
+                      ${ch.type === 'whatsapp' ? 'bg-emerald-500 shadow-emerald-100'
+                        : ch.type === 'messenger' ? 'bg-blue-500 shadow-blue-100'
+                        : ch.type === 'tiktok' ? 'bg-slate-800 shadow-slate-200'
                         : 'bg-gradient-to-tr from-pink-500 via-purple-500 to-orange-500'}`}>
-                      {ch.type === 'whatsapp' ? <MessageCircle size={20} /> 
-                        : ch.type === 'messenger' ? <MessageSquare size={20} /> 
+                      {ch.type === 'whatsapp' ? <MessageCircle size={20} />
+                        : ch.type === 'messenger' ? <MessageSquare size={20} />
+                        : ch.type === 'tiktok' ? <Music size={20} />
                         : <Globe size={20} />}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="font-semibold text-slate-800 text-sm">{ch.name}</p>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase
-                          ${ch.type === 'whatsapp' ? 'bg-emerald-100 text-emerald-700' 
-                            : ch.type === 'messenger' ? 'bg-blue-100 text-blue-700' 
+                          ${ch.type === 'whatsapp' ? 'bg-emerald-100 text-emerald-700'
+                            : ch.type === 'messenger' ? 'bg-blue-100 text-blue-700'
+                            : ch.type === 'tiktok' ? 'bg-slate-100 text-slate-700'
                             : 'bg-purple-100 text-purple-700'}`}>
                           {ch.type}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400">
-                        {ch.type === 'whatsapp' ? `Phone Number ID: ${ch.phone_number_id || 'N/A'}` : `Page ID: ${ch.page_id || 'N/A'}`}
+                        {ch.type === 'whatsapp' ? `Phone Number ID: ${ch.phone_number_id || 'N/A'}`
+                          : ch.type === 'tiktok' ? `Account: ${ch.tiktok_account_id || ch.consultant || 'N/A'}`
+                          : `Page ID: ${ch.page_id || 'N/A'}`}
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
-                    {(ch.type === 'messenger' || ch.type === 'instagram') && (
+                    {(ch.type === 'messenger' || ch.type === 'instagram' || ch.type === 'tiktok') && (
                       <button
                         onClick={() => syncHistory(ch)}
                         disabled={syncingId !== null}
@@ -1103,6 +1245,7 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
     waba_id: '',
     page_id: '',
     ig_account_id: '',
+    tiktok_account_id: '',
     access_token: '',
     webhook_verify_token: verifyToken || 'eduexpress_verify_2024',
   });
@@ -1130,7 +1273,7 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
           <h3 className="font-bold text-slate-800">Add Messaging Channel</h3>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={18} /></button>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg" aria-label="Close"><X size={18} /></button>
         </div>
         <form onSubmit={save} className="p-5 space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -1144,6 +1287,7 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
                 <option value="whatsapp">WhatsApp Cloud API</option>
                 <option value="messenger">Facebook Messenger</option>
                 <option value="instagram">Instagram Direct</option>
+                <option value="tiktok">TikTok</option>
               </select>
             </div>
             <div>
@@ -1227,6 +1371,32 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
             </div>
           )}
 
+          {form.type === 'tiktok' && (
+            <div className="grid grid-cols-2 gap-3 border-t border-slate-50 pt-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">TikTok Account ID</label>
+                <input
+                  type="text"
+                  required
+                  value={form.tiktok_account_id}
+                  onChange={e => setForm(f => ({ ...f, tiktok_account_id: e.target.value }))}
+                  placeholder="e.g. @eduexpress or 1234567890"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant (optional)</label>
+                <input
+                  type="text"
+                  value={form.consultant}
+                  onChange={e => setForm(f => ({ ...f, consultant: e.target.value }))}
+                  placeholder="e.g. Abdullah Al Rakib"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          )}
+
           <div className="border-t border-slate-50 pt-2">
             <label className="text-xs font-semibold text-slate-600 mb-1 block">Channel Access Token (leave blank to use Global Token)</label>
             <input
@@ -1254,3 +1424,457 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
   );
 }
 
+
+/* ─────────────────────── DOCUMENT TEMPLATES ─────────────────────── */
+function DocTemplateManager({ destinations, templates, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [data, setData] = useState({});
+  const [newDoc, setNewDoc] = useState('');
+  const [activeDest, setActiveDest] = useState('');
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    const base = {};
+    for (const dest of destinations) {
+      base[dest] = templates[dest] || [];
+    }
+    setData(base);
+    if (destinations.length > 0 && !activeDest) setActiveDest(destinations[0]);
+  }, [destinations, templates]);
+
+  const addDoc = () => {
+    const val = newDoc.trim();
+    if (!val || !activeDest) return;
+    if (data[activeDest]?.includes(val)) { toast.error('Document already in list'); return; }
+    setData(d => ({ ...d, [activeDest]: [...(d[activeDest] || []), val] }));
+    setNewDoc('');
+  };
+
+  const removeDoc = (dest, index) => {
+    setData(d => ({ ...d, [dest]: d[dest].filter((_, i) => i !== index) }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveSettings('settings_docTemplates', data);
+      toast.success('Document templates saved');
+      setEditing(false);
+      onSaved();
+    } catch (e) { toast.error(e.message || 'Failed to save'); }
+    setSaving(false);
+  };
+
+  const cancel = () => {
+    const base = {};
+    for (const dest of destinations) base[dest] = templates[dest] || [];
+    setData(base);
+    setEditing(false);
+    setNewDoc('');
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+      <div className="flex items-center gap-2.5 px-5 py-3.5 border-b bg-slate-50 text-slate-700 border-slate-100">
+        <FileText size={16} className="text-slate-500" />
+        <span className="font-semibold text-sm flex-grow">Document Templates per Destination</span>
+        {!editing ? (
+          <button onClick={() => setEditing(true)}
+            className="flex items-center gap-1 text-xs font-semibold px-2.5 h-8 rounded-lg border border-slate-300 hover:bg-white transition-colors">
+            <Pencil size={11} /> Edit
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button onClick={cancel} disabled={saving}
+              className="text-xs px-2.5 h-8 rounded-lg border border-slate-300 text-slate-600 hover:bg-white bg-white font-medium">Cancel</button>
+            <button onClick={save} disabled={saving}
+              className="text-xs px-3 h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-semibold flex items-center gap-1">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="p-5 space-y-4">
+        <p className="text-xs text-slate-500">Define the required document checklist for each destination. When a new application is created, these documents are auto-seeded.</p>
+        {destinations.length === 0 ? (
+          <p className="text-sm text-slate-400 italic">No destinations configured. Add destinations first.</p>
+        ) : (
+          <div className="flex gap-4">
+            {/* Destination tabs */}
+            <div className="w-40 flex-shrink-0 space-y-1">
+              {destinations.map(dest => (
+                <button key={dest} onClick={() => setActiveDest(dest)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold transition-all ${activeDest === dest ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+                  {dest}
+                </button>
+              ))}
+            </div>
+            {/* Document list for active destination */}
+            <div className="flex-1 min-w-0">
+              {activeDest && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">{activeDest} Required Documents</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(data[activeDest] || []).map((doc, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg border border-blue-100">
+                        {editing ? (
+                          <>
+                            {doc}
+                            <button onClick={() => removeDoc(activeDest, i)} className="text-blue-400 hover:text-rose-500"><X size={12} /></button>
+                          </>
+                        ) : (
+                          <span className="flex items-center gap-1"><CheckCircle2 size={11} /> {doc}</span>
+                        )}
+                      </span>
+                    ))}
+                    {(data[activeDest] || []).length === 0 && (
+                      <p className="text-xs text-slate-400 italic">No documents configured for {activeDest}.</p>
+                    )}
+                  </div>
+                  {editing && (
+                    <form onSubmit={e => { e.preventDefault(); addDoc(); }} className="flex gap-2 mt-3">
+                      <input type="text" value={newDoc} onChange={e => setNewDoc(e.target.value)}
+                        placeholder={`Add document for ${activeDest}…`}
+                        className="flex-grow border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/25" />
+                      <button type="submit" className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700">Add</button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── COMPANY PROFILE SETTINGS ─────────────────────── */
+function CompanyProfileSettings() {
+  const [profile, setProfile] = useState({
+    company_name: 'EduExpress International',
+    tagline: 'Student Consultancy & Recruitment',
+    address: 'Dhanmondi, Dhaka, Bangladesh',
+    phone: '',
+    email: '',
+    website: '',
+    currency: 'BDT',
+    timezone: 'Asia/Dhaka',
+    working_days: 'Sun-Thu',
+    working_hours: '09:30 - 18:00',
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const toast = useToast();
+
+  useEffect(() => {
+    api.settings().then(s => {
+      if (s?.companyProfile) setProfile(s.companyProfile);
+    }).catch(() => {});
+  }, []);
+
+  const update = (k, v) => setProfile(p => ({ ...p, [k]: v }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.saveSettings('settings_companyProfile', profile);
+      toast.success('Company profile saved');
+      setMsg('✓ Saved successfully');
+      setTimeout(() => setMsg(''), 2500);
+    } catch (err) {
+      toast.error(err.message || 'Failed to save');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Business Rules Card */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-blue-50 text-blue-700 border-blue-100">
+          <Lock size={18} />
+          <span className="font-semibold text-sm flex-1">Business Rules & Data Isolation</span>
+          <span className="text-xs font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Active</span>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Globe size={14} className="text-amber-600" />
+                <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">China Market</span>
+              </div>
+              <p className="text-sm text-amber-900 font-medium">Isolated Data Pipeline</p>
+              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                China applications are completely separate from the Bangladesh office. 
+                Only <strong>Founder & CEO</strong> and <strong>Application Manager</strong> can access China data. 
+                Managing Director and all other roles are explicitly excluded.
+              </p>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Users size={14} className="text-emerald-600" />
+                <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Bangladesh Office</span>
+              </div>
+              <p className="text-sm text-emerald-900 font-medium">B2C + B2B Collection</p>
+              <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                <strong>In-House:</strong> Online/offline marketing leads (direct).<br />
+                <strong>B2B / Agent:</strong> Partner agent submissions.<br />
+                All chat conversions auto-tagged to Bangladesh pipeline.
+              </p>
+            </div>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Role Access Matrix</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+              {[
+                { role: 'Founder & CEO', access: 'Everything + China', color: 'text-purple-700 bg-purple-50 border-purple-100' },
+                { role: 'Managing Director', access: 'Everything except China', color: 'text-indigo-700 bg-indigo-50 border-indigo-100' },
+                { role: 'Investor', access: 'Read-only, no chat', color: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                { role: 'Application Manager', access: 'Apps + China data', color: 'text-amber-700 bg-amber-50 border-amber-100' },
+                { role: 'Marketing Manager', access: 'Marketing + all chats', color: 'text-rose-700 bg-rose-50 border-rose-100' },
+                { role: 'Consultant', access: 'Own leads only', color: 'text-blue-700 bg-blue-50 border-blue-100' },
+              ].map(r => (
+                <div key={r.role} className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${r.color}`}>
+                  <Shield size={12} />
+                  <div>
+                    <p className="font-bold">{r.role}</p>
+                    <p className="text-[10px] opacity-80">{r.access}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Company Details Form */}
+      <form onSubmit={save} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-slate-50 text-slate-700 border-slate-100">
+          <Building size={18} />
+          <span className="font-semibold text-sm flex-1">Organisation Details</span>
+          <span className="text-xs text-slate-400">Saved locally in CRM settings</span>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Company Name</label>
+              <input value={profile.company_name} onChange={e => update('company_name', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Tagline</label>
+              <input value={profile.tagline} onChange={e => update('tagline', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Office Address</label>
+              <input value={profile.address} onChange={e => update('address', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Contact Phone</label>
+              <input value={profile.phone} onChange={e => update('phone', e.target.value)}
+                placeholder="+880..." className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Contact Email</label>
+              <input type="email" value={profile.email} onChange={e => update('email', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Website</label>
+              <input value={profile.website} onChange={e => update('website', e.target.value)}
+                placeholder="https://..." className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Currency</label>
+              <select value={profile.currency} onChange={e => update('currency', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white">
+                <option value="BDT">BDT (৳) — Bangladeshi Taka</option>
+                <option value="USD">USD ($) — US Dollar</option>
+                <option value="CNY">CNY (¥) — Chinese Yuan</option>
+                <option value="EUR">EUR (€) — Euro</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Timezone</label>
+              <select value={profile.timezone} onChange={e => update('timezone', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white">
+                <option value="Asia/Dhaka">Asia/Dhaka (GMT+6)</option>
+                <option value="Asia/Shanghai">Asia/Shanghai (GMT+8)</option>
+                <option value="UTC">UTC</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Working Days</label>
+              <input value={profile.working_days} onChange={e => update('working_days', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Working Hours</label>
+              <input value={profile.working_hours} onChange={e => update('working_hours', e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          {msg && <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">{msg}</div>}
+
+          <div className="flex justify-end pt-1">
+            <button type="submit" disabled={saving}
+              className="text-sm px-5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
+              <Save size={14} /> {saving ? 'Saving…' : 'Save profile'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ─────────────────────── SYSTEM HEALTH CARD ─────────────────────── */
+function SystemHealthCard() {
+  const [dbSize, setDbSize] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+
+  useEffect(() => {
+    fetch('/api/health/db-size', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setDbSize(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleBackup = async () => {
+    try {
+      const res = await fetch('/api/health/backup', { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('Backup failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `crm_backup_${new Date().toISOString().slice(0,10)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Database backup downloaded');
+    } catch (e) {
+      toast.error('Backup failed: ' + e.message);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-emerald-50 text-emerald-700 border-emerald-100">
+        <Activity size={18} />
+        <span className="font-semibold text-sm flex-1">System Health</span>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${loading ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
+          {loading ? 'Checking…' : 'Healthy'}
+        </span>
+      </div>
+      <div className="p-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Database</p>
+            <p className="text-lg font-bold text-slate-800">{dbSize ? `${(dbSize.bytes / 1024 / 1024).toFixed(1)} MB` : '—'}</p>
+            <p className="text-xs text-slate-400">SQLite in-memory with WAL</p>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Build</p>
+            <p className="text-lg font-bold text-slate-800">Vite + React 19</p>
+            <p className="text-xs text-slate-400">Tailwind CSS 4 · Lucide icons</p>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Last Backup</p>
+            <p className="text-lg font-bold text-slate-800">Manual</p>
+            <p className="text-xs text-slate-400">No automated backup configured</p>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={handleBackup}
+            className="flex items-center gap-1.5 text-xs font-medium bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 shadow-sm transition-colors">
+            <Database size={13} /> Download Backup
+          </button>
+          <button onClick={() => window.open('/api/health/export-json', '_blank')}
+            className="flex items-center gap-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors">
+            <FileText size={13} /> Export JSON
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── ROLES & DESIGNATIONS ─────────────────────── */
+function RolesDesignationsCard({ employees }) {
+  const roles = useMemo(() => {
+    const map = new Map();
+    for (const emp of employees) {
+      if (!emp.role) continue;
+      const key = emp.role.toLowerCase().trim();
+      if (!map.has(key)) map.set(key, { role: emp.role, count: 0, employees: [] });
+      map.get(key).count++;
+      map.get(key).employees.push(emp);
+    }
+    return Array.from(map.values());
+  }, [employees]);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3.5 border-b bg-slate-50 text-slate-700 border-slate-100">
+        <Shield size={16} className="text-slate-500" />
+        <span className="font-semibold text-sm flex-grow">Roles & Designations</span>
+      </div>
+      <div className="p-5 space-y-4">
+        <p className="text-xs text-slate-500">Active consultants and their roles across the system. These are pulled from the HR module and used in Leads, Applications, and Finance.</p>
+        {employees.length === 0 ? (
+          <p className="text-sm text-slate-400 italic">No active consultants found. Add consultants in the HR module.</p>
+        ) : (
+          <div className="space-y-3">
+            {roles.map((r, i) => (
+              <div key={i} className="border border-slate-100 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">{r.role}</span>
+                  <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{r.count} consultant{r.count > 1 ? 's' : ''}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {r.employees.map(emp => (
+                    <span key={emp.id} className="text-xs font-medium bg-violet-50 text-violet-700 px-2 py-1 rounded-lg border border-violet-100 flex items-center gap-1">
+                      <Users size={10} /> {emp.name}
+                      {emp.emp_id && <span className="text-[10px] text-violet-400 font-mono">#{emp.emp_id}</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {/* List all consultants with IDs */}
+            <div className="border-t border-slate-100 pt-3">
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">All Active Consultants (with IDs)</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {employees.map(emp => (
+                  <div key={emp.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-[10px] font-bold">
+                        {emp.name?.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">{emp.name}</p>
+                        <p className="text-[10px] text-slate-400">{emp.role || 'No role'} · {emp.email || 'No email'}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">ID:{emp.id} · EMP:{emp.emp_id || '-'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

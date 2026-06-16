@@ -6,9 +6,10 @@
      event happens (configurable via Notification permission).
 */
 import { useEffect, useRef, useState } from 'react';
-import { Bell, X, CheckCircle2, UserPlus, DollarSign, Tag, Users, AlertCircle, Activity } from 'lucide-react';
+import { Bell, X, CheckCircle2, UserPlus, DollarSign, Tag, Users, Activity } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { isFullAdmin } from '../lib/roles';
 
 const LS_KEY = (uid) => `notif_seen_${uid || 'guest'}`;
 const fmt = (n) => {
@@ -124,7 +125,7 @@ export default function NotificationBell({ user }) {
   return (
     <div ref={wrapperRef} className="relative">
       <button onClick={() => { setOpen(o => !o); if (!open) markAllRead(); }}
-        className="relative p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg" title="Notifications">
+        className="relative p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg" title="Notifications" aria-label="Notifications">
         <Bell size={17} />
         {unread > 0 && (
           <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center leading-none">
@@ -175,7 +176,7 @@ export default function NotificationBell({ user }) {
             </div>
           )}
 
-          {user?.role === 'admin' && (
+          {isFullAdmin(user) && (
             <Link to="/cockpit" onClick={() => setOpen(false)}
               className="block text-center text-xs font-medium text-blue-600 hover:bg-blue-50 py-2.5 border-t border-slate-100">
               Open Cockpit → view full activity feed

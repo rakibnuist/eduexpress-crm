@@ -46,23 +46,23 @@ function Dialog({ state, onCancel, onConfirm }) {
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={onCancel} onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); if (e.key === 'Enter') onConfirm(); }}>
       <div onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="p-6">
-          <div className="flex items-start gap-3">
-            <div className={`p-2 rounded-xl bg-slate-50 ${t.accent}`}><Icon size={20}/></div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-slate-800">{state.title || 'Are you sure?'}</h3>
-              {state.body && <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{state.body}</p>}
-            </div>
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+        <div className="px-5 py-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Icon size={16} className={t.accent} />
+            <h3 className="font-bold text-sm uppercase tracking-wider text-white">{state.title || 'Are you sure?'}</h3>
           </div>
         </div>
-        <div className="px-6 py-4 bg-slate-50/60 border-t border-slate-100 flex justify-end gap-2">
+        <div className="p-5">
+          {state.body && <p className="text-sm text-slate-600 whitespace-pre-wrap">{state.body}</p>}
+        </div>
+        <div className="px-5 py-4 bg-slate-50/60 border-t border-slate-100 flex justify-end gap-2">
           <button onClick={onCancel}
-            className="text-sm font-medium px-4 py-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700">
+            className="text-sm font-medium px-4 py-2 rounded-xl border border-slate-200 hover:bg-white text-slate-700 transition-colors">
             {state.cancelLabel || 'Cancel'}
           </button>
           <button onClick={onConfirm} autoFocus
-            className={`text-sm font-medium px-4 py-2 rounded-xl text-white ${t.btn}`}>
+            className={`text-sm font-medium px-4 py-2 rounded-xl text-white transition-colors ${t.btn}`}>
             {state.confirmLabel || 'Confirm'}
           </button>
         </div>

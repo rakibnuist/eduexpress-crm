@@ -79,6 +79,7 @@ export const api = {
   createLead:   (d)      => req('/leads',       { method: 'POST', body: JSON.stringify(d) }),
   updateLead:   (id, d)  => req(`/leads/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteLead:   (id)     => req(`/leads/${id}`, { method: 'DELETE' }),
+  bulkAssignLeads: (ids, consultant) => req('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, consultant }) }),
   leadTimeline: (id)     => req(`/leads/${id}/timeline`),
   addNote:      (id, t)  => req(`/leads/${id}/notes`, { method: 'POST', body: JSON.stringify({ text: t }) }),
 
@@ -135,8 +136,10 @@ export const api = {
   replyToStudent:    (id, t)   => req(`/leads/${id}/reply-to-student`, { method: 'POST', body: JSON.stringify({ text: t }) }),
   studentThread:     (token)   => fetch(`/api/public/student/${token}/thread`).then(r => r.ok ? r.json() : Promise.reject(new Error(r.statusText))),
 
-  // Employees
+  // Auto-link current user to an HR employee record
+  autoLinkEmployee: () => req('/employees/auto-link', { method: 'POST' }),
   employees:      ()      => req('/employees'),
+  employeesActive: ()    => req('/employees/active'),
   createEmployee: (d)     => req('/employees',       { method: 'POST', body: JSON.stringify(d) }),
   updateEmployee: (id, d) => req(`/employees/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteEmployee: (id)    => req(`/employees/${id}`, { method: 'DELETE' }),
@@ -212,4 +215,38 @@ export const api = {
     update: (res, id, d) => req(`/marketing/${res}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
     remove: (res, id)    => req(`/marketing/${res}/${id}`, { method: 'DELETE' }),
   },
+
+  // Automation Hub
+  automationRules: () => req('/automation/rules'),
+  createAutomationRule: (d) => req('/automation/rules', { method: 'POST', body: JSON.stringify(d) }),
+  updateAutomationRule: (id, d) => req(`/automation/rules/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteAutomationRule: (id) => req(`/automation/rules/${id}`, { method: 'DELETE' }),
+  testAutomationRule: (id) => req(`/automation/rules/${id}/test`, { method: 'POST' }),
+
+  templates: () => req('/templates'),
+  createTemplate: (d) => req('/templates', { method: 'POST', body: JSON.stringify(d) }),
+  updateTemplate: (id, d) => req(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteTemplate: (id) => req(`/templates/${id}`, { method: 'DELETE' }),
+
+  tags: () => req('/tags'),
+  createTag: (d) => req('/tags', { method: 'POST', body: JSON.stringify(d) }),
+  deleteTag: (id) => req(`/tags/${id}`, { method: 'DELETE' }),
+  tagContacts: (id) => req(`/tags/${id}/contacts`),
+
+  broadcastCampaigns: () => req('/broadcast-campaigns'),
+  createBroadcastCampaign: (d) => req('/broadcast-campaigns', { method: 'POST', body: JSON.stringify(d) }),
+  sendBroadcastCampaign: (id) => req(`/broadcast-campaigns/${id}/send`, { method: 'POST' }),
+  deleteBroadcastCampaign: (id) => req(`/broadcast-campaigns/${id}`, { method: 'DELETE' }),
+
+  conversationNotes: (id) => req(`/conversations/${id}/notes`),
+  addConversationNote: (id, d) => req(`/conversations/${id}/notes`, { method: 'POST', body: JSON.stringify(d) }),
+  addConversationTag: (id, d) => req(`/conversations/${id}/tags`, { method: 'POST', body: JSON.stringify(d) }),
+  removeConversationTag: (id, tagId) => req(`/conversations/${id}/tags/${tagId}`, { method: 'DELETE' }),
+  assignConversation: (id, d) => req(`/conversations/${id}/assign`, { method: 'PUT', body: JSON.stringify(d) }),
+
+  // Convert conversation to lead
+  convertConversationToLead: (id, d) => req(`/conversations/${id}/convert-to-lead`, { method: 'POST', body: JSON.stringify(d) }),
+  convertLeadToApplication: (id) => req(`/leads/${id}/convert-to-application`, { method: 'POST' }),
+
+  automationStats: () => req('/automation/stats'),
 };

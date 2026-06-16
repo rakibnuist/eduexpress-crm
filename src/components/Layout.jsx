@@ -1,34 +1,46 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone, Zap, Moon, PlusCircle
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
 import { useToast } from './Toast';
+import { useDarkMode } from '../hooks/useDarkMode';
 import NotificationBell from './NotificationBell';
+import { getNavForUser, getPrimaryRoleLabel, getPrimaryRoleBadgeClass } from '../lib/roles';
 
-const baseNav = [
-  { to: '/',             icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/cockpit',      icon: Eye,             label: 'Cockpit',     staffOnly: true },
-  { to: '/reports',      icon: FileBarChart,    label: 'Reports',     staffOnly: true },
-  { to: '/my-day',       icon: Sun,             label: 'Daily Workspace & Reflections' },
-  { to: '/leads',        icon: Users,           label: 'Leads & Pipeline' },
-  { to: '/applications', icon: Plane,           label: 'Applications' },
-  { to: '/conversations', icon: MessageSquare,   label: 'Chat Inbox' },
-  { to: '/marketing',    icon: Megaphone,       label: 'Marketing',   staffOnly: true },
-  { to: '/finance',      icon: DollarSign,      label: 'Finance',     adminOnly: true },
-  { to: '/hr',           icon: UserCheck,       label: 'HR',          adminOnly: true },
-  { to: '/settings',     icon: Settings,        label: 'Settings',    adminOnly: true },
-];
+// Icon map for dynamic nav generation
+const ICON_MAP = {
+  LayoutDashboard,
+  Eye,
+  FileBarChart,
+  Sun,
+  Users,
+  Plane,
+  PlusCircle,
+  MessageSquare,
+  Megaphone,
+  Zap,
+  DollarSign,
+  UserCheck,
+  Settings,
+};
 
 export default function Layout({ children, user, onLogout }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'admin';
-  const isStaff = user?.role === 'admin' || user?.role === 'manager';
-  const nav = baseNav.filter(n => (!n.adminOnly || isAdmin) && (!n.staffOnly || isStaff));
+  const { isDark, toggle } = useDarkMode();
+
+  // Generate navigation dynamically from user's roles (exclude action-only items)
+  const nav = getNavForUser(user)
+    .filter(item => !item.isAction)
+    .map(item => ({
+      ...item,
+      icon: ICON_MAP[item.icon] || LayoutDashboard,
+    }));
+
   const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'Core';
 
   const logout = async () => {
@@ -38,6 +50,8 @@ export default function Layout({ children, user, onLogout }) {
   };
 
   const initials = (user?.name || 'A').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
+  const roleLabel = getPrimaryRoleLabel(user);
+  const roleBadgeClass = getPrimaryRoleBadgeClass(user);
 
   const [attMsg, setAttMsg] = useState(() => sessionStorage.getItem('att_msg'));
   const [wifiSSID, setWifiSSID] = useState(null);
@@ -59,8 +73,6 @@ export default function Layout({ children, user, onLogout }) {
       if (ssid) {
         setWifiConfigured(ssid);
         
-        // Auto-simulate wifi connection inside office by default for convenient demonstration,
-        // or load from localStorage.
         const isSimulated = localStorage.getItem('simulated_wifi') !== 'false';
         if (isSimulated) {
           setWifiSSID(ssid);
@@ -83,7 +95,7 @@ export default function Layout({ children, user, onLogout }) {
         }
       }
     }).catch(err => console.error('Failed to load office config:', err));
-  }, [user]);
+  }, [user, toast]);
 
   const toggleWifiSimulation = () => {
     if (wifiSSID) {
@@ -156,14 +168,11 @@ export default function Layout({ children, user, onLogout }) {
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-slate-800 truncate">{user?.name || 'User'}</p>
               <div className="flex items-center gap-1.5">
-                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full
-                  ${user?.role === 'admin' ? 'bg-purple-100 text-purple-700'
-                  : user?.role === 'manager' ? 'bg-amber-100 text-amber-700'
-                  : 'bg-blue-100 text-blue-700'}`}>{user?.role || 'user'}</span>
+                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${roleBadgeClass}`}>{roleLabel}</span>
                 <span className="text-[10px] text-slate-400 truncate">{user?.email}</span>
               </div>
             </div>
-            <button onClick={logout} title="Log out"
+            <button onClick={logout} title="Log out" aria-label="Log out"
               className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
               <LogOut size={14} />
             </button>
@@ -181,7 +190,8 @@ export default function Layout({ children, user, onLogout }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 lg:px-6 gap-3 flex-shrink-0 shadow-sm">
           <button className="lg:hidden p-2 text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-            onClick={() => setOpen(o => !o)}>
+            onClick={() => setOpen(o => !o)}
+            aria-label={open ? "Close menu" : "Open menu"}>
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
           <h1 className="text-sm font-semibold text-slate-700 flex-1 truncate">{pageTitle}</h1>
@@ -199,6 +209,16 @@ export default function Layout({ children, user, onLogout }) {
               <kbd className="hidden lg:inline text-[10px] font-mono bg-slate-100 text-slate-500 px-1 rounded">⌘K</kbd>
             </button>
             <NotificationBell user={user} />
+
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={toggle}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label="Toggle dark mode"
+            >
+              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
 
             {/* Auto Wi-Fi Attendance Indicator & Simulator */}
             {wifiConfigured && (
@@ -230,12 +250,12 @@ export default function Layout({ children, user, onLogout }) {
 
             <div className="text-right hidden sm:block">
               <p className="text-xs font-medium text-slate-700">{user?.name || 'User'}</p>
-              <p className="text-xs text-slate-400 capitalize">{user?.role || ''}</p>
+              <p className="text-xs text-slate-400 capitalize">{roleLabel}</p>
             </div>
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-sm">
               {initials}
             </div>
-            <button onClick={logout} title="Log out"
+            <button onClick={logout} title="Log out" aria-label="Log out"
               className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
               <LogOut size={17} />
             </button>
@@ -245,7 +265,7 @@ export default function Layout({ children, user, onLogout }) {
         {attMsg && (
           <div className="bg-emerald-50 border-b border-emerald-100 text-emerald-700 text-xs px-4 lg:px-6 py-2 flex items-center justify-between">
             <span>{attMsg}</span>
-            <button onClick={() => setAttMsg(null)} className="text-emerald-500 hover:text-emerald-700">
+            <button onClick={() => setAttMsg(null)} className="text-emerald-500 hover:text-emerald-700" aria-label="Dismiss message">
               <X size={13} />
             </button>
           </div>

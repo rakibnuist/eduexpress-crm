@@ -6,9 +6,13 @@ import CommandPalette from './components/CommandPalette';
 import { ToastProvider } from './components/Toast';
 import { ConfirmProvider } from './components/Confirm';
 import { api } from './api';
+import {
+  hasPermission, isFullAdmin, isInvestor, canManageApplications,
+  canManageMarketing, canViewReports, canViewAutomation, canViewAllLeads, canViewAllConversations,
+  PERMISSIONS, canViewChinaData, normalizeUserRoles
+} from './lib/roles';
 
-// Route-level code splitting — each page loads on demand, keeping the
-// initial bundle small and first paint fast.
+// Route-level code splitting
 const Dashboard     = lazy(() => import('./pages/Dashboard'));
 const Cockpit       = lazy(() => import('./pages/Cockpit'));
 const Applications  = lazy(() => import('./pages/Applications'));
@@ -23,6 +27,7 @@ const LegalNotice   = lazy(() => import('./pages/LegalNotice'));
 const StudentPortal = lazy(() => import('./pages/StudentPortal'));
 const Conversations = lazy(() => import('./pages/Conversations'));
 const Marketing     = lazy(() => import('./pages/Marketing'));
+const Automation    = lazy(() => import('./pages/Automation'));
 
 function PageLoader() {
   return (
@@ -33,10 +38,10 @@ function PageLoader() {
 }
 
 export default function App() {
-  const [user, setUser] = useState(undefined); // undefined = loading, null = logged out
+  const [user, setUser] = useState(undefined);
 
   useEffect(() => {
-    api.me().then(u => setUser(u)).catch(() => setUser(null));
+    api.me().then(u => setUser(normalizeUserRoles(u))).catch(() => setUser(null));
   }, []);
 
   if (user === undefined) {
@@ -56,14 +61,12 @@ export default function App() {
         <ConfirmProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              {/* Public pages */}
               <Route path="/privacy" element={<LegalNotice />} />
               <Route path="/s/:token" element={<StudentPortal />} />
               <Route path="/login" element={
-                user ? <Navigate to="/" replace /> : <Login onSuccess={setUser} />
+                user ? <Navigate to="/" replace /> : <Login onSuccess={u => setUser(normalizeUserRoles(u))} />
               } />
 
-              {/* Protected app */}
               <Route path="/*" element={
                 !user ? <Navigate to="/login" replace /> :
                 <>
@@ -72,18 +75,19 @@ export default function App() {
                     <Suspense fallback={<PageLoader />}>
                       <Routes>
                         <Route path="/" element={<Dashboard user={user} />} />
-                        {(user.role === 'admin' || user.role === 'manager') && <Route path="/cockpit" element={<Cockpit />} />}
-                        {(user.role === 'admin' || user.role === 'manager') && <Route path="/reports" element={<Reports />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_COCKPIT) && <Route path="/cockpit" element={<Cockpit />} />}
+                        {canViewReports(user) && <Route path="/reports" element={<Reports />} />}
                         <Route path="/leads" element={<Leads user={user} />} />
                         <Route path="/leads/:id" element={<LeadDetail user={user} />} />
-                        <Route path="/my-day" element={<MyDay user={user} />} />
+                        {hasPermission(user, PERMISSIONS.VIEW_MY_DAY) && <Route path="/my-day" element={<MyDay user={user} />} />}
                         <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
                         <Route path="/applications" element={<Applications user={user} />} />
-                        <Route path="/conversations" element={<Conversations user={user} />} />
-                        {(user.role === 'admin' || user.role === 'manager') && <Route path="/marketing" element={<Marketing />} />}
-                        {user.role === 'admin' && <Route path="/finance" element={<Finance />} />}
-                        {user.role === 'admin' && <Route path="/hr" element={<HR user={user} />} />}
-                        {user.role === 'admin' && <Route path="/settings" element={<Settings />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_CHAT_INBOX) && <Route path="/conversations" element={<Conversations user={user} />} />}
+                        {canManageMarketing(user) && <Route path="/marketing" element={<Marketing />} />}
+                        {canViewAutomation(user) && <Route path="/automation" element={<Automation />} />}
+                        {isFullAdmin(user) && <Route path="/finance" element={<Finance />} />}
+                        {isFullAdmin(user) && <Route path="/hr" element={<HR user={user} />} />}
+                        {isFullAdmin(user) && <Route path="/settings" element={<Settings />} />}
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>
                     </Suspense>

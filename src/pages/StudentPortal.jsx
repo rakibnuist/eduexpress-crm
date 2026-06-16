@@ -6,13 +6,12 @@
      get a paste-link box so the student can submit a Google Drive share URL.
    - A simple message box that creates a note on the staff side.
    Polls every 60 seconds so updates appear without a refresh. */
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import {
-  GraduationCap, CheckCircle2, Clock, ExternalLink, AlertCircle, FileText,
-  Building2, Send, Plane, MapPin, Calendar, Phone, RefreshCw, Upload, Heart,
-  AlertTriangle,
+  GraduationCap, CheckCircle2, ExternalLink, AlertCircle, FileText,
+  Building2, Send, Plane, MapPin, RefreshCw, Upload, AlertTriangle,
 } from 'lucide-react';
 
 const UNI_STATUS_LABEL = {
@@ -61,10 +60,12 @@ export default function StudentPortal() {
     if (!silent) setRefreshing(false);
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) load(true); }, 60000);
     return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => {

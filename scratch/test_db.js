@@ -34,7 +34,7 @@ async function test() {
     const ws1 = '';
     const params1 = {};
     const total1 = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws1}`).get(params1).c;
-    const convs1 = db.prepare(`${CONV_SELECT} ${ws1} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`).all(params1);
+    db.prepare(`${CONV_SELECT} ${ws1} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`).all(params1);
     console.log('Admin query success. Total conversations:', total1);
 
     // 2. Test query with non-admin role (filter active)
@@ -45,7 +45,7 @@ async function test() {
       user_id: 1
     };
     const total2 = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws2}`).get(params2).c;
-    const convs2 = db.prepare(`${CONV_SELECT} ${ws2} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`).all(params2);
+    db.prepare(`${CONV_SELECT} ${ws2} ORDER BY conversations.last_message_at DESC LIMIT 30 OFFSET 0`).all(params2);
     console.log('Employee query success. Total conversations:', total2);
 
     console.log('All tests passed successfully!');

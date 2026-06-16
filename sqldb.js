@@ -293,6 +293,9 @@ export async function initDatabase(dbPath) {
       } catch { return []; }
     },
 
-    close() { immediatelySave(); _db.close(); }
+    close() { immediatelySave(); _db.close(); },
+
+    // Export raw sql.js database (for backup/download)
+    export() { return _db.export(); }
   };
 }

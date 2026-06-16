@@ -7,7 +7,7 @@ import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
-const SOURCES   = ['In-House', 'B2B'];
+const SOURCES   = ['In-House', 'B2B', 'China', 'Agent'];
 const DEGREES   = ['Diploma', 'Bachelor', 'L+Bachelor', 'L+Diploma', 'Masters', 'PhD'];
 const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
@@ -26,18 +26,23 @@ export default function LeadForm({ lead, settings, onSave }) {
   const [form, setForm] = useState(initial(lead));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const toast = useToast();
 
   const mappedStages = useMemo(() => mapStages(settings?.fileStages), [settings?.fileStages]);
 
   // Pre-populate the referrer autocomplete from values already in use.
-  // Saves consultants from typo'ing existing names.
   useEffect(() => {
     api.leads({ limit: 2000 }).then(d => {
       const set = new Set();
       (d.leads || []).forEach(l => { if (l.referrer) set.add(l.referrer); });
       setReferrerList(Array.from(set).sort());
     }).catch(() => {});
+  }, []);
+
+  // Fetch active employees for consultant dropdown
+  useEffect(() => {
+    api.employeesActive().then(setEmployees).catch(() => setEmployees([]));
   }, []);
 
   // Auto-balance = fee - paid; show live but don't make it editable.
@@ -59,7 +64,13 @@ export default function LeadForm({ lead, settings, onSave }) {
         service_fee: form.service_fee === '' ? 0 : Number(form.service_fee),
         paid:        form.paid        === '' ? 0 : Number(form.paid),
         deposit:     form.deposit     === '' ? 0 : Number(form.deposit),
+        assigned_employee_id: form.assigned_employee_id ? Number(form.assigned_employee_id) : null,
       };
+      // Keep assigned_consultant in sync if employee selected
+      if (payload.assigned_employee_id) {
+        const emp = employees.find(e => e.id === payload.assigned_employee_id);
+        if (emp?.name) payload.assigned_consultant = emp.name;
+      }
       if (lead) { await api.updateLead(lead.id, payload); toast.success(`${form.client_name} updated`); }
       else      { await api.createLead(payload); toast.success(`${form.client_name} added`); }
       onSave?.();
@@ -131,8 +142,8 @@ export default function LeadForm({ lead, settings, onSave }) {
             options={settings?.leadStatuses || []} placeholder="— pick —" />
         </Row>
         <Row>
-          <SelectField label="Assigned consultant" value={form.assigned_consultant} onChange={v => set('assigned_consultant', v)}
-            options={settings?.consultants || []} placeholder="— pick —" />
+          <EmployeeSelect label="Assigned consultant" value={form.assigned_employee_id || ''} onChange={v => set('assigned_employee_id', v)}
+            employees={employees} placeholder="— pick —" />
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
         {(form.lead_status === 'File Opened' || form.lead_status === 'Enrolled') && (
@@ -144,7 +155,7 @@ export default function LeadForm({ lead, settings, onSave }) {
               <select
                 value={form.application_stage || mappedStages[0]?.key || ''}
                 onChange={e => set('application_stage', e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white font-semibold text-slate-700 cursor-pointer"
+                className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white font-semibold text-slate-700 cursor-pointer"
               >
                 <option value="">— pick file stage —</option>
                 {mappedStages.map(s => (
@@ -229,6 +240,14 @@ function initial(lead) {
     date_added: new Date().toISOString().slice(0, 10),
     nationality: 'Bangladesh',
     service_fee: '', paid: '', deposit: '',
+    source: '', lead_source: '', referrer: '',
+    destination: '', degree: '', major: '',
+    intake_term: '', university: '', last_education: '',
+    passport: '', english_score: '',
+    drive_link: '',
+    blood_group: '', date_of_birth: '',
+    medical_notes: '', emergency_contact: '',
+    gpa: '',
   };
   return {
     ...lead,
@@ -237,6 +256,7 @@ function initial(lead) {
     paid:        lead.paid ?? '',
     deposit:     lead.deposit ?? '',
     phone:       lead.phone ?? '',
+    assigned_employee_id: lead.assigned_employee_id ?? '',
     // ensure all the Excel + medical fields exist on the form even if null in DB
     source: lead.source ?? '', referrer: lead.referrer ?? '',
     nationality: lead.nationality ?? '', passport: lead.passport ?? '',
@@ -282,7 +302,7 @@ function Field({ label, value = '', onChange, type = 'text', placeholder, requir
       </label>
       <input type={type} required={required} value={value ?? ''} onChange={e => onChange(e.target.value)}
         placeholder={placeholder} list={list} step={step}
-        className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${mono ? 'font-mono' : ''}`} />
+        className={`w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${mono ? 'font-mono' : ''}`} />
     </div>
   );
 }
@@ -294,7 +314,7 @@ function SelectField({ label, value = '', onChange, options = [], placeholder = 
         {label}{required && <span className="text-rose-500"> *</span>}
       </label>
       <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required}
-        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
+        className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer">
         <option value="">{placeholder}</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -308,6 +328,21 @@ function TextareaField({ label, value = '', onChange, placeholder, rows = 3 }) {
       <label className="block text-xs font-semibold text-slate-600 mb-1">{label}</label>
       <textarea rows={rows} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" />
+    </div>
+  );
+}
+
+function EmployeeSelect({ label, value = '', onChange, employees = [], placeholder = '— select —', required }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-600 mb-1">
+        {label}{required && <span className="text-rose-500"> *</span>}
+      </label>
+      <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required}
+        className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer">
+        <option value="">{placeholder}</option>
+        {employees.map(e => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
+      </select>
     </div>
   );
 }

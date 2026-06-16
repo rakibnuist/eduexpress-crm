@@ -1,11 +1,15 @@
-/* Applications — mirrors the EduExpress "File Updates" workbook.
-   Lead Management ends at File Open; from there the Applications module owns
-   the workflow: Documents → Ready → Submitted → Admitted → Visa Applied →
-   Visa Approved → Departed → Arrived.
-   Two views: Kanban (one column per stage) and Table (Excel-style row view).
-   Side panel covers: Source (Agent/In-house), Referrer, Nationality, Passport,
-   Intake, Degree, Major, Universities (multi-uni per applicant w/ status),
-   Drive Link, Deposit, Visa & Departure dates, Notes, Documents checklist.
+/* Applications Hub — redesigned per EduExpress business model
+   ┌─────────────────────────────────────────────┐
+   │ Source Markets  │  Bangladesh Channels        │
+   │  All │ China* │ Bangladesh  │ Office │ B2B  │
+   ├─────────────────────────────────────────────┤
+   │ Destination: [All ▼] (syncable across app) │
+   ├─────────────────────────────────────────────┤
+   │ Kanban / Table view + filters               │
+   └─────────────────────────────────────────────┘
+   * China tab visible only to Founder & CEO + Application Manager
+   * Destinations are where students GO TO (Malaysia, Thailand, China…)
+   * Source markets are where students come FROM (China, Bangladesh)
 */
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { api } from '../api';
@@ -13,11 +17,14 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import Modal from '../components/Modal';
 import {
-  GraduationCap, RefreshCw, X, CheckCircle2, AlertTriangle, ExternalLink,
+  GraduationCap, RefreshCw, X, CheckCircle2, ExternalLink,
   CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
-  LayoutGrid, Table as TableIcon, Filter, Building2, User, ChevronDown,
-  Share2, Copy, QrCode, RotateCw, Search,
+  LayoutGrid, Table as TableIcon, Building2, ChevronDown,
+  Share2, Copy, QrCode, RotateCw, Search, ArrowUpDown, Download, Filter,
+  BarChart3, Clock, DollarSign, CheckCircle, Globe
 } from 'lucide-react';
+import { fmtCurrency, timeAgo } from '../lib/format';
+import { isFullAdmin, userHasRole, canAddChinaApplication, canViewChinaData } from '../lib/roles';
 
 const ensureAbsoluteUrl = (url) => {
   if (!url) return '';
@@ -28,7 +35,7 @@ const ensureAbsoluteUrl = (url) => {
 const STAGE_COLORS = {
   documents:          { bg: 'bg-slate-50 text-slate-700',  border: 'border-slate-200',   pill: 'bg-slate-200 text-slate-700' },
   ready:              { bg: 'bg-blue-50 text-blue-800',    border: 'border-blue-200',    pill: 'bg-blue-200 text-blue-800' },
-  submitted:          { bg: 'bg-violet-50 text-violet-850',border: 'border-violet-200',  pill: 'bg-violet-200 text-violet-800' },
+  submitted:          { bg: 'bg-violet-50 text-violet-800',border: 'border-violet-200',  pill: 'bg-violet-200 text-violet-800' },
   interview:          { bg: 'bg-indigo-50 text-indigo-800',border: 'border-indigo-200',  pill: 'bg-indigo-200 text-indigo-800' },
   in_review:          { bg: 'bg-sky-50 text-sky-800',      border: 'border-sky-200',     pill: 'bg-sky-200 text-sky-800' },
   pre_admission:      { bg: 'bg-cyan-50 text-cyan-800',    border: 'border-cyan-200',    pill: 'bg-cyan-200 text-cyan-800' },
@@ -40,9 +47,9 @@ const STAGE_COLORS = {
   visa_approved:      { bg: 'bg-green-50 text-green-800',  border: 'border-green-200',   pill: 'bg-green-200 text-green-800' },
   payment_complete:   { bg: 'bg-fuchsia-50 text-fuchsia-800', border: 'border-fuchsia-200', pill: 'bg-fuchsia-200 text-fuchsia-800' },
   visa_rejected:      { bg: 'bg-red-50 text-red-800',      border: 'border-red-200',     pill: 'bg-red-200 text-red-800' },
-  enrolled:           { bg: 'bg-emerald-100 text-emerald-800', border: 'border-emerald-350', pill: 'bg-emerald-600 text-white font-bold' },
-  cancelled:          { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300',   pill: 'bg-slate-550 text-white' },
-  withdraw:           { bg: 'bg-orange-100 text-orange-800', border: 'border-orange-350', pill: 'bg-orange-600 text-white font-bold' },
+  enrolled:           { bg: 'bg-emerald-100 text-emerald-800', border: 'border-emerald-300', pill: 'bg-emerald-600 text-white font-bold' },
+  cancelled:          { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300',   pill: 'bg-slate-500 text-white' },
+  withdraw:           { bg: 'bg-orange-100 text-orange-800', border: 'border-orange-300', pill: 'bg-orange-600 text-white font-bold' },
 };
 
 const STAGE_COLORS_LIST = [
@@ -71,139 +78,139 @@ const DOC_STATUSES = [
 const UNI_STATUSES = [
   { key: 'ready',               label: 'Ready',               cls: 'bg-blue-100 text-blue-700' },
   { key: 'submitted',           label: 'Submitted',           cls: 'bg-violet-100 text-violet-700' },
-  { key: 'pending',             label: 'Pending',             cls: 'bg-slate-100 text-slate-650' },
+  { key: 'pending',             label: 'Pending',             cls: 'bg-slate-100 text-slate-600' },
   { key: 'processing',          label: 'Processing',          cls: 'bg-indigo-100 text-indigo-700' },
   { key: 'initial_review_pass', label: 'Initial Review Pass', cls: 'bg-sky-100 text-sky-700' },
   { key: 'interview',           label: 'Interview',           cls: 'bg-amber-100 text-amber-700' },
   { key: 'pre_admission',       label: 'Pre-Admission',       cls: 'bg-cyan-100 text-cyan-700' },
-  { key: 'admitted',            label: 'Admitted',            cls: 'bg-emerald-100 text-emerald-750 font-bold' },
+  { key: 'admitted',            label: 'Admitted',            cls: 'bg-emerald-100 text-emerald-700 font-bold' },
   { key: 'returned',            label: 'Returned',            cls: 'bg-orange-100 text-orange-700 font-medium' },
   { key: 'rejected',            label: 'Rejected',            cls: 'bg-rose-100 text-rose-700 font-medium' },
 ];
 
-const SOURCES = ['In-House', 'B2B', 'China'];
 const DEGREES = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'L+Bachelor', 'L+Diploma'];
 
-export default function Applications({ user }) {
-  useEffect(() => { document.title = "Application Hub | EduExpress Core"; }, []);
+function unique(arr) { return Array.from(new Set(arr.filter(Boolean))).sort(); }
 
+export default function Applications({ user }) {
+  useEffect(() => { document.title = 'Applications Hub | EduExpress Core'; }, []);
   const toast = useToast();
-  const [stages, setStages]   = useState([]);
-  const [rows, setRows]       = useState([]);
+  const confirm = useConfirm();
+
+  const [meta, setMeta] = useState({ stages: [], destinations: [], sources: [], bdChannels: [] });
+  const [settings, setSettings] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [stages, setStages] = useState([]);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [filterStage, setFilterStage]     = useState('all');
-  const [filterDest, setFilterDest]       = useState('all');
-  const [filterSource, setFilterSource]   = useState('all');
-  const [filterReferrer, setFilterReferrer] = useState('all');
-  const [filterConsultant, setFilterConsultant] = useState('all');
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [view, setView] = useState(() => localStorage.getItem('app_view') || 'kanban');
-
-  const [settings, setSettings] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newApp, setNewApp] = useState({
-    client_name: '',
-    phone: '',
-    destination: 'China',
-    degree: 'Bachelor',
-    major: '',
-    university: '',
-    source: 'In-House',
-    referrer: '',
-    assigned_consultant: '',
+
+  // ── Source Market (business model) ──
+  const [sourceMarket, setSourceMarket] = useState(() => {
+    const saved = localStorage.getItem('app_source_market');
+    if (saved === 'china' && !canViewChinaData(user)) return 'all';
+    return saved || 'all';
+  });
+  const [bdChannel, setBdChannel] = useState(() => localStorage.getItem('app_bd_channel') || 'office');
+
+  // ── Destination (where students GO TO — syncable across app) ──
+  const [destinationFilter, setDestinationFilter] = useState(() => {
+    return localStorage.getItem('global_destination') || 'all';
   });
 
-  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
-  const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
-
+  const [view, setView] = useState(() => localStorage.getItem('app_view') || 'kanban');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStage, setFilterStage] = useState('all');
+  const [filterUniversity, setFilterUniversity] = useState('all');
+  const [filterConsultant, setFilterConsultant] = useState('all');
+  const [filterSource, setFilterSource] = useState('all');
+  const [sortConfig, setSortConfig] = useState({ key: null, dir: 'asc' });
   const [hideEmptyColumns, setHideEmptyColumns] = useState(() => localStorage.getItem('hide_empty_cols') === 'true');
-  useEffect(() => { localStorage.setItem('hide_empty_cols', hideEmptyColumns); }, [hideEmptyColumns]);
 
+  const [newApp, setNewApp] = useState({
+    client_name: '', phone: '', destination: '', degree: 'Bachelor', major: '',
+    university: '', source: '', referrer: '', assigned_employee_id: '',
+  });
+
+  // Load meta + settings + employees once on mount
   useEffect(() => {
     api.settings().then(setSettings).catch(() => {});
-  }, []);
 
-  useEffect(() => {
-    setSelectedIds([]);
-  }, [view, filterStage, filterDest, filterSource, filterReferrer, filterConsultant, searchQuery]);
-
-  const handleBulkDelete = async () => {
-    try {
-      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
-      setSelectedIds([]);
-      setBulkDeleting(false);
-      load();
-      toast.success(`${selectedIds.length} applications deleted successfully`);
-    } catch (err) {
-      toast.error(err.message || 'Could not delete some applications');
-    }
-  };
-
-  const handleCreateApplication = async (e) => {
-    e.preventDefault();
-    if (!newApp.client_name || !newApp.phone) {
-      toast.error("Full name and Phone number are required");
-      return;
-    }
-    try {
-      const payload = {
-        ...newApp,
-        lead_status: 'File Opened',
-        application_stage: 'documents',
-      };
-      await api.createLead(payload);
-      toast.success(`Application for ${newApp.client_name} created successfully`);
-      setShowAddModal(false);
-      setNewApp({
-        client_name: '',
-        phone: '',
-        destination: 'China',
-        degree: 'Bachelor',
-        major: '',
-        university: '',
-        source: 'In-House',
-        referrer: '',
-        assigned_consultant: '',
+    api.applicationMeta().then(m => {
+      setMeta(m || { stages: [], destinations: [], sources: [], bdChannels: [] });
+      setStages(m?.stages || []);
+      // Validate saved source market against permissions
+      setSourceMarket(prev => {
+        if (prev === 'china' && !canViewChinaData(user)) return 'all';
+        return prev;
       });
-      load();
-    } catch (err) {
-      toast.error(err.message || 'Could not create application');
-    }
-  };
+    }).catch(() => {});
+
+    fetch('/api/employees/active', { credentials: 'include', headers: { 'Content-Type': 'application/json' } })
+      .then(r => r.ok ? r.json() : [])
+      .then(setEmployees)
+      .catch(() => setEmployees([]));
+  }, [user]);
+
+  useEffect(() => { localStorage.setItem('app_source_market', sourceMarket); }, [sourceMarket]);
+  useEffect(() => { localStorage.setItem('app_bd_channel', bdChannel); }, [bdChannel]);
+  useEffect(() => { localStorage.setItem('global_destination', destinationFilter); }, [destinationFilter]);
+  useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
+  useEffect(() => { localStorage.setItem('hide_empty_cols', hideEmptyColumns); }, [hideEmptyColumns]);
+  useEffect(() => { setSelectedIds([]); }, [sourceMarket, bdChannel, destinationFilter, view, filterStage, filterUniversity, filterConsultant, filterSource, searchQuery]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const d = await api.applications(); setStages(d.stages); setRows(d.rows); }
-    finally { setLoading(false); }
-  }, []);
+    try {
+      const params = {};
+      if (sourceMarket && sourceMarket !== 'all') params.source_market = sourceMarket;
+      if (sourceMarket === 'bangladesh' && bdChannel && bdChannel !== 'all') params.bd_channel = bdChannel;
+      if (destinationFilter && destinationFilter !== 'all') params.destination = destinationFilter;
+      const d = await api.applications(params);
+      setStages(d.stages || []);
+      setRows(d.rows || []);
+    } finally { setLoading(false); }
+  }, [sourceMarket, bdChannel, destinationFilter]);
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
-
-  const filtered = useMemo(() => rows.filter(r => {
-    const defaultStage = stages[0]?.key || 'documents';
-    if (filterStage    !== 'all' && (r.application_stage || defaultStage) !== filterStage) return false;
-    if (filterDest     !== 'all' && r.destination !== filterDest)     return false;
-    if (filterSource   !== 'all' && r.source !== filterSource)        return false;
-    if (filterReferrer !== 'all' && r.referrer !== filterReferrer)    return false;
-    if (filterConsultant !== 'all' && r.assigned_consultant !== filterConsultant) return false;
+  // ── Client-side filtering (on top of server-side) ──
+  const filtered = useMemo(() => {
+    let list = [...rows];
+    if (filterStage !== 'all') {
+      list = list.filter(r => (r.application_stage || stages[0]?.key || 'documents') === filterStage);
+    }
+    if (filterUniversity !== 'all') {
+      list = list.filter(r => (r.university || '').toLowerCase().includes(filterUniversity.toLowerCase()) || (r.uni_list || '').toLowerCase().includes(filterUniversity.toLowerCase()));
+    }
+    if (filterConsultant !== 'all') {
+      list = list.filter(r => String(r.assigned_employee_id || r.assigned_consultant || '') === filterConsultant);
+    }
+    if (filterSource !== 'all') {
+      list = list.filter(r => r.source === filterSource);
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      const nameMatch = (r.client_name || '').toLowerCase().includes(q);
-      const idMatch = (r.lead_id || '').toLowerCase().includes(q);
-      const destMatch = (r.destination || '').toLowerCase().includes(q);
-      const majorMatch = (r.major || '').toLowerCase().includes(q);
-      const universityMatch = (r.university || '').toLowerCase().includes(q);
-      const consultantMatch = (r.assigned_consultant || '').toLowerCase().includes(q);
-      const degreeMatch = (r.degree || '').toLowerCase().includes(q);
-      const referrerMatch = (r.referrer || '').toLowerCase().includes(q);
-      if (!nameMatch && !idMatch && !destMatch && !majorMatch && !universityMatch && !consultantMatch && !degreeMatch && !referrerMatch) return false;
+      list = list.filter(r =>
+        (r.client_name || '').toLowerCase().includes(q) ||
+        (r.phone || '').toLowerCase().includes(q) ||
+        (r.passport || '').toLowerCase().includes(q) ||
+        (r.university || '').toLowerCase().includes(q) ||
+        (r.lead_id || '').toLowerCase().includes(q)
+      );
     }
-    return true;
-  }), [rows, stages, filterStage, filterDest, filterSource, filterReferrer, filterConsultant, searchQuery]);
+    if (sortConfig.key) {
+      list.sort((a, b) => {
+        const av = a[sortConfig.key] || '';
+        const bv = b[sortConfig.key] || '';
+        if (typeof av === 'number' && typeof bv === 'number') return sortConfig.dir === 'asc' ? av - bv : bv - av;
+        return sortConfig.dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+      });
+    }
+    return list;
+  }, [rows, filterStage, filterUniversity, filterConsultant, filterSource, searchQuery, sortConfig, stages]);
 
   const stageCounts = useMemo(() => {
     const m = Object.fromEntries(stages.map(s => [s.key, 0]));
@@ -215,155 +222,274 @@ export default function Applications({ user }) {
     return m;
   }, [rows, stages]);
 
-  const destinations = useMemo(() => unique(rows.map(r => r.destination)), [rows]);
-  const referrers    = useMemo(() => unique(rows.map(r => r.referrer)), [rows]);
-  const consultants  = useMemo(() => unique(rows.map(r => r.assigned_consultant)), [rows]);
-
-  const sourceSplit = useMemo(() => {
-    const m = { 'In-House': 0, 'B2B': 0, 'Unknown': 0 };
-    filtered.forEach(r => {
-      const s = r.source || '';
-      if (s.toLowerCase() === 'in-house') m['In-House']++;
-      else if (s === 'B2B' || s === 'Agent') m['B2B']++;
-      else m['Unknown']++;
-    });
-    return m;
+  const stats = useMemo(() => {
+    const total = filtered.length;
+    const docs = filtered.filter(r => r.docs_received > 0).length;
+    const submitted = filtered.filter(r => ['submitted','interview','in_review','pre_admission','admitted','jw202','visa_applied','visa_approved','enrolled'].includes(r.application_stage)).length;
+    const admitted = filtered.filter(r => ['admitted','jw202','visa_applied','visa_approved','enrolled'].includes(r.application_stage)).length;
+    const visa = filtered.filter(r => ['visa_approved','enrolled'].includes(r.application_stage)).length;
+    const enrolled = filtered.filter(r => r.application_stage === 'enrolled').length;
+    return { total, docs, submitted, admitted, visa, enrolled };
   }, [filtered]);
 
-  const isFilterActive = filterSource !== 'all' || filterDest !== 'all' || filterReferrer !== 'all' || filterConsultant !== 'all' || searchQuery;
+  const universities = useMemo(() => unique(rows.map(r => r.university).concat(rows.map(r => r.uni_list?.split(', ')[0])).filter(Boolean)), [rows]);
+
+  const consultants = useMemo(() => {
+    // Use settings.consultants (same source as Leads & Settings) for consistent filter list
+    const list = (settings?.consultants || []).map(name => ({ value: name, label: name }));
+    // Add legacy consultants from current rows that are not in the settings list
+    const legacy = new Set();
+    rows.forEach(r => {
+      if (r.assigned_consultant && !settings?.consultants?.includes(r.assigned_consultant)) {
+        legacy.add(r.assigned_consultant);
+      }
+    });
+    legacy.forEach(name => list.push({ value: name, label: `${name} (legacy)` }));
+    return list.sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows, settings]);
+
+  const isFilterActive = filterStage !== 'all' || filterUniversity !== 'all' || filterConsultant !== 'all' || filterSource !== 'all' || searchQuery || destinationFilter !== 'all';
+
+  const handleBulkDelete = async () => {
+    try {
+      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
+      setSelectedIds([]); setBulkDeleting(false); load();
+      toast.success(`${selectedIds.length} applications deleted`);
+    } catch (err) { toast.error(err.message || 'Could not delete'); }
+  };
+
+  const handleCreateApplication = async (e) => {
+    e.preventDefault();
+    if (!newApp.client_name || !newApp.phone) { toast.error('Name and phone required'); return; }
+    try {
+      const payload = { ...newApp, lead_status: 'File Opened', application_stage: 'documents' };
+      if (payload.assigned_employee_id) {
+        payload.assigned_employee_id = Number(payload.assigned_employee_id);
+      }
+      await api.createLead(payload);
+      toast.success(`Application for ${newApp.client_name} created`);
+      setShowAddModal(false);
+      setNewApp({
+        client_name: '', phone: '', destination: settings?.destinations?.[0] || '', degree: 'Bachelor', major: '',
+        university: '', source: meta.sources?.[0]?.key || '', referrer: '', assigned_employee_id: '',
+      });
+      load();
+    } catch (err) { toast.error(err.message || 'Could not create'); }
+  };
+
+  const handleExportExcel = () => {
+    const data = filtered.map(r => ({
+      'Lead ID': r.lead_id, 'Name': r.client_name, 'Phone': r.phone, 'Destination': r.destination,
+      'Source': r.source, 'Stage': stages.find(s => s.key === r.application_stage)?.label || r.application_stage,
+      'University': r.university, 'Degree': r.degree, 'Major': r.major, 'Consultant': r.employee_name || r.assigned_consultant,
+      'Deposit': r.deposit, 'Balance': r.balance, 'Passport': r.passport, 'Nationality': r.nationality,
+    }));
+    if (!data.length) { toast.info('No data to export'); return; }
+    import('xlsx').then(XLSX => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Applications');
+      const regionLabel = sourceMarket === 'all' ? 'all' : sourceMarket.toLowerCase().replace(/\s+/g, '_');
+      XLSX.writeFile(wb, `applications_${regionLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
+      toast.success('Exported to Excel');
+    }).catch(() => toast.error('Excel export failed'));
+  };
+
+  // ── Helpers for add-modal defaults based on current tab ──
+  const getDefaultSourceForTab = () => {
+    if (sourceMarket === 'china') return 'China';
+    if (sourceMarket === 'bangladesh') {
+      if (bdChannel === 'b2b') return 'B2B';
+      return 'In-House';
+    }
+    return meta.sources?.[0]?.key || '';
+  };
+
+  const getDefaultDestinationForTab = () => {
+    if (destinationFilter && destinationFilter !== 'all') return destinationFilter;
+    return settings?.destinations?.[0] || '';
+  };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <GraduationCap size={22} className="text-blue-600" /> Application Pipeline
+            <GraduationCap size={22} className="text-blue-600" /> Applications Hub
           </h2>
           <p className="text-sm text-slate-500">
-            {filtered.length} active{rows.length !== filtered.length ? ` of ${rows.length}` : ''} ·
-            <strong className="text-emerald-600 ml-1">{sourceSplit['In-House']}</strong> in-house ·
-            <strong className="text-violet-600 ml-1">{sourceSplit['B2B']}</strong> B2B
+            {filtered.length} active · {sourceMarket === 'all' ? 'All Markets' : sourceMarket === 'china' ? 'China Market' : 'Bangladesh Market'}
+            {sourceMarket === 'bangladesh' && ` · ${bdChannel === 'office' ? 'Office (In-House)' : 'B2B / Agent'}`}
+            {destinationFilter !== 'all' && ` · Destination: ${destinationFilter}`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* View toggle */}
           <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button onClick={() => setView('kanban')}
-              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setView('kanban')} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <LayoutGrid size={13} /> Kanban
             </button>
-            <button onClick={() => setView('table')}
-              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button onClick={() => setView('table')} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <TableIcon size={13} /> Table
             </button>
           </div>
-          <button onClick={load} disabled={loading}
-            className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+          <button onClick={load} disabled={loading} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
-          {selectedIds.length > 0 && (
-            <button onClick={() => setBulkDeleting(true)}
-              className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-              <Trash2 size={16} /> Delete Selected ({selectedIds.length})
+          {selectedIds.length > 0 && isFullAdmin(user) && (
+            <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+              <Trash2 size={16} /> Delete ({selectedIds.length})
             </button>
           )}
-          <button onClick={() => {
-            setNewApp(prev => ({
-              ...prev,
-              source: 'In-House'
-            }));
-            setShowAddModal(true);
-          }}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-            <Plus size={16} /> Add Application
+          {(isFullAdmin(user) || userHasRole(user, 'application_manager')) && (
+            <button onClick={handleExportExcel} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+              <Download size={16} /> Export
+            </button>
+          )}
+          {(sourceMarket !== 'china' || canAddChinaApplication(user)) && (
+            <button onClick={() => {
+              setNewApp(prev => ({
+                ...prev,
+                destination: getDefaultDestinationForTab(),
+                source: getDefaultSourceForTab()
+              }));
+              setShowAddModal(true);
+            }} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+              <Plus size={16} /> Add Application
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════
+          SOURCE MARKET TABS (Business Model: China vs Bangladesh)
+          ═══════════════════════════════════════════════════════ */}
+      <div className="flex gap-2 border-b border-slate-200 pb-0">
+        <button onClick={() => { setSourceMarket('all'); setBdChannel('office'); }}
+          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'all' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          All Markets
+        </button>
+        {/* China tab — visible only to Founder & CEO + Application Manager. Managing Director does NOT see this. */}
+        {canViewChinaData(user) && (
+          <button onClick={() => { setSourceMarket('china'); setBdChannel('all'); }}
+            className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'china' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            🇨🇳 China <span className="text-[10px] font-normal text-slate-400 ml-1">(Source)</span>
           </button>
-        </div>
+        )}
+        <button onClick={() => { setSourceMarket('bangladesh'); setBdChannel('office'); }}
+          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'bangladesh' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          🇧🇩 Bangladesh <span className="text-[10px] font-normal text-slate-400 ml-1">(Source)</span>
+        </button>
       </div>
 
-      {/* Advanced Sticky Filter & Search Bar */}
-      <div className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur-md -mx-4 lg:-mx-6 px-4 lg:px-6 py-2 border-b border-slate-200/80">
-        <div className="bg-white border border-slate-200 rounded-2xl p-2.5 shadow-sm flex flex-wrap gap-2.5 items-center">
-          <div className="relative flex-1 min-w-[240px]">
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              className="pl-10 pr-9 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
-              placeholder="Search by name, ID, major, university, degree, consultant..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
-              >
-                <X size={14} />
-              </button>
-            )}
+      {/* Bangladesh Channel Sub-tabs */}
+      {sourceMarket === 'bangladesh' && (
+        <div className="flex items-center gap-3">
+          <div className="flex gap-2">
+            <button onClick={() => setBdChannel('office')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'office' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              Office (In-House / B2C)
+            </button>
+            <button onClick={() => setBdChannel('b2b')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'b2b' ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              B2B / Agent
+            </button>
           </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
-              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
-                ${filterSource !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-              <option value="all">All Sources</option>
-              {visibleSources.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            
-            <select value={filterDest} onChange={e => setFilterDest(e.target.value)}
-              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
-                ${filterDest !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-              <option value="all">All Destinations</option>
-              {destinations.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-
-            <select value={filterReferrer} onChange={e => setFilterReferrer(e.target.value)}
-              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[160px]
-                ${filterReferrer !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-              <option value="all">All Referrers</option>
-              {referrers.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-
-            <select value={filterConsultant} onChange={e => setFilterConsultant(e.target.value)}
-              className={`px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100
-                ${filterConsultant !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-              <option value="all">All Consultants</option>
-              {consultants.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-
-            {view === 'kanban' && (
-              <label className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white cursor-pointer select-none hover:bg-slate-50 transition-colors">
-                <input type="checkbox" checked={hideEmptyColumns} onChange={e => setHideEmptyColumns(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
-                <span className="text-slate-600 font-semibold">Hide empty columns</span>
-              </label>
-            )}
-
-            {isFilterActive && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setFilterSource('all');
-                  setFilterDest('all');
-                  setFilterReferrer('all');
-                  setFilterConsultant('all');
-                }}
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold"
-              >
-                <X size={14} /> Clear all filters
-              </button>
-            )}
-          </div>
+          <div className="h-px flex-1 bg-slate-100" />
         </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════
+          DESTINATION FILTER (syncable across the whole app)
+          ═══════════════════════════════════════════════════════ */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Globe size={14} className="text-slate-400" />
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Destination</span>
+          <select value={destinationFilter} onChange={e => setDestinationFilter(e.target.value)}
+            className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${destinationFilter !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+            <option value="all">All Destinations</option>
+            {settings?.destinations?.map(dest => <option key={dest} value={dest}>{dest}</option>)}
+          </select>
+          {destinationFilter !== 'all' && (
+            <button onClick={() => setDestinationFilter('all')}
+              className="text-xs text-slate-400 hover:text-rose-500 px-2 py-1 rounded-lg hover:bg-rose-50 transition-all">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-400">Where the student goes TO study. Synced across app.</p>
       </div>
 
-      {/* Stage pill strip — click to filter, click again to clear */}
+      {/* Stats Bar */}
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+        {[
+          { label: 'Total', value: stats.total, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Docs Ready', value: stats.docs, icon: FileText, color: 'text-slate-600', bg: 'bg-slate-50' },
+          { label: 'Submitted', value: stats.submitted, icon: ArrowRight, color: 'text-violet-600', bg: 'bg-violet-50' },
+          { label: 'Admitted', value: stats.admitted, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'Visa Approved', value: stats.visa, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Enrolled', value: stats.enrolled, icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+        ].map(s => (
+          <div key={s.label} className={`${s.bg} rounded-xl border border-slate-200/60 p-3 flex items-center gap-3`}>
+            <s.icon size={16} className={s.color} />
+            <div>
+              <p className="text-lg font-bold text-slate-800 leading-tight">{s.value}</p>
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{s.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm flex flex-wrap gap-2.5 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input type="text" className="pl-10 pr-9 h-10 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            placeholder="Search by name, phone, passport, university…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"><X size={14} /></button>
+          )}
+        </div>
+        <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterStage !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          <option value="all">All Stages</option>
+          {stages.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <select value={filterUniversity} onChange={e => setFilterUniversity(e.target.value)}
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterUniversity !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          <option value="all">All Universities</option>
+          {universities.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterSource !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          <option value="all">All Sources</option>
+          {meta.sources?.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <select value={filterConsultant} onChange={e => setFilterConsultant(e.target.value)}
+          className={`h-10 min-w-[160px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterConsultant !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          <option value="all">All Consultants</option>
+          {consultants.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+        {view === 'kanban' && (
+          <label className="flex items-center gap-1.5 h-10 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white cursor-pointer select-none hover:bg-slate-50 transition-colors">
+            <input type="checkbox" checked={hideEmptyColumns} onChange={e => setHideEmptyColumns(e.target.checked)} className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
+            <span className="text-slate-600 font-semibold">Hide empty</span>
+          </label>
+        )}
+        {isFilterActive && (
+          <button onClick={() => { setSearchQuery(''); setFilterStage('all'); setFilterUniversity('all'); setFilterSource('all'); setFilterConsultant('all'); setDestinationFilter('all'); }}
+            className="flex items-center gap-1 h-10 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold">
+            <X size={14} /> Clear
+          </button>
+        )}
+      </div>
+
+      {/* Stage Pills */}
       {stages.length > 0 && rows.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           <button onClick={() => setFilterStage('all')}
-            className={`flex-shrink-0 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
-              ${filterStage === 'all' ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+            className={`flex-shrink-0 text-xs font-semibold px-3 py-2 rounded-xl border transition-all ${filterStage === 'all' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
             All <span className="ml-1 opacity-75">{rows.length}</span>
           </button>
           {stages.map((s, index) => {
@@ -371,12 +497,10 @@ export default function Applications({ user }) {
             const active = filterStage === s.key;
             const color = STAGE_COLORS[s.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
             return (
-              <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)}
-                disabled={n === 0}
+              <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)} disabled={n === 0}
                 className={`flex-shrink-0 flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
-                  ${active ? `${color.bg} border-current shadow-sm scale-[1.02]`
-                    : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${color.pill.split(' ')[0]}`}/>
+                  ${active ? `${color.bg} border-current shadow-sm scale-[1.02]` : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${color.pill.split(' ')[0]}`} />
                 {s.label}
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-white/60' : 'bg-slate-100'}`}>{n}</span>
               </button>
@@ -392,164 +516,115 @@ export default function Applications({ user }) {
       ) : view === 'kanban' ? (
         <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} user={user} />
       ) : (
-        <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} user={user} />
+        <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} user={user} sortConfig={sortConfig} setSortConfig={setSortConfig} />
       )}
 
-      {selected && (
-        <ApplicationPanel
-          leadId={selected.id}
-          stages={stages}
-          referrers={referrers}
-          onClose={() => setSelected(null)}
-          onChanged={load}
-          user={user}
-        />
-      )}
+      {selected && <ApplicationPanel leadId={selected.id} stages={stages} onClose={() => setSelected(null)} onChanged={load} user={user} employees={employees} settings={settings} />}
 
       {bulkDeleting && (
-        <Modal title="Delete Selected Applications?" onClose={() => setBulkDeleting(false)}>
-          <div className="p-4 space-y-4">
-            <p className="text-sm text-slate-650">
-              Are you sure you want to permanently delete the <strong>{selectedIds.length}</strong> selected student records? This action will remove them from the database and cannot be undone.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setBulkDeleting(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer select-none">Cancel</button>
-              <button onClick={handleBulkDelete} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm hover:bg-rose-700 cursor-pointer select-none">Delete All</button>
+        <Modal title="Delete Applications" icon={Trash2} onClose={() => setBulkDeleting(false)}>
+          <div className="space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-rose-50 text-rose-600 flex-shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Permanently delete {selectedIds.length} selected records?</p>
+                <p className="text-sm text-slate-500 mt-1">This action cannot be undone. Student portal links and all associated data will be removed.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button onClick={() => setBulkDeleting(false)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+              <button onClick={handleBulkDelete} className="px-4 py-2 bg-rose-600 text-white rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors flex items-center gap-1.5">
+                <Trash2 size={14} /> Delete All
+              </button>
             </div>
           </div>
         </Modal>
       )}
 
       {showAddModal && (
-        <Modal title="Add Application" onClose={() => setShowAddModal(false)}>
-          <form onSubmit={handleCreateApplication} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  value={newApp.client_name}
-                  onChange={e => setNewApp({ ...newApp, client_name: e.target.value })}
-                  placeholder="e.g. Md Saiful Haque"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Phone Number <span className="text-red-500">*</span></label>
-                <input
-                  type="tel"
-                  required
-                  value={newApp.phone}
-                  onChange={e => setNewApp({ ...newApp, phone: e.target.value })}
-                  placeholder="e.g. +88017XXXXXXXX"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Destination</label>
-                <select
-                  value={newApp.destination}
-                  onChange={e => setNewApp({ ...newApp, destination: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
-                >
-                  {(settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia']).map(d => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Degree</label>
-                <select
-                  value={newApp.degree}
-                  onChange={e => setNewApp({ ...newApp, degree: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
-                >
-                  {DEGREES.map(deg => (
-                    <option key={deg} value={deg}>{deg}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Major</label>
-                <input
-                  type="text"
-                  value={newApp.major}
-                  onChange={e => setNewApp({ ...newApp, major: e.target.value })}
-                  placeholder="e.g. Computer Science"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Primary University</label>
-                <input
-                  type="text"
-                  value={newApp.university}
-                  onChange={e => setNewApp({ ...newApp, university: e.target.value })}
-                  placeholder="e.g. Sichuan University"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Source (Remark)</label>
-                <select
-                  value={newApp.source}
-                  onChange={e => setNewApp({ ...newApp, source: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
-                >
-                  {visibleSources.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer</label>
-                <input
-                  type="text"
-                  value={newApp.referrer}
-                  onChange={e => setNewApp({ ...newApp, referrer: e.target.value })}
-                  placeholder="e.g. BheUni, Mahmud"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all"
-                />
-              </div>
-            </div>
-
+        <Modal title="Add Application" icon={Plus} onClose={() => setShowAddModal(false)}>
+          <form onSubmit={handleCreateApplication} className="space-y-5">
+            {/* Student Identity */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Assigned Consultant</label>
-              <select
-                value={newApp.assigned_consultant}
-                onChange={e => setNewApp({ ...newApp, assigned_consultant: e.target.value })}
-                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer"
-              >
-                <option value="">— pick —</option>
-                {(settings?.consultants || []).map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Student Identity</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+                  <input type="text" required value={newApp.client_name} onChange={e => setNewApp({ ...newApp, client_name: e.target.value })} placeholder="e.g. Md Saiful Haque"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Phone Number <span className="text-red-500">*</span></label>
+                  <input type="tel" required value={newApp.phone} onChange={e => setNewApp({ ...newApp, phone: e.target.value })} placeholder="e.g. +88017XXXXXXXX"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5"
-              >
-                <Save size={13} /> Create Application
+            {/* Program & Destination */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Program & Destination</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Destination <span className="text-slate-400">(where they go)</span></label>
+                  <select value={newApp.destination} onChange={e => setNewApp({ ...newApp, destination: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                    {settings?.destinations?.map(dest => <option key={dest} value={dest}>{dest}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Degree</label>
+                  <select value={newApp.degree} onChange={e => setNewApp({ ...newApp, degree: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                    {DEGREES.map(deg => <option key={deg} value={deg}>{deg}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Major</label>
+                  <input type="text" value={newApp.major} onChange={e => setNewApp({ ...newApp, major: e.target.value })} placeholder="e.g. Computer Science"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Primary University</label>
+                  <input type="text" value={newApp.university} onChange={e => setNewApp({ ...newApp, university: e.target.value })} placeholder="e.g. Sichuan University"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                </div>
+              </div>
+            </div>
+
+            {/* Source & Assignment */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Source & Assignment</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Source Market</label>
+                  <select value={newApp.source} onChange={e => setNewApp({ ...newApp, source: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                    {meta.sources?.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer</label>
+                  <input type="text" value={newApp.referrer} onChange={e => setNewApp({ ...newApp, referrer: e.target.value })} placeholder="e.g. BheUni, Mahmud"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Assigned Consultant</label>
+                <select value={newApp.assigned_employee_id} onChange={e => setNewApp({ ...newApp, assigned_employee_id: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                  <option value="">Unassigned</option>
+                  {employees.map(e => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+              <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5">
+                <Save size={14} /> Create Application
               </button>
             </div>
           </form>
@@ -559,16 +634,12 @@ export default function Applications({ user }) {
   );
 }
 
-function unique(arr) { return Array.from(new Set(arr.filter(Boolean))).sort(); }
-
 function EmptyState() {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
       <GraduationCap size={36} className="text-slate-300 mx-auto mb-3" />
       <p className="text-slate-600 font-semibold">No applications match the current filters</p>
-      <p className="text-xs text-slate-400 mt-1">
-        Mark a lead as <strong>Enrolled</strong> or <strong>File Opened</strong> to start its application.
-      </p>
+      <p className="text-xs text-slate-400 mt-1">Mark a lead as <strong>File Opened</strong> to start its application.</p>
     </div>
   );
 }
@@ -598,14 +669,11 @@ function KanbanView({ stages, rows, onPick, hideEmptyColumns, user }) {
           const color = STAGE_COLORS[stage.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
           return (
             <div key={stage.key} className={`w-[290px] flex-shrink-0 rounded-2xl border ${color.border} ${color.bg} shadow-sm transition-all duration-200 flex flex-col`}>
-              {/* Colored top band */}
               <div className={`h-1.5 w-full ${color.pill.split(' ')[0]}`} />
-              
               <div className="px-3.5 py-3 border-b border-white/60 flex items-center justify-between">
                 <span className="font-bold text-slate-800 text-sm tracking-tight">{stage.label}</span>
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${color.pill}`}>{items.length}</span>
               </div>
-              
               <div className="p-2.5 space-y-2.5 max-h-[640px] overflow-y-auto min-h-[140px] flex-1">
                 {items.length === 0 ? (
                   <div className="py-12 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200/80 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center">
@@ -628,8 +696,7 @@ function ApplicationCard({ card, onClick, user }) {
   const docPct = card.docs_total > 0 ? Math.round((card.docs_received / card.docs_total) * 100) : 0;
   const visaSoon = card.visa_deadline && (new Date(card.visa_deadline) - new Date() < 30 * 86400000);
   const isB2B = card.source === 'B2B' || card.source === 'Agent';
-  const isChina = card.source === 'China' || (card.lead_id && card.lead_id.startsWith('C-'));
-
+  const isChinaSource = card.source === 'China';
   return (
     <button onClick={onClick} className="w-full text-left bg-white rounded-xl p-3 shadow-sm hover:shadow-md border border-slate-100 hover:border-blue-200 transition-all">
       <div className="flex items-start justify-between gap-2 mb-1">
@@ -638,24 +705,33 @@ function ApplicationCard({ card, onClick, user }) {
       </div>
       <p className="text-[11px] text-slate-400 truncate">{card.lead_id}</p>
       <div className="flex items-center gap-1.5 flex-wrap mt-1">
-        {(card.source || isChina) && (
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
-            ${isChina 
-              ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' 
-              : isB2B 
-              ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' 
-              : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-            {card.source || 'China'}
+        {/* Source market badge */}
+        {isChinaSource && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 shadow-sm">
+            China Source
           </span>
         )}
+        {isB2B && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200 shadow-sm">
+            B2B
+          </span>
+        )}
+        {!isChinaSource && !isB2B && card.source && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm">
+            {card.source}
+          </span>
+        )}
+        {/* Destination badge */}
         {card.destination && (
-          <span className="text-[10px] text-slate-500 flex items-center gap-0.5"><MapPin size={9}/> {card.destination}</span>
+          <span className="text-[10px] text-slate-500 flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-full border border-slate-100">
+            <MapPin size={9} /> {card.destination}
+          </span>
         )}
         {card.degree && (<span className="text-[10px] text-slate-500">{card.degree}</span>)}
       </div>
       {card.uni_list && (
         <p className="text-[11px] text-slate-500 mt-1.5 truncate" title={card.uni_list}>
-          <Building2 size={9} className="inline mr-0.5"/>{card.uni_list}
+          <Building2 size={9} className="inline mr-0.5" />{card.uni_list}
           {card.uni_admitted > 0 && <span className="ml-1 text-emerald-600 font-semibold">· {card.uni_admitted} admit</span>}
         </p>
       )}
@@ -669,116 +745,66 @@ function ApplicationCard({ card, onClick, user }) {
           </div>
         </div>
       )}
-      {user?.email === 'admin@eduexpressint.com' && card.phone && (
-        <div className="mt-2.5 pt-2 border-t border-slate-50 flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-          <a href={`https://wa.me/${card.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-            onClick={e => e.stopPropagation()}
-            className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1 font-semibold" title="Chat on WhatsApp">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-            {card.phone}
-          </a>
-        </div>
-      )}
       <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
-        <span className="truncate">{card.referrer || card.assigned_consultant || '—'}</span>
+        <span className="truncate">{card.referrer || card.employee_name || card.assigned_consultant || '—'}</span>
         {card.intake_term && <span>{card.intake_term}</span>}
       </div>
     </button>
   );
 }
 
-/* ───────────────────────────── TABLE (Excel-style) ───────────────────────────── */
-function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user }) {
+/* ───────────────────────────── TABLE ───────────────────────────── */
+function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, sortConfig, setSortConfig }) {
   const stageLabel = (key) => stages.find(s => s.key === key)?.label || '—';
+  const toggleSort = (key) => {
+    setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }));
+  };
+  const SortIcon = ({ col }) => {
+    if (sortConfig.key !== col) return <ArrowUpDown size={10} className="text-slate-300 ml-1" />;
+    return <ArrowUpDown size={10} className={sortConfig.dir === 'asc' ? 'text-blue-600 ml-1' : 'text-blue-600 ml-1 rotate-180'} />;
+  };
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
             <tr>
-              <Th>
-                <input
-                  type="checkbox"
-                  checked={rows.length > 0 && rows.every(r => selectedIds.includes(r.id))}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedIds(prev => {
-                        const rowIds = rows.map(r => r.id);
-                        const union = Array.from(new Set([...prev, ...rowIds]));
-                        return union;
-                      });
-                    } else {
-                      setSelectedIds(prev => {
-                        const rowIds = rows.map(r => r.id);
-                        return prev.filter(id => !rowIds.includes(id));
-                      });
-                    }
-                  }}
-                  onClick={e => e.stopPropagation()}
-                  className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
-                />
-              </Th>
-              <Th>#</Th>
+              <Th><input type="checkbox" checked={rows.length > 0 && rows.every(r => selectedIds.includes(r.id))}
+                onChange={(e) => { if (e.target.checked) { setSelectedIds(prev => Array.from(new Set([...prev, ...rows.map(r => r.id)]))); } else { setSelectedIds(prev => prev.filter(id => !rows.map(r => r.id).includes(id))); } }}
+                onClick={e => e.stopPropagation()} className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" /></Th>
+              <Th onClick={() => toggleSort('client_name')}>Name <SortIcon col="client_name" /></Th>
               <Th>Source</Th>
-              <Th>Name</Th>
-              <Th>Nationality</Th>
+              <Th onClick={() => toggleSort('destination')}>Destination <SortIcon col="destination" /></Th>
+              <Th onClick={() => toggleSort('nationality')}>Nationality <SortIcon col="nationality" /></Th>
               <Th>Passport</Th>
               <Th>Intake</Th>
               <Th>Degree</Th>
               <Th>Major</Th>
-              <Th>Status</Th>
+              <Th onClick={() => toggleSort('application_stage')}>Stage <SortIcon col="application_stage" /></Th>
               <Th>Universities</Th>
-              <Th>Referrer</Th>
-              <Th>Drive</Th>
-              <Th right>Deposit</Th>
-              <Th right>Balance</Th>
+              <Th>Consultant</Th>
+              <Th>Deposit</Th>
+              <Th>Balance</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r, i) => (
+            {rows.map((r) => (
               <tr key={r.id} onClick={() => onPick(r)} className="hover:bg-blue-50/40 cursor-pointer">
                 <Td onClick={e => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(r.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedIds(prev => [...prev, r.id]);
-                      } else {
-                        setSelectedIds(prev => prev.filter(id => id !== r.id));
-                      }
-                    }}
-                    className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
-                  />
+                  <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={(e) => { if (e.target.checked) setSelectedIds(prev => [...prev, r.id]); else setSelectedIds(prev => prev.filter(id => id !== r.id)); }}
+                    className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
                 </Td>
-                <Td>{i + 1}</Td>
-                <Td>{(r.source || (r.lead_id && r.lead_id.startsWith('C-'))) && (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
-                    ${(r.source === 'China' || (r.lead_id && r.lead_id.startsWith('C-')))
-                      ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
-                      : (r.source === 'B2B' || r.source === 'Agent')
-                      ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-                    {r.source || 'China'}
-                  </span>
-                )}</Td>
                 <Td>
                   <div className="font-medium text-slate-800">{r.client_name}</div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-[11px] text-slate-400">{r.lead_id}</span>
-                    {user?.email === 'admin@eduexpressint.com' && r.phone && (
-                      <>
-                        <span className="text-slate-300">·</span>
-                        <a href={`https://wa.me/${r.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-                          onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-emerald-600 hover:underline transition-colors font-medium" title="Chat on WhatsApp">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                          <span>{r.phone}</span>
-                        </a>
-                      </>
-                    )}
-                  </div>
+                  <div className="text-[11px] text-slate-400">{r.lead_id}</div>
                 </Td>
+                <Td>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
+                    ${r.source === 'China' ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : (r.source === 'B2B' || r.source === 'Agent') ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
+                    {r.source || 'In-House'}
+                  </span>
+                </Td>
+                <Td>{r.destination || '—'}</Td>
                 <Td>{r.nationality || '—'}</Td>
                 <Td className="font-mono text-[12px]">{r.passport || '—'}</Td>
                 <Td>{r.intake_term || '—'}</Td>
@@ -786,15 +812,9 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user }) 
                 <Td className="max-w-[180px] truncate">{r.major || r.university || '—'}</Td>
                 <Td><span className="text-[11px] font-semibold text-slate-700">{stageLabel(r.application_stage)}</span></Td>
                 <Td className="max-w-[200px] truncate" title={r.uni_list}>{r.uni_list || '—'}</Td>
-                <Td>{r.referrer || r.assigned_consultant || '—'}</Td>
-                <Td>{r.drive_link
-                  ? <a href={ensureAbsoluteUrl(r.drive_link)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-blue-600 hover:underline text-xs">
-                      Open <ExternalLink size={11} />
-                    </a>
-                  : <span className="text-slate-300 text-xs">—</span>}</Td>
-                <Td right>{r.deposit ? `৳${Number(r.deposit).toLocaleString()}` : '—'}</Td>
-                <Td right>{r.balance > 0 ? `৳${Number(r.balance).toLocaleString()}` : '—'}</Td>
+                <Td>{r.employee_name || r.assigned_consultant || '—'}</Td>
+                <Td>{r.deposit ? fmtCurrency(r.deposit) : '—'}</Td>
+                <Td>{r.balance > 0 ? fmtCurrency(r.balance) : '—'}</Td>
               </tr>
             ))}
           </tbody>
@@ -803,104 +823,96 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user }) 
     </div>
   );
 }
-function Th({ children, right }) { return <th className={`px-3 py-2.5 font-semibold whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}>{children}</th>; }
-function Td({ children, right, className = '' }) { return <td className={`px-3 py-2.5 align-middle whitespace-nowrap ${right ? 'text-right' : ''} ${className}`}>{children}</td>; }
+function Th({ children, right, onClick }) { return <th className={`px-3 py-2.5 font-semibold whitespace-nowrap cursor-pointer select-none hover:text-slate-700 transition-colors ${right ? 'text-right' : 'text-left'}`} onClick={onClick}>{children}</th>; }
+function Td({ children, right, className = '', onClick }) { return <td className={`px-3 py-2.5 align-middle whitespace-nowrap ${right ? 'text-right' : ''} ${className}`} onClick={onClick}>{children}</td>; }
 
 /* ───────────────────────────── PANEL ───────────────────────────── */
-function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, user }) {
-  const [lead, setLead]     = useState(null);
-  const [docs, setDocs]     = useState([]);
-  const [unis, setUnis]     = useState([]);
+function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, employees = [], settings = null }) {
+  const [lead, setLead] = useState(null);
+  const [docs, setDocs] = useState([]);
+  const [unis, setUnis] = useState([]);
+  const [timeline, setTimeline] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [newNoteText, setNewNoteText] = useState('');
   const [saving, setSaving] = useState(false);
-  const [form, setForm]     = useState({});
+  const [form, setForm] = useState({});
+  const [editMode, setEditMode] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
-
-  const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
-  const visibleSources = isAuthorized ? SOURCES : SOURCES.filter(s => s !== 'China');
 
   const onCloseRef = useRef(onClose);
   const toastRef = useRef(toast);
   const stagesRef = useRef(stages);
 
-  useEffect(() => {
-    onCloseRef.current = onClose;
-    toastRef.current = toast;
-    stagesRef.current = stages;
-  });
+  useEffect(() => { onCloseRef.current = onClose; toastRef.current = toast; stagesRef.current = stages; });
 
   const load = useCallback(async () => {
     try {
-      const [l, d, u] = await Promise.all([
-        api.getLead(leadId),
-        api.documents(leadId),
-        api.universityApps(leadId),
+      const [l, d, u, t, n] = await Promise.all([
+        api.getLead(leadId), api.documents(leadId), api.universityApps(leadId),
+        api.leadTimeline(leadId).catch(() => ({ events: [] })),
+        api.leadTimeline(leadId).catch(() => ({ notes: [] })),
       ]);
-      if (!l) {
-        toastRef.current?.error("Lead not found or access denied");
-        onCloseRef.current?.();
-        return;
-      }
-      setLead(l); 
-      setDocs(d || []); 
-      setUnis(u || []);
+      if (!l) { toastRef.current?.error('Lead not found'); onCloseRef.current?.(); return; }
+      setLead(l); setDocs(d || []); setUnis(u || []);
+      setTimeline(t.events || []);
+      setNotes(n.notes || []);
       const curStages = stagesRef.current || [];
       setForm({
         application_stage: l.application_stage || (curStages[0]?.key || 'documents'),
-        source:            l.source || '',
-        referrer:          l.referrer || '',
-        nationality:       l.nationality || '',
-        passport:          l.passport || '',
-        degree:            l.degree || '',
-        major:             l.major || l.program || '',
-        intake_term:       l.intake_term || '',
-        university:        l.university || '',
-        drive_link:        l.drive_link || '',
-        deposit:           l.deposit || '',
-        visa_deadline:     l.visa_deadline || '',
-        departure_date:    l.departure_date || '',
-        application_notes: l.application_notes || '',
-        blood_group:       l.blood_group || '',
-        date_of_birth:     l.date_of_birth || '',
-        medical_notes:     l.medical_notes || '',
+        destination: l.destination || '',
+        source: l.source || '', referrer: l.referrer || '', nationality: l.nationality || '',
+        passport: l.passport || '', degree: l.degree || '', major: l.major || l.program || '',
+        intake_term: l.intake_term || '', university: l.university || '', drive_link: l.drive_link || '',
+        deposit: l.deposit || '', visa_deadline: l.visa_deadline || '', departure_date: l.departure_date || '',
+        application_notes: l.application_notes || '', blood_group: l.blood_group || '',
+        date_of_birth: l.date_of_birth || '', medical_notes: l.medical_notes || '',
         emergency_contact: l.emergency_contact || '',
+        assigned_consultant: l.assigned_consultant || '', assigned_employee_id: l.assigned_employee_id || '',
+        lead_source: l.lead_source || '', english_score: l.english_score || '',
+        next_followup: l.next_followup || '', client_name: l.client_name || '',
+        phone: l.phone || '', email: l.email || '', program: l.program || '', notes: l.notes || '',
+        lead_status: l.lead_status || '', service_fee: l.service_fee || '', paid: l.paid || '',
+        last_education: l.last_education || '',
       });
-    } catch (err) {
-      console.error("Error loading application detail panel:", err);
-      toastRef.current?.error(err.message || "Failed to load application details");
-      onCloseRef.current?.();
-    }
+    } catch (err) { toastRef.current?.error(err.message || 'Failed to load'); onCloseRef.current?.(); }
   }, [leadId]);
 
   useEffect(() => { load(); }, [load]);
-
   const updateField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const saveAll = async () => {
     setSaving(true);
-    try { await api.updateStage(leadId, form); await load(); onChanged?.(); toast.success('Saved'); }
+    try {
+      const payload = { ...form };
+      // Sync assigned_consultant with assigned_employee_id
+      if (payload.assigned_employee_id) {
+        const emp = employees.find(e => e.id === Number(payload.assigned_employee_id));
+        if (emp?.name) payload.assigned_consultant = emp.name;
+      } else if (payload.assigned_employee_id === '' || payload.assigned_employee_id == null) {
+        payload.assigned_consultant = null;
+        payload.assigned_employee_id = null;
+      }
+      // Convert numeric fields
+      payload.deposit = (payload.deposit === '' || payload.deposit == null) ? null : Number(payload.deposit);
+      payload.service_fee = (payload.service_fee === '' || payload.service_fee == null) ? null : Number(payload.service_fee);
+      payload.paid = (payload.paid === '' || payload.paid == null) ? null : Number(payload.paid);
+      payload.assigned_employee_id = (payload.assigned_employee_id === '' || payload.assigned_employee_id == null) ? null : Number(payload.assigned_employee_id);
+      await api.updateStage(leadId, payload);
+      await load();
+      onChanged?.();
+      toast.success('Saved');
+    }
     catch (e) { toast.error(e.message || 'Could not save'); }
     setSaving(false);
   };
 
-  // Click a stage chip → save immediately AND move the card on the kanban.
-  // Previously this only changed local form state, so consultants had to
-  // click 'Save details' for the column to update.
   const changeStage = async (newStage) => {
     if (newStage === form.application_stage) return;
     const previous = form.application_stage;
-    setForm(f => ({ ...f, application_stage: newStage })); // optimistic
-    try {
-      await api.updateStage(leadId, { stage: newStage });
-      await load();
-      onChanged?.();
-      const label = stages.find(s => s.key === newStage)?.label || newStage;
-      toast.success(`Moved to ${label}`);
-    } catch (e) {
-      // Roll back local state on failure
-      setForm(f => ({ ...f, application_stage: previous }));
-      toast.error(e.message || 'Could not change stage');
-    }
+    setForm(f => ({ ...f, application_stage: newStage }));
+    try { await api.updateStage(leadId, { stage: newStage }); await load(); onChanged?.(); toast.success(`Moved to ${stages.find(s => s.key === newStage)?.label || newStage}`); }
+    catch (e) { setForm(f => ({ ...f, application_stage: previous })); toast.error(e.message || 'Could not change stage'); }
   };
 
   const advance = () => {
@@ -910,57 +922,48 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
   };
 
   const deleteLead = async () => {
-    const ok = await confirm({
-      title: `Delete ${lead.client_name}?`,
-      body: `This will permanently remove this student from Applications and All Leads. The student portal link will stop working.`,
-      tone: 'danger', confirmLabel: 'Delete student',
-    });
+    const ok = await confirm({ title: `Delete ${lead.client_name}?`, body: 'This will permanently remove this student. The portal link will stop working.', tone: 'danger', confirmLabel: 'Delete student' });
     if (!ok) return;
-    try {
-      await api.deleteLead(leadId);
-      toast.success(`${lead.client_name} deleted`);
-      onChanged?.();
-      onClose?.();
-    } catch (e) { toast.error(e.message || 'Could not delete'); }
+    try { await api.deleteLead(leadId); toast.success(`${lead.client_name} deleted`); onChanged?.(); onClose?.(); }
+    catch (e) { toast.error(e.message || 'Could not delete'); }
   };
 
   const setDocStatus = async (doc, status) => {
     setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, status } : d));
-    try { await api.updateDocument(doc.id, { status }); }
-    catch (e) { toast.error(e.message || 'Failed'); load(); }
+    try { await api.updateDocument(doc.id, { status }); } catch (e) { toast.error(e.message || 'Failed'); load(); }
   };
   const addDoc = async () => {
-    const name = prompt('Document name?');
-    if (!name?.trim()) return;
+    const name = prompt('Document name?'); if (!name?.trim()) return;
     try { await api.addDocument(leadId, { doc_type: name.trim() }); load(); toast.success(`Added ${name.trim()}`); }
     catch (e) { toast.error(e.message); }
   };
   const removeDoc = async (doc) => {
     if (!await confirm({ title: `Remove "${doc.doc_type}"?`, tone: 'danger', confirmLabel: 'Remove' })) return;
-    try { await api.deleteDocument(doc.id); load(); toast.info('Document removed'); }
-    catch (e) { toast.error(e.message); }
+    try { await api.deleteDocument(doc.id); load(); toast.info('Document removed'); } catch (e) { toast.error(e.message); }
   };
 
   const addUni = async () => {
-    const name = prompt('University name? (e.g. NJTech)');
-    if (!name?.trim()) return;
-    try { await api.addUniversityApp(leadId, { university: name.trim(), status: 'ready' });
-          load(); toast.success(`Added ${name.trim()}`); }
+    const name = prompt('University name? (e.g. NJTech)'); if (!name?.trim()) return;
+    try { await api.addUniversityApp(leadId, { university: name.trim(), status: 'ready' }); load(); toast.success(`Added ${name.trim()}`); }
     catch (e) { toast.error(e.message); }
   };
   const setUniStatus = async (uni, status) => {
     setUnis(prev => prev.map(u => u.id === uni.id ? { ...u, status } : u));
-    try { await api.updateUniversityApp(uni.id, { status }); onChanged?.(); }
-    catch (e) { toast.error(e.message || 'Failed'); load(); }
+    try { await api.updateUniversityApp(uni.id, { status }); onChanged?.(); } catch (e) { toast.error(e.message || 'Failed'); load(); }
   };
   const removeUni = async (uni) => {
     if (!await confirm({ title: `Remove ${uni.university}?`, tone: 'danger', confirmLabel: 'Remove' })) return;
-    try { await api.deleteUniversityApp(uni.id); load(); toast.info('Removed'); }
+    try { await api.deleteUniversityApp(uni.id); load(); toast.info('Removed'); } catch (e) { toast.error(e.message); }
+  };
+
+  const addTimelineNote = async () => {
+    if (!newNoteText.trim()) return;
+    try { await api.addNote(leadId, newNoteText.trim()); setNewNoteText(''); load(); toast.success('Note added'); }
     catch (e) { toast.error(e.message); }
   };
 
   if (!lead) {
-    return <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/40 backdrop-blur-sm">
+    return <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/50 backdrop-blur-sm">
       <div className="bg-white h-full w-full max-w-2xl flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
@@ -968,51 +971,39 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
   }
 
   const currentIdx = (stages || []).findIndex(s => s.key === (form.application_stage || stages?.[0]?.key || 'documents'));
-  const received = (docs || []).filter(d => d && ['received','verified'].includes(d.status)).length;
+  const received = (docs || []).filter(d => d && ['received', 'verified'].includes(d.status)).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white h-full w-full max-w-2xl overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-10">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white h-full w-full max-w-2xl overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900 text-white px-6 py-4 flex items-center justify-between z-10 shadow-md">
           <div className="min-w-0">
-            <h3 className="text-lg font-bold text-slate-800 truncate">{lead.client_name}</h3>
-            <p className="text-xs text-slate-400 truncate">
-              {lead.lead_id} · {lead.destination || 'No destination'} · {lead.assigned_consultant || 'Unassigned'}
-            </p>
-            {user?.email === 'admin@eduexpressint.com' && lead.phone && (
-              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
-                <span className="font-semibold">Phone:</span>
-                <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-                  className="text-slate-600 hover:text-emerald-600 hover:underline inline-flex items-center gap-1 transition-colors font-medium" title="Chat on WhatsApp">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                  {lead.phone}
-                </a>
-              </p>
-            )}
+            <h3 className="text-lg font-bold truncate">{lead.client_name}</h3>
+            <p className="text-xs text-slate-400 truncate">{lead.lead_id} · {lead.destination || 'No destination'} · {lead.employee_name || lead.assigned_consultant || 'Unassigned'}</p>
           </div>
           <div className="flex items-center gap-2">
             {form.drive_link && (
-              <a href={ensureAbsoluteUrl(form.drive_link)} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
-                <ExternalLink size={12} /> Drive folder
+              <a href={ensureAbsoluteUrl(form.drive_link)} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs font-medium text-blue-400 hover:text-blue-300 hover:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
+                <ExternalLink size={12} /> Drive
               </a>
             )}
-            <button onClick={deleteLead}
-              className="flex items-center gap-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
+            <button onClick={() => setEditMode(e => !e)} className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${editMode ? 'bg-blue-600 text-white border-blue-500' : 'border-slate-600 text-slate-300 hover:bg-slate-800'}`}>
+              {editMode ? 'Done' : 'Edit'}
+            </button>
+            <button onClick={deleteLead} className="flex items-center gap-1.5 text-xs font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 px-3 py-1.5 rounded-lg border border-rose-800/50 transition-colors">
               <Trash2 size={12} /> Delete
             </button>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
+            <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"><X size={18} /></button>
           </div>
         </div>
 
         {/* Stage strip */}
-        <div className="px-6 py-5 border-b border-slate-100">
+        <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center justify-between mb-3">
-            <p className="font-semibold text-slate-700 text-sm">Application Stage</p>
+            <p className="font-bold text-slate-800 text-sm uppercase tracking-wider">Application Stage</p>
             {currentIdx >= 0 && currentIdx < stages.length - 1 && stages[currentIdx + 1] && (
-              <button onClick={advance} disabled={saving}
-                className="text-xs font-medium px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5">
-                Advance to {stages[currentIdx + 1]?.label || 'Next Stage'} <ArrowRight size={13} />
+              <button onClick={advance} disabled={saving} className="text-xs font-semibold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5 shadow-sm transition-all">
+                Advance to {stages[currentIdx + 1]?.label || 'Next'} <ArrowRight size={13} />
               </button>
             )}
           </div>
@@ -1021,11 +1012,7 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
               <div key={s.key} className="flex items-center gap-1.5">
                 <button onClick={() => changeStage(s.key)} disabled={saving}
                   className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50
-                    ${i === currentIdx
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                      : i < currentIdx
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}>
+                    ${i === currentIdx ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : i < currentIdx ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}>
                   {i < currentIdx ? <CheckCircle2 size={11} className="inline mr-1" /> : ''}{s.label}
                 </button>
                 {i < stages.length - 1 && <ChevronRight size={12} className="text-slate-300" />}
@@ -1034,68 +1021,115 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
           </div>
         </div>
 
-        {/* Excel-aligned student data */}
-        <div className="px-6 py-5 border-b border-slate-100 space-y-3">
-          <h4 className="font-semibold text-slate-700 text-sm">Student Details</h4>
+        {/* Student Info Card */}
+        <div className="px-6 py-5 border-b border-slate-100">
+          <div className="flex items-start gap-4">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-lg shadow-md bg-gradient-to-br from-blue-500 to-indigo-600 flex-shrink-0 ring-2 ring-blue-100`}>
+              {lead.client_name?.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase() || '?'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-bold text-slate-800">{lead.client_name}</h4>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${lead.source === 'B2B' || lead.source === 'Agent' ? 'bg-violet-50 text-violet-700 border-violet-200' : lead.source === 'China' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                  {lead.source || 'In-House'}
+                </span>
+                {lead.destination && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-200">
+                    → {lead.destination}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">{lead.destination} · {lead.degree} · {lead.major || '—'} · {lead.intake_term || '—'}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Consultant: {lead.employee_name || lead.assigned_consultant || '—'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Student Details */}
+        <div className="px-6 py-5 border-b border-slate-100 space-y-4">
+          <h4 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Student Details</h4>
+
+          {/* Contact Identity */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Source (Remark)" type="select" value={form.source} onChange={v => updateField('source', v)}
-              options={['', ...visibleSources]} />
-            <Field label="Referrer (Referance)" value={form.referrer} onChange={v => updateField('referrer', v)}
-              placeholder="e.g. BheUni, Mahmud, Office (M)" list="ref-list" />
-            <datalist id="ref-list">{(referrers || []).map(r => <option key={r} value={r} />)}</datalist>
-
-            <Field label="Nationality" value={form.nationality} onChange={v => updateField('nationality', v)} placeholder="Bangladesh" />
-            <Field label="Passport" value={form.passport} onChange={v => updateField('passport', v)} placeholder="A12345678" mono />
-
-            <Field label="Intake" value={form.intake_term} onChange={v => updateField('intake_term', v)} placeholder="September 2026" />
-            <Field label="Degree" type="select" value={form.degree} onChange={v => updateField('degree', v)} options={['', ...DEGREES]} />
-
-            <Field label="Major" value={form.major} onChange={v => updateField('major', v)} placeholder="International Economy" />
-            <Field label="Primary university" value={form.university} onChange={v => updateField('university', v)} placeholder="e.g. NJTech" />
-
-            <Field label="Visa deadline" type="date" value={form.visa_deadline} onChange={v => updateField('visa_deadline', v)} />
-            <Field label="Departure date" type="date" value={form.departure_date} onChange={v => updateField('departure_date', v)} />
-
-            <Field label="Drive folder link" value={form.drive_link} onChange={v => updateField('drive_link', v)} placeholder="https://drive.google.com/…" mono />
-            <Field label="Deposit (৳)" type="number" value={form.deposit} onChange={v => updateField('deposit', v)} placeholder="0" />
+            <Field label="Full name" value={form.client_name} onChange={v => updateField('client_name', v)} placeholder="e.g. Md Saiful Haque" disabled={!editMode} />
+            <Field label="Phone" value={form.phone} onChange={v => updateField('phone', v)} placeholder="+8801XXX-XXXXXX" disabled={!editMode} />
+            <Field label="Email" value={form.email} onChange={v => updateField('email', v)} placeholder="student@example.com" type="email" disabled={!editMode} />
+            <Field label="Nationality" value={form.nationality} onChange={v => updateField('nationality', v)} placeholder="Bangladesh" disabled={!editMode} />
+            <Field label="Passport number" value={form.passport} onChange={v => updateField('passport', v)} placeholder="A12345678" mono disabled={!editMode} />
           </div>
+
+          {/* Academic & Program */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Destination" type="select" value={form.destination} onChange={v => updateField('destination', v)} options={['', ...(settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia'])]} disabled={!editMode} />
+            <Field label="Intake" value={form.intake_term} onChange={v => updateField('intake_term', v)} placeholder="September 2026" disabled={!editMode} />
+            <Field label="Degree" type="select" value={form.degree} onChange={v => updateField('degree', v)} options={['', ...DEGREES]} disabled={!editMode} />
+            <Field label="Major / Program" value={form.major} onChange={v => updateField('major', v)} placeholder="International Economy" disabled={!editMode} />
+            <Field label="Primary university" value={form.university} onChange={v => updateField('university', v)} placeholder="e.g. NJTech" disabled={!editMode} />
+            <Field label="English score" value={form.english_score} onChange={v => updateField('english_score', v)} placeholder="IELTS 6.5 / MOI" disabled={!editMode} />
+            <Field label="Last education" value={form.last_education} onChange={v => updateField('last_education', v)} placeholder="HSC · Science" disabled={!editMode} />
+          </div>
+
+          {/* Source & Assignment */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Source (Remark)" type="select" value={form.source} onChange={v => updateField('source', v)} options={['', 'In-House', 'B2B', 'China', 'Agent']} disabled={!editMode} />
+            <Field label="Referrer" value={form.referrer} onChange={v => updateField('referrer', v)} placeholder="e.g. BheUni, Mahmud" disabled={!editMode} />
+            <Field label="Lead source" type="select" value={form.lead_source} onChange={v => updateField('lead_source', v)} options={['', ...(settings?.leadSources || [])]} disabled={!editMode} />
+            <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => updateField('next_followup', v)} disabled={!editMode} />
+          </div>
+
+          {/* Financial & Travel */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Service fee (৳)" type="number" value={form.service_fee} onChange={v => updateField('service_fee', v)} placeholder="0" disabled={!editMode} />
+            <Field label="Paid so far (৳)" type="number" value={form.paid} onChange={v => updateField('paid', v)} placeholder="0" disabled={!editMode} />
+            <Field label="Deposit (৳)" type="number" value={form.deposit} onChange={v => updateField('deposit', v)} placeholder="0" disabled={!editMode} />
+            <Field label="Lead status" type="select" value={form.lead_status} onChange={v => updateField('lead_status', v)} options={['', ...(settings?.leadStatuses || [])]} disabled={!editMode} />
+          </div>
+
+          {/* Travel & Files */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Visa deadline" type="date" value={form.visa_deadline} onChange={v => updateField('visa_deadline', v)} disabled={!editMode} />
+            <Field label="Departure date" type="date" value={form.departure_date} onChange={v => updateField('departure_date', v)} disabled={!editMode} />
+            <Field label="Drive folder link" value={form.drive_link} onChange={v => updateField('drive_link', v)} placeholder="https://drive.google.com/…" mono disabled={!editMode} />
+          </div>
+
+          {/* Assigned Consultant — Employee Dropdown */}
+          <div className="grid grid-cols-1 gap-3">
+            <EmployeeSelect label="Assigned Consultant" value={form.assigned_employee_id || ''} onChange={v => updateField('assigned_employee_id', v)} employees={employees} placeholder="— Unassigned —" disabled={!editMode} />
+          </div>
+
           <div>
-            <label className="text-xs font-semibold text-slate-600 mb-1 block">Notes</label>
-            <textarea rows={2} value={form.application_notes} onChange={e => updateField('application_notes', e.target.value)}
-              placeholder="Anything the next person should know…"
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+            <label className={`text-xs font-semibold mb-1 block ${!editMode ? 'text-slate-400' : 'text-slate-600'}`}>Notes</label>
+            <textarea rows={2} value={form.application_notes} onChange={e => updateField('application_notes', e.target.value)} placeholder="Anything the next person should know…"
+              className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50 ${!editMode ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`}
+              disabled={!editMode} readOnly={!editMode} />
           </div>
-
-          {/* Medical + emergency — needed for some destinations (China MBBS etc.) */}
           <details className="mt-1 group">
-            <summary className="text-xs font-semibold text-slate-600 cursor-pointer hover:text-slate-800 list-none flex items-center gap-1">
-              <span className="group-open:rotate-90 transition-transform inline-block">▸</span>
-              Medical & Emergency contact
+            <summary className={`text-xs font-semibold cursor-pointer hover:text-slate-800 list-none flex items-center gap-1 ${!editMode ? 'text-slate-400' : 'text-slate-600'}`}>
+              <span className="group-open:rotate-90 transition-transform inline-block">▸</span> Medical & Emergency contact
             </summary>
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label="Blood group" type="select" value={form.blood_group} onChange={v => updateField('blood_group', v)}
-                options={['', 'A+','A-','B+','B-','AB+','AB-','O+','O-']} />
-              <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => updateField('date_of_birth', v)} />
+              <Field label="Blood group" type="select" value={form.blood_group} onChange={v => updateField('blood_group', v)} options={['', 'A+','A-','B+','B-','AB+','AB-','O+','O-']} disabled={!editMode} />
+              <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => updateField('date_of_birth', v)} disabled={!editMode} />
               <div className="col-span-2">
-                <label className="text-xs font-semibold text-slate-600 mb-1 block">Emergency contact</label>
-                <input value={form.emergency_contact} onChange={e => updateField('emergency_contact', e.target.value)}
-                  placeholder="Name + phone, e.g. Father · +880 1XXX-XXXXXX"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+                <label className={`text-xs font-semibold mb-1 block ${!editMode ? 'text-slate-400' : 'text-slate-600'}`}>Emergency contact</label>
+                <input value={form.emergency_contact} onChange={e => updateField('emergency_contact', e.target.value)} placeholder="Name + phone"
+                  className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50 ${!editMode ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`}
+                  disabled={!editMode} readOnly={!editMode} />
               </div>
               <div className="col-span-2">
-                <label className="text-xs font-semibold text-slate-600 mb-1 block">Medical notes</label>
-                <textarea rows={2} value={form.medical_notes} onChange={e => updateField('medical_notes', e.target.value)}
-                  placeholder="Allergies, conditions, medications…"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+                <label className={`text-xs font-semibold mb-1 block ${!editMode ? 'text-slate-400' : 'text-slate-600'}`}>Medical notes</label>
+                <textarea rows={2} value={form.medical_notes} onChange={e => updateField('medical_notes', e.target.value)} placeholder="Allergies, conditions…"
+                  className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50 ${!editMode ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`}
+                  disabled={!editMode} readOnly={!editMode} />
               </div>
             </div>
           </details>
-
           <div className="flex justify-end">
-            <button onClick={saveAll} disabled={saving}
-              className="text-sm bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
-              <Save size={14} /> {saving ? 'Saving…' : 'Save details'}
-            </button>
+            {editMode && (
+              <button onClick={saveAll} disabled={saving} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2 shadow-sm transition-all">
+                <Save size={14} /> {saving ? 'Saving…' : 'Save details'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1106,14 +1140,10 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
         <div className="px-6 py-5 border-b border-slate-100">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-                <Building2 size={14} /> University Applications
-              </p>
-              <p className="text-xs text-slate-400">Track status per uni — same idea as the NJTech / SUES / SXU columns</p>
+              <p className="font-bold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-2"><Building2 size={14} /> University Applications</p>
+              <p className="text-xs text-slate-400">Track status per uni</p>
             </div>
-            <button onClick={addUni} className="text-xs font-medium px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center gap-1.5">
-              <Plus size={13} /> Add university
-            </button>
+            <button onClick={addUni} className="text-xs font-semibold px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 flex items-center gap-1.5 transition-all"><Plus size={13} /> Add university</button>
           </div>
           {unis.length === 0 ? (
             <p className="text-sm text-slate-400 italic text-center py-6">No universities yet</p>
@@ -1125,25 +1155,61 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
         </div>
 
         {/* Documents */}
-        <div className="px-6 py-5">
+        <div className="px-6 py-5 border-b border-slate-100">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-                <FileText size={14} /> Document Checklist
-              </p>
+              <p className="font-bold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-2"><FileText size={14} /> Document Checklist</p>
               <p className="text-xs text-slate-400">{received} of {docs.length} received</p>
             </div>
-            <button onClick={addDoc} className="text-xs font-medium px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center gap-1.5">
-              <Plus size={13} /> Add document
-            </button>
+            <button onClick={addDoc} className="text-xs font-semibold px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 flex items-center gap-1.5 transition-all"><Plus size={13} /> Add document</button>
           </div>
           {docs.length === 0 ? (
-            <p className="text-sm text-slate-400 italic text-center py-6">No documents yet — set the destination to auto-seed the checklist.</p>
+            <p className="text-sm text-slate-400 italic text-center py-6">No documents yet</p>
           ) : (
             <div className="space-y-1.5">
               {docs.map(d => <DocRow key={d.id} doc={d} onStatus={setDocStatus} onRemove={() => removeDoc(d)} />)}
             </div>
           )}
+        </div>
+
+        {/* Timeline */}
+        <div className="px-6 py-5 border-b border-slate-100">
+          <p className="font-bold text-slate-800 text-sm uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={14} /> Timeline</p>
+          {timeline.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">No timeline events yet</p>
+          ) : (
+            <div className="space-y-3">
+              {timeline.map((ev, i) => (
+                <div key={i} className="flex gap-3">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-xs text-slate-700">{ev.description || ev.event}</p>
+                    <p className="text-[10px] text-slate-400">{timeAgo(ev.created_at)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        <div className="px-6 py-5">
+          <p className="font-bold text-slate-800 text-sm uppercase tracking-wider mb-3 flex items-center gap-2"><FileText size={14} /> Notes</p>
+          <div className="space-y-2 mb-3">
+            {notes.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">No notes yet</p>
+            ) : notes.map((n, i) => (
+              <div key={i} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <p className="text-xs text-slate-700">{n.text || n.note}</p>
+                <p className="text-[10px] text-slate-400 mt-1">{n.author || 'Team'} · {timeAgo(n.created_at)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <textarea value={newNoteText} onChange={e => setNewNoteText(e.target.value)} rows={2} placeholder="Add a note…"
+              className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50" />
+            <button onClick={addTimelineNote} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors shadow-sm">Add</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1151,18 +1217,31 @@ function ApplicationPanel({ leadId, stages = [], referrers, onClose, onChanged, 
 }
 
 /* ──── small inputs ──── */
-function Field({ label, value, onChange, type = 'text', placeholder, options, list, mono }) {
-  const cls = `w-full border border-slate-200 rounded-xl px-3 py-2 text-sm ${mono ? 'font-mono' : ''}`;
+function Field({ label, value, onChange, type = 'text', placeholder, options, list, mono, disabled }) {
+  const cls = `w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50 ${mono ? 'font-mono' : ''} ${disabled ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`;
   return (
     <div>
-      <label className="text-xs font-semibold text-slate-600 mb-1 block">{label}</label>
+      <label className={`text-xs font-semibold mb-1 block ${disabled ? 'text-slate-400' : 'text-slate-600'}`}>{label}</label>
       {type === 'select' ? (
-        <select value={value} onChange={e => onChange(e.target.value)} className={cls}>
+        <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled} className={cls}>
           {(options || []).map(o => <option key={o} value={o}>{o || '—'}</option>)}
         </select>
       ) : (
-        <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} list={list} className={cls} />
+        <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} list={list} disabled={disabled} readOnly={disabled} className={cls} />
       )}
+    </div>
+  );
+}
+
+function EmployeeSelect({ label, value = '', onChange, employees = [], placeholder = '— select —', disabled }) {
+  const cls = `w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50 cursor-pointer ${disabled ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`;
+  return (
+    <div>
+      <label className={`text-xs font-semibold mb-1 block ${disabled ? 'text-slate-400' : 'text-slate-600'}`}>{label}</label>
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled} className={cls}>
+        <option value="">{placeholder}</option>
+        {employees.map(e => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
+      </select>
     </div>
   );
 }
@@ -1172,7 +1251,7 @@ function StatusDropdown({ statuses, current, onPick }) {
   const cur = statuses.find(s => s.key === current) || statuses[0];
   return (
     <div className="relative">
-      <button onClick={() => setOpen(o => !o)} className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${cur.cls} flex items-center gap-1`}>
+      <button onClick={() => setOpen(o => !o)} className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${cur.cls} flex items-center gap-1 transition-all hover:shadow-sm`}>
         {cur.label} <ChevronDown size={10} />
       </button>
       {open && (
@@ -1180,8 +1259,7 @@ function StatusDropdown({ statuses, current, onPick }) {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-20 min-w-[130px] py-1">
             {statuses.map(s => (
-              <button key={s.key} onClick={() => { onPick(s.key); setOpen(false); }}
-                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 ${s.key === cur.key ? 'font-bold' : ''}`}>
+              <button key={s.key} onClick={() => { onPick(s.key); setOpen(false); }} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition-colors ${s.key === cur.key ? 'font-bold' : ''}`}>
                 {s.label}
               </button>
             ))}
@@ -1194,11 +1272,11 @@ function StatusDropdown({ statuses, current, onPick }) {
 
 function DocRow({ doc, onStatus, onRemove }) {
   return (
-    <div className="flex items-center gap-3 p-2.5 rounded-lg border border-slate-100 hover:border-slate-200 bg-white">
+    <div className="flex items-center gap-3 p-2.5 rounded-lg border border-slate-100 hover:border-slate-200 bg-white transition-all hover:shadow-sm">
       <span className="text-sm text-slate-700 flex-1 truncate">{doc.doc_type}</span>
       {doc.received_on && <span className="text-[11px] text-slate-400">{doc.received_on}</span>}
       <StatusDropdown statuses={DOC_STATUSES} current={doc.status} onPick={s => onStatus(doc, s)} />
-      <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 rounded"><Trash2 size={13} /></button>
+      <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors" aria-label="Remove"><Trash2 size={13} /></button>
     </div>
   );
 }
@@ -1206,25 +1284,20 @@ function DocRow({ doc, onStatus, onRemove }) {
 function UniRow({ uni, onStatus, onRemove }) {
   const [editing, setEditing] = useState(false);
   const [program, setProgram] = useState(uni.program || '');
-  const [appId, setAppId]     = useState(uni.application_id || '');
-  const [notes, setNotes]     = useState(uni.notes || '');
-
+  const [appId, setAppId] = useState(uni.application_id || '');
+  const [notes, setNotes] = useState(uni.notes || '');
   const toast = useToast();
   const save = async () => {
-    try { await api.updateUniversityApp(uni.id, { program, application_id: appId, notes });
-          setEditing(false); toast.success(`${uni.university} updated`); }
+    try { await api.updateUniversityApp(uni.id, { program, application_id: appId, notes }); setEditing(false); toast.success(`${uni.university} updated`); }
     catch (e) { toast.error(e.message); }
   };
-
   return (
-    <div className="rounded-lg border border-slate-100 hover:border-slate-200 bg-white">
+    <div className="rounded-lg border border-slate-100 hover:border-slate-200 bg-white transition-all hover:shadow-sm">
       <div className="flex items-center gap-3 p-2.5">
         <div className="flex-1 min-w-0">
           <p className="text-sm text-slate-700 truncate font-medium">{uni.university}</p>
           {uni.program && <p className="text-[11px] text-slate-400 truncate">{uni.program}</p>}
-          {uni.application_id && (
-            <p className="text-[11px] text-slate-500"><span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded">App ID: {uni.application_id}</span></p>
-          )}
+          {uni.application_id && <p className="text-[11px] text-slate-500"><span className="font-mono bg-slate-50 px-1.5 py-0.5 rounded">App ID: {uni.application_id}</span></p>}
           {(uni.submitted_on || uni.decision_on) && (
             <p className="text-[10px] text-slate-400 mt-0.5">
               {uni.submitted_on && <>submitted {uni.submitted_on}</>}
@@ -1234,22 +1307,16 @@ function UniRow({ uni, onStatus, onRemove }) {
           )}
         </div>
         <StatusDropdown statuses={UNI_STATUSES} current={uni.status} onPick={s => onStatus(uni, s)} />
-        <button onClick={() => setEditing(e => !e)} title="Edit details"
-          className="p-1 text-slate-300 hover:text-blue-500 rounded text-[11px] font-medium">
-          {editing ? '×' : 'edit'}
-        </button>
-        <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 rounded"><Trash2 size={13} /></button>
+        <button onClick={() => setEditing(e => !e)} title="Edit details" className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors text-[11px] font-medium">{editing ? '×' : 'edit'}</button>
+        <button onClick={onRemove} className="p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors" aria-label="Remove"><Trash2 size={13} /></button>
       </div>
       {editing && (
         <div className="px-2.5 pb-2.5 border-t border-slate-100 pt-2 space-y-1.5">
-          <input value={program} onChange={e => setProgram(e.target.value)} placeholder="Program (e.g. MBBS)"
-            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs" />
-          <input value={appId} onChange={e => setAppId(e.target.value)} placeholder="University application ID / file number"
-            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono" />
-          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional)"
-            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs" />
+          <input value={program} onChange={e => setProgram(e.target.value)} placeholder="Program (e.g. MBBS)" className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50" />
+          <input value={appId} onChange={e => setAppId(e.target.value)} placeholder="University application ID" className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50" />
+          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional)" className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all bg-slate-50" />
           <div className="flex justify-end">
-            <button onClick={save} className="text-[11px] font-medium bg-blue-600 text-white px-2.5 py-1 rounded-lg hover:bg-blue-700">Save</button>
+            <button onClick={save} className="text-[11px] font-semibold bg-blue-600 text-white px-2.5 py-1 rounded-lg hover:bg-blue-700 transition-colors shadow-sm">Save</button>
           </div>
         </div>
       )}
@@ -1267,91 +1334,61 @@ function ShareCard({ lead, onChanged }) {
   const toast = useToast();
 
   useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
-
   const url = token ? `${window.location.origin}/s/${token}` : null;
 
   const generate = async () => {
     setBusy(true);
-    try {
-      const r = await api.regenerateToken(lead.id);
-      setToken(r.public_token); setEnabled(true);
-      onChanged?.();
-      toast.success('New share link generated');
-    } catch (e) { toast.error(e.message); }
-    setBusy(false);
+    try { const r = await api.regenerateToken(lead.id); setToken(r.public_token); setEnabled(true); onChanged?.(); toast.success('New share link generated'); }
+    catch (e) { toast.error(e.message); } setBusy(false);
   };
-
   const toggle = async () => {
     setBusy(true);
-    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.();
-          toast.info(enabled ? 'Student link disabled' : 'Student link enabled'); }
-    catch (e) { toast.error(e.message); }
-    setBusy(false);
+    try { await api.setPublic(lead.id, !enabled); setEnabled(!enabled); onChanged?.(); toast.info(enabled ? 'Student link disabled' : 'Student link enabled'); }
+    catch (e) { toast.error(e.message); } setBusy(false);
   };
-
-  const copy = async () => {
-    if (!url) return;
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-  };
+  const copy = async () => { if (!url) return; try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {} };
 
   return (
     <div className="px-6 py-5 border-b border-slate-100">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <p className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-            <Share2 size={14} className="text-slate-400" /> Student portal
-          </p>
+          <p className="font-bold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-2"><Share2 size={14} className="text-slate-400" /> Student portal</p>
           <p className="text-xs text-slate-400">Give the student access to their progress tracker</p>
         </div>
       </div>
-      
       {!token ? (
         <div className="text-center py-2 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-4">
           <p className="text-xs text-slate-500 mb-3">No share link yet. Generate one to give the student access to their progress.</p>
-          <button onClick={generate} disabled={busy}
-            className="text-xs font-semibold bg-blue-600 text-white px-3.5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer">
+          <button onClick={generate} disabled={busy} className="text-xs font-semibold bg-blue-600 text-white px-3.5 py-2 rounded-xl hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer">
             <Share2 size={12} /> {busy ? 'Generating…' : 'Generate share link'}
           </button>
         </div>
       ) : (
         <div className="space-y-2.5 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
           <div className="flex items-center justify-between">
-            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-              {enabled ? 'Active' : 'Disabled'}
-            </span>
-            <button onClick={toggle} disabled={busy}
-              className="text-xs text-slate-500 hover:text-slate-700 underline cursor-pointer">
-              {enabled ? 'Disable link' : 'Enable link'}
-            </button>
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{enabled ? 'Active' : 'Disabled'}</span>
+            <button onClick={toggle} disabled={busy} className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline cursor-pointer transition-colors">{enabled ? 'Disable link' : 'Enable link'}</button>
           </div>
-          
           <div className="bg-white border border-slate-200 rounded-xl p-2 flex items-center gap-2">
             <code className="text-[11px] flex-1 truncate text-slate-600 font-mono">{url}</code>
-            <button onClick={copy} title="Copy"
-              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+            <button onClick={copy} title="Copy" aria-label="Copy" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
               {copied ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
             </button>
           </div>
-          
           <div className="flex gap-1.5">
-            <a href={url} target="_blank" rel="noreferrer"
-              className="flex-1 text-xs font-medium text-center text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all">
+            <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-xs font-semibold text-center text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all">
               <ExternalLink size={12} /> Open
             </a>
-            <button onClick={() => setShowQR(s => !s)}
-              className="flex-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+            <button onClick={() => setShowQR(s => !s)} className="flex-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
               <QrCode size={12} /> {showQR ? 'Hide QR' : 'Show QR'}
             </button>
-            <button onClick={generate} disabled={busy} title="Regenerate (invalidates old link)"
-              className="text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+            <button onClick={generate} disabled={busy} title="Regenerate (invalidates old link)" aria-label="Regenerate link" className="text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
               <RotateCw size={12} />
             </button>
           </div>
-          
           {showQR && (
             <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center mt-2 shadow-sm">
-              <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={200} height={200}
-                className="rounded" loading="lazy" />
+              <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={200} height={200} className="rounded" loading="lazy" />
               <p className="text-[10px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>
             </div>
           )}

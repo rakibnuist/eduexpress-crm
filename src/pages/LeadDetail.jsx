@@ -9,12 +9,13 @@ import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
 import { useToast } from '../components/Toast';
+import { isFullAdmin } from '../lib/roles';
 import {
-  ArrowLeft, Pencil, Trash2, Phone, Mail, MapPin, Calendar, User, Hash,
+  ArrowLeft, Pencil, Trash2, Phone, Mail, User, Hash,
   GraduationCap, Building2, FileText, DollarSign, Activity, Send, AlertCircle,
-  ChevronRight, ExternalLink, Globe, CreditCard, CheckCircle2, Clock,
-  Tag, UserPlus, Receipt, Plane, BookOpen, MessageSquare, Loader2,
-  Share2, Copy, QrCode, RotateCw, Heart,
+  ExternalLink, Globe, CreditCard, CheckCircle2,
+  Tag, UserPlus, Receipt, Plane, MessageSquare, Loader2,
+  Heart,
 } from 'lucide-react';
 
 const fmt = (n) => {
@@ -176,7 +177,7 @@ export default function LeadDetail({ user }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
-          <button onClick={() => navigate(-1)} className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg"><ArrowLeft size={18} /></button>
+          <button onClick={() => navigate(-1)} className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg" aria-label="Go back"><ArrowLeft size={18} /></button>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-2xl font-bold text-slate-800 truncate">{lead.client_name}</h2>
@@ -229,7 +230,7 @@ export default function LeadDetail({ user }) {
             className="flex items-center gap-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 px-3 py-2 rounded-lg border border-slate-200">
             <Pencil size={13} /> Edit
           </button>
-          {user?.role === 'admin' && (
+          {isFullAdmin(user) && (
             <button onClick={() => setDeleteOpen(true)}
               className="flex items-center gap-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 px-3 py-2 rounded-lg border border-rose-200">
               <Trash2 size={13} /> Delete
@@ -610,7 +611,7 @@ function TimelineItem({ a }) {
         )}
         {a.type !== 'note' && typeof details === 'object' && details && (
           <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-            {Object.entries(details).filter(([k, v]) => v != null && v !== '').slice(0, 4).map(([k, v]) => (
+            {Object.entries(details).filter(([, v]) => v != null && v !== '').slice(0, 4).map(([k, v]) => (
               <span key={k}><strong className="text-slate-500">{k}:</strong> {String(v).slice(0, 60)}</span>
             ))}
           </div>
@@ -662,17 +663,17 @@ function describe(a) {
 
 const STAGE_COLORS_LIST = [
   { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-700 hover:bg-slate-100' },
-  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-805 text-blue-800 hover:bg-blue-100' },
-  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-850 text-violet-800 hover:bg-violet-100' },
-  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-850 text-amber-800 hover:bg-amber-100' },
-  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-850 text-orange-800 hover:bg-orange-100' },
-  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-850 text-teal-800 hover:bg-teal-100' },
-  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-850 text-emerald-800 hover:bg-emerald-100' },
-  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-850 text-green-800 hover:bg-green-100' },
-  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-850 text-indigo-800 hover:bg-indigo-100' },
-  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-850 text-fuchsia-800 hover:bg-fuchsia-100' },
-  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-850 text-pink-800 hover:bg-pink-100' },
-  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-850 text-sky-800 hover:bg-sky-100' },
+  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800 hover:bg-blue-100' },
+  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-800 hover:bg-violet-100' },
+  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-800 hover:bg-amber-100' },
+  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-800 hover:bg-orange-100' },
+  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-800 hover:bg-teal-100' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800 hover:bg-emerald-100' },
+  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-800 hover:bg-green-100' },
+  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-800 hover:bg-indigo-100' },
+  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-800 hover:bg-fuchsia-100' },
+  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-800 hover:bg-pink-100' },
+  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-800 hover:bg-sky-100' },
 ];
 
 function InlineStageSelect({ value, onChange, stages }) {

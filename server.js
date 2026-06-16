@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { initDatabase, isDead } from './sqldb.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -11,9 +13,37 @@ const PORT = process.env.PORT || 3001;
 const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
 const DB_DIR = dirname(DB_PATH);
 const app = express();
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Rate limiting — prevent brute-force and abuse
+const standardLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // limit each IP to 300 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20, // stricter for auth endpoints
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again later.' },
+});
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 50, // uploads are expensive
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Upload quota exceeded, please try again later.' },
+});
+app.use(standardLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/logout', authLimiter);
+app.use('/api/upload', uploadLimiter);
 
 const UPLOADS_DIR = join(__dirname, 'uploads');
 if (!existsSync(UPLOADS_DIR)) {
@@ -143,7 +173,7 @@ app.post('/api/auth/login', (req, res) => {
   // If neither config is set the check is skipped (safe for initial setup).
   // Admins may log in from anywhere — they are exempt from the office network
   // and geofence gates (their password has already been verified above).
-  const enforceLocation = user.role !== 'admin';
+  const enforceLocation = !isFullAdmin(user); // Full admins exempt from location enforcement
   const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
   const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
 
@@ -191,7 +221,13 @@ app.post('/api/auth/login', (req, res) => {
   // ── End enforcement ────────────────────────────────────────────────────────
 
   db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-  const token = signToken({ id: user.id, role: user.role, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
+  // Load multi-roles for token
+  const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+  if (userRoles.length === 0) {
+    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
+    userRoles.push(roleMap[user.role] || user.role || 'consultant');
+  }
+  const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
   setAuthCookie(res, token);
 
   // Auto attendance (best-effort; never blocks login if it fails)
@@ -206,7 +242,7 @@ app.post('/api/auth/login', (req, res) => {
   } catch (e) { console.error('[auto-attendance]', e.message); }
 
   res.json({
-    id: user.id, email: user.email, name: user.name, role: user.role,
+    id: user.id, email: user.email, name: user.name, role: user.role, roles: userRoles,
     consultant_name: user.consultant_name, emp_id: user.emp_id,
     attendance, // { ok, created/alreadyIn/reason, time, status }
   });
@@ -219,11 +255,19 @@ app.get('/api/auth/me', (req, res) => {
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
   const user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  // Load multi-roles from user_roles table
+  const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+  if (roles.length === 0) {
+    // Fallback: map legacy role to new role
+    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
+    roles.push(roleMap[user.role] || user.role || 'consultant');
+  }
+  user.roles = roles;
   res.json(user);
 });
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events'];
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
@@ -234,46 +278,135 @@ app.use((req, res, next) => {
   if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
   // Service-account bypass: trusted internal key (no location restriction)
   if (req.headers['x-api-key'] === INTERNAL_API_KEY) {
-    req.user = { id: 0, role: 'super_admin', name: 'n8n Bot', email: 'bot@eduexpress.internal' };
+    req.user = { id: 0, role: 'super_admin', roles: ['founder_ceo'], name: 'n8n Bot', email: 'bot@eduexpress.internal' };
     return next();
   }
   const payload = verifyToken(getCookie(req, AUTH_COOKIE));
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  // Ensure roles array is present (fallback for legacy tokens)
+  if (!payload.roles || !Array.isArray(payload.roles)) {
+    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
+    payload.roles = [roleMap[payload.role] || payload.role || 'consultant'];
+  }
   req.user = payload;
   next();
 });
 
+// ─── RBAC Helpers ──────────────────────────────────────────────────────────
+function userHasRole(user, role) {
+  if (!user?.roles || !Array.isArray(user.roles)) return false;
+  return user.roles.includes(role);
+}
+function userHasAnyRole(user, ...roles) {
+  if (!user?.roles || !Array.isArray(user.roles)) return false;
+  return roles.some(r => user.roles.includes(r));
+}
+function isFullAdmin(user) {
+  if (!user) return false;
+  if (user.role === 'admin') return true; // Legacy
+  return userHasAnyRole(user, 'founder_ceo', 'managing_director');
+}
+function isInvestor(user) {
+  return userHasRole(user, 'investor');
+}
+function canManageApplications(user) {
+  return isFullAdmin(user) || userHasAnyRole(user, 'application_manager');
+}
+function canManageMarketing(user) {
+  return isFullAdmin(user) || userHasAnyRole(user, 'marketing_manager');
+}
+function canViewReports(user) {
+  return isFullAdmin(user) || isInvestor(user) || userHasAnyRole(user, 'application_manager', 'marketing_manager');
+}
+function canViewFinance(user) {
+  return isFullAdmin(user) || isInvestor(user);
+}
+function canViewHR(user) {
+  return isFullAdmin(user);
+}
+function canViewSettings(user) {
+  return isFullAdmin(user);
+}
+function canViewAutomation(user) {
+  return isFullAdmin(user) || userHasRole(user, 'marketing_manager');
+}
+function canViewAllLeads(user) {
+  return isFullAdmin(user) || isInvestor(user) || userHasAnyRole(user, 'application_manager', 'marketing_manager');
+}
+function canViewOwnLeadsOnly(user) {
+  return userHasRole(user, 'consultant') && !canViewAllLeads(user);
+}
+function canViewAllConversations(user) {
+  // Full admins (Founder & CEO, Managing Director, legacy Admin) + any role with explicit all-conversations permission
+  if (isFullAdmin(user)) return true;
+  if (userHasAnyRole(user, 'application_manager', 'marketing_manager')) return true;
+  // Future-proof: any role granted VIEW_ALL_CONVERSATIONS permission will have full inbox access
+  return false;
+}
+function canViewOwnConversations(user) {
+  return userHasRole(user, 'consultant');
+}
+
+function canViewChinaData(user) {
+  return userHasAnyRole(user, 'founder_ceo', 'application_manager');
+}
+
 // Admin-only guard helper
 function requireAdmin(req, res, next) {
-  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (!isFullAdmin(req.user)) return res.status(403).json({ error: 'Admin only' });
   next();
 }
 
-// Manager-or-admin guard — Application Managers can edit application data.
+// Manager-or-admin guard — Application Managers, Marketing Managers, and full admins
 function requireManagerOrAdmin(req, res, next) {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
+  if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager')) {
     return res.status(403).json({ error: 'Manager or admin only' });
   }
   next();
 }
 
-// Check if a user has access to a specific conversation (admin has access to all; employees/consultants only to their own)
+// Application-manager guard
+function requireApplicationManager(req, res, next) {
+  if (!isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
+    return res.status(403).json({ error: 'Application manager only' });
+  }
+  next();
+}
+
+// Marketing-manager guard
+function requireMarketingManager(req, res, next) {
+  if (!isFullAdmin(req.user) && !userHasRole(req.user, 'marketing_manager')) {
+    return res.status(403).json({ error: 'Marketing manager only' });
+  }
+  next();
+}
+
+// Check if a user has access to a specific conversation
 function userHasAccessToConversation(user, conversationId) {
   if (!user) return false;
-  if (user.role === 'admin' || user.role === 'manager') return true;
-  const c = db.prepare(`
-    SELECT channels.consultant, conversations.assigned_to
-    FROM conversations
-    LEFT JOIN channels ON channels.id = conversations.channel_id
-    WHERE conversations.id = ?
-  `).get(conversationId);
-  if (!c) return false;
-  
-  const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
-  if (!meUser) return false;
-  const matchConsultant = c.consultant && meUser.consultant_name &&
-    c.consultant.trim().toLowerCase() === meUser.consultant_name.trim().toLowerCase();
-  return matchConsultant || c.assigned_to === user.id;
+  if (isFullAdmin(user)) return true;
+  if (canViewAllConversations(user)) return true; // App Manager, Marketing Manager
+  // Consultant: own channels only for WhatsApp, all other channels
+  if (canViewOwnConversations(user)) {
+    const c = db.prepare(`
+      SELECT channels.type AS channel_type, channels.consultant, conversations.assigned_to, channel_access.access_type
+      FROM conversations
+      LEFT JOIN channels ON channels.id = conversations.channel_id
+      LEFT JOIN channel_access ON channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @userId
+      WHERE conversations.id = @convId
+    `).get({ userId: user.id, convId: conversationId });
+    if (!c) return false;
+    // For WhatsApp: own account only (via channel consultant or assigned_to)
+    if (c.channel_type === 'whatsapp') {
+      const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
+      const matchConsultant = c.consultant && meUser?.consultant_name &&
+        c.consultant.trim().toLowerCase() === meUser.consultant_name.trim().toLowerCase();
+      return matchConsultant || c.assigned_to === user.id || c.access_type;
+    }
+    // All other channels: full access
+    return true;
+  }
+  return false;
 }
 
 // Random URL-safe token for the student portal share link.
@@ -282,35 +415,56 @@ function generatePublicToken() {
 }
 
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
-app.get('/api/users', (req, res, next) => requireAdmin(req, res, () => {
+app.get('/api/users', (req, res) => requireAdmin(req, res, () => {
   const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login FROM users ORDER BY id").all();
+  // Attach roles array to each user
+  for (const u of users) {
+    const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(u.id).map(r => r.role);
+    u.roles = roles.length ? roles : [u.role === 'admin' ? 'founder_ceo' : u.role === 'manager' ? 'application_manager' : 'consultant'];
+  }
   res.json(users);
 }));
-app.post('/api/users', (req, res, next) => requireAdmin(req, res, () => {
-  const { email, name, password, role = 'consultant', consultant_name = null, emp_id = null } = req.body || {};
+app.post('/api/users', (req, res) => requireAdmin(req, res, () => {
+  const { email, name, password, role = 'consultant', roles = [], consultant_name = null, emp_id = null } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
     const safeRole = ['admin', 'manager', 'consultant'].includes(role) ? role : 'consultant';
     const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
       .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id);
-    const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(info.lastInsertRowid);
-    logActivity({ type: 'user_created', actor: req.user, to: u.email, details: { role: u.role, consultant_name: u.consultant_name } });
+    const newUserId = info.lastInsertRowid;
+    // Insert into user_roles if roles provided
+    const newRoles = Array.isArray(roles) && roles.length ? roles : [safeRole === 'admin' ? 'founder_ceo' : safeRole === 'manager' ? 'application_manager' : 'consultant'];
+    const insertRole = db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)`);
+    for (const r of newRoles) insertRole.run(newUserId, r);
+    const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(newUserId);
+    u.roles = newRoles;
+    logActivity({ type: 'user_created', actor: req.user, to: u.email, details: { role: u.role, roles: newRoles, consultant_name: u.consultant_name } });
     res.json(u);
   } catch (e) {
     res.status(400).json({ error: e.message.includes('UNIQUE') ? 'That email is already in use' : e.message });
   }
 }));
-app.put('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
-  const { name, role, consultant_name, emp_id, active, password } = req.body || {};
+app.put('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
+  const { name, role, roles, consultant_name, emp_id, active, password } = req.body || {};
   const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   const newHash = password ? hashPassword(password) : cur.password_hash;
   db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=? WHERE id=?`)
     .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, req.params.id);
-  res.json(db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(req.params.id));
+  // Update user_roles if roles array provided
+  if (Array.isArray(roles)) {
+    db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
+    const insertRole = db.prepare("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)");
+    for (const r of roles) insertRole.run(req.params.id, r);
+  }
+  const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(req.params.id);
+  const updatedRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(req.params.id).map(r => r.role);
+  u.roles = updatedRoles.length ? updatedRoles : [role === 'admin' ? 'founder_ceo' : role === 'manager' ? 'application_manager' : 'consultant'];
+  res.json(u);
 }));
-app.delete('/api/users/:id', (req, res, next) => requireAdmin(req, res, () => {
+app.delete('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
   if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
+  db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
   db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 }));
@@ -321,7 +475,7 @@ app.get('/api/office-config', (req, res) => {
   const cfg = Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)]));
   res.json(cfg);
 });
-app.post('/api/office-config', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/office-config', (req, res) => requireAdmin(req, res, () => {
   for (const k of OFFICE_KEYS) if (k in req.body) setConfig(k, req.body[k] === '' ? null : req.body[k]);
   res.json(Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)])));
 }));
@@ -389,57 +543,159 @@ const DEFAULT_DOCS = ['Passport', 'SSC Certificate', 'HSC Certificate', 'Markshe
                       'Passport-size Photo', 'CV', 'Statement of Purpose', 'Bank Statement'];
 
 function templateFor(destination) {
+  // Read from settings first, fall back to hardcoded defaults
+  const fromSettings = getConfig('settings_docTemplates');
+  if (fromSettings) {
+    try {
+      const parsed = JSON.parse(fromSettings);
+      if (parsed[destination]) return parsed[destination];
+    } catch {}
+  }
   return DOC_TEMPLATES[destination] || DEFAULT_DOCS;
 }
 
 function leadIsVisibleTo(lead, user) {
-  const isGeneralAuthorized = user?.role === 'admin' || user?.role === 'manager' || user?.email === 'admin@eduexpressint.com';
-  if (isGeneralAuthorized) return true;
+  if (canViewAllLeads(user)) return true;
   const me = user?.consultant_name || user?.name || '';
   if (!me || !lead.assigned_consultant) return false;
   const leadC = lead.assigned_consultant.toLowerCase().trim();
   const meC = me.toLowerCase().trim();
   const meClean = meC.split(' ')[0];
-  return leadC === meC || meClean === leadC || meC.includes(leadC) || leadC.includes(meClean);
+  const nameMatch = leadC === meC || meClean === leadC || meC.includes(leadC) || leadC.includes(meClean);
+  // Also check employee_id match if both are linked
+  if (lead.assigned_employee_id && user.emp_id) {
+    const emp = db.prepare("SELECT emp_id FROM employees WHERE id=?").get(lead.assigned_employee_id);
+    if (emp && emp.emp_id === user.emp_id) return true;
+  }
+  return nameMatch;
+}
+function leadIsChina(lead) {
+  return lead?.destination === 'China' || lead?.source === 'China';
 }
 
 // Reference: list of stages + doc templates (for the UI).
 app.get('/api/application/meta', (req, res) => {
-  res.json({ stages: getApplicationStages(), docTemplates: DOC_TEMPLATES, defaultDocs: DEFAULT_DOCS });
+  const getList = (key, defaults) => {
+    const val = getConfig(key);
+    try { if (val) return JSON.parse(val); } catch {}
+    return defaults;
+  };
+  const destinations = getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']);
+  const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Referral']);
+  // Source markets align with business model (China = collect FROM China; Bangladesh = collect FROM Bangladesh)
+  const sourceMarkets = [
+    { key: 'all', label: 'All Markets' },
+    { key: 'china', label: 'China', restricted: true },
+    { key: 'bangladesh', label: 'Bangladesh' }
+  ];
+  // Bangladesh channels
+  const bdChannels = [
+    { key: 'office', label: 'Office (In-House)', sourceMatch: ['In-House'] },
+    { key: 'b2b', label: 'B2B / Agent', sourceMatch: ['B2B', 'Agent'] }
+  ];
+  res.json({ 
+    stages: getApplicationStages(), 
+    docTemplates: DOC_TEMPLATES, 
+    defaultDocs: DEFAULT_DOCS,
+    destinations,
+    sourceMarkets,
+    bdChannels,
+    sources: allSources.map(s => ({ key: s, label: s }))
+  });
 });
 
 // All leads currently in the application pipeline (i.e. that have a stage set,
 // or are 'Enrolled'/'File Opened'). Returns one card-friendly row each.
+// NEW: supports source_market (china|bangladesh|all), bd_channel (office|b2b|all),
+// and destination (any configured destination). China data is isolated.
 app.get('/api/applications', (req, res) => {
   const where = [
     "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
   ];
   const params = {};
-  if (req.user?.role === 'consultant') { // admins + managers see all
+  if (canViewOwnLeadsOnly(req.user)) { // full admins + managers see all
     const meName = req.user.consultant_name || req.user.name || '';
     const meClean = meName.split(' ')[0];
     where.push("(TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(l.assigned_consultant)) || '%' OR TRIM(LOWER(l.assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
     params.me = meName;
     params.meClean = meClean;
   }
-  if (req.query.destination) { where.push("l.destination = @destination"); params.destination = req.query.destination; }
+
+  // ── Source Market filter (business model: China vs Bangladesh) ──
+  const sourceMarket = req.query.source_market || 'all';
+  
+  // China data isolation: block unauthorized users from explicitly requesting China market
+  if (sourceMarket === 'china' && !canViewChinaData(req.user)) {
+    return res.status(403).json({ error: 'Access denied to China applications' });
+  }
+  
+  if (sourceMarket === 'china') {
+    // China market = leads whose source is 'China' (students collected FROM China)
+    where.push("l.source = 'China'");
+  } else if (sourceMarket === 'bangladesh') {
+    // Bangladesh market = all leads whose source is NOT 'China'
+    where.push("(l.source != 'China' OR l.source IS NULL OR l.source = '')");
+  }
+  
+  // Bangladesh channel filter (only meaningful when source_market is bangladesh or all)
+  const bdChannel = req.query.bd_channel || 'all';
+  if (bdChannel === 'office') {
+    where.push("(l.source = 'In-House' OR l.source IS NULL OR l.source = '')");
+  } else if (bdChannel === 'b2b') {
+    where.push("(l.source = 'B2B' OR l.source = 'Agent')");
+  }
+  
+  // ── Destination filter (where the student GOES TO: Malaysia, Thailand, China, etc.) ──
+  const destination = req.query.destination || 'all';
+  if (destination !== 'all') {
+    where.push("l.destination = @destination");
+    params.destination = destination;
+  }
+  
+  // Legacy: support old 'region' param for backward compatibility (maps to source_market)
+  const region = req.query.region || 'all';
+  if (region !== 'all' && sourceMarket === 'all') {
+    // Old behavior: region matched either destination or source
+    where.push("(LOWER(l.destination) = LOWER(@region) OR LOWER(l.source) = LOWER(@region))");
+    params.region = region;
+  }
+  // Legacy: old 'destination' param (singular) also accepted
+  const destinationParam = req.query.destination;
+  if (destinationParam && destination === 'all') { 
+    where.push("l.destination = @destination"); 
+    params.destination = destinationParam; 
+  }
+  
+  // China data isolation: exclude China leads for unauthorized users when viewing all or other markets
+  if (!canViewChinaData(req.user) && sourceMarket !== 'china') {
+    where.push("(l.source != 'China')");
+  }
+  
+  // Source filtering (explicit source value)
+  const source = req.query.source || 'all';
+  if (source !== 'all') {
+    where.push("l.source = @source");
+    params.source = source;
+  }
+  
   if (req.query.consultant)  { where.push("l.assigned_consultant = @consultant"); params.consultant = req.query.consultant; }
-  if (req.query.source)      { where.push("l.source = @source"); params.source = req.query.source; }
   if (req.query.referrer)    { where.push("l.referrer = @referrer"); params.referrer = req.query.referrer; }
   const ws2 = 'WHERE ' + where.join(' AND ');
 
   const rows = db.prepare(`
     SELECT l.id, l.lead_id, l.client_name, l.phone, l.email, l.destination, l.university,
            l.lead_status, l.application_stage, l.visa_deadline, l.departure_date,
-           l.intake_term, l.assigned_consultant, l.service_fee, l.paid, l.balance,
+           l.intake_term, l.assigned_consultant, l.assigned_employee_id, l.service_fee, l.paid, l.balance,
            l.source, l.referrer, l.nationality, l.passport, l.degree, l.major,
            l.drive_link, l.deposit,
+           e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id) AS docs_total,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id AND d.status IN ('received','verified')) AS docs_received,
            (SELECT COUNT(*) FROM lead_university_applications u WHERE u.lead_id=l.id) AS uni_total,
            (SELECT COUNT(*) FROM lead_university_applications u WHERE u.lead_id=l.id AND u.status='admitted') AS uni_admitted,
            (SELECT GROUP_CONCAT(university, ', ') FROM lead_university_applications u WHERE u.lead_id=l.id) AS uni_list
     FROM leads l
+    LEFT JOIN employees e ON l.assigned_employee_id = e.id
     ${ws2}
     ORDER BY l.id DESC`).all(params);
 
@@ -462,12 +718,19 @@ app.get('/api/applications', (req, res) => {
 app.put('/api/leads/:id/stage', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
   const {
     stage, visa_deadline, departure_date, university, intake_term, application_notes,
     source, referrer, nationality, passport, degree, major, drive_link, deposit,
     blood_group, date_of_birth, medical_notes, emergency_contact,
+    destination, assigned_consultant, assigned_employee_id, lead_source, english_score,
+    next_followup, client_name, phone, email, program, notes, lead_status,
+    service_fee, paid, last_education,
   } = req.body || {};
   const stages = getApplicationStages();
   if (stage && !stages.some(s => s.key === stage)) {
@@ -492,7 +755,22 @@ app.put('/api/leads/:id/stage', (req, res) => {
     blood_group       = COALESCE(?, blood_group),
     date_of_birth     = COALESCE(?, date_of_birth),
     medical_notes     = COALESCE(?, medical_notes),
-    emergency_contact = COALESCE(?, emergency_contact)
+    emergency_contact = COALESCE(?, emergency_contact),
+    destination       = COALESCE(?, destination),
+    assigned_consultant = COALESCE(?, assigned_consultant),
+    assigned_employee_id = COALESCE(?, assigned_employee_id),
+    lead_source       = COALESCE(?, lead_source),
+    english_score     = COALESCE(?, english_score),
+    next_followup     = COALESCE(?, next_followup),
+    client_name       = COALESCE(?, client_name),
+    phone             = COALESCE(?, phone),
+    email             = COALESCE(?, email),
+    program           = COALESCE(?, program),
+    notes             = COALESCE(?, notes),
+    lead_status       = COALESCE(?, lead_status),
+    service_fee       = COALESCE(?, service_fee),
+    paid              = COALESCE(?, paid),
+    last_education    = COALESCE(?, last_education)
     WHERE id=?`).run(
       stage ?? null, visa_deadline ?? null, departure_date ?? null,
       university ?? null, intake_term ?? null, application_notes ?? null,
@@ -500,6 +778,14 @@ app.put('/api/leads/:id/stage', (req, res) => {
       degree ?? null, major ?? null, drive_link ?? null,
       (deposit === '' || deposit == null) ? null : Number(deposit),
       blood_group ?? null, date_of_birth ?? null, medical_notes ?? null, emergency_contact ?? null,
+      destination ?? null, assigned_consultant ?? null,
+      (assigned_employee_id === '' || assigned_employee_id == null) ? null : Number(assigned_employee_id),
+      lead_source ?? null, english_score ?? null, next_followup ?? null,
+      client_name ?? null, phone ?? null, email ?? null, program ?? null, notes ?? null,
+      lead_status ?? null,
+      (service_fee === '' || service_fee == null) ? null : Number(service_fee),
+      (paid === '' || paid == null) ? null : Number(paid),
+      last_education ?? null,
       req.params.id);
   const fresh = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (stage && oldStage !== stage) {
@@ -512,6 +798,10 @@ app.put('/api/leads/:id/stage', (req, res) => {
 app.get('/api/leads/:id/university-applications', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const rows = db.prepare("SELECT * FROM lead_university_applications WHERE lead_id=? ORDER BY id").all(lead.id);
   res.json(rows);
@@ -520,6 +810,10 @@ app.get('/api/leads/:id/university-applications', (req, res) => {
 app.post('/api/leads/:id/university-applications', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const { university, program = null, status = 'documents', application_id = null, notes = null } = req.body || {};
   if (!university) return res.status(400).json({ error: 'university is required' });
@@ -536,6 +830,10 @@ app.put('/api/university-applications/:id', (req, res) => {
   const row = db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const { university, program, status, application_id, submitted_on, decision_on, notes } = req.body || {};
   if (status && !UNI_APP_STATUSES.includes(status)) return res.status(400).json({ error: 'Bad status' });
@@ -571,6 +869,10 @@ app.delete('/api/university-applications/:id', (req, res) => {
   const row = db.prepare("SELECT * FROM lead_university_applications WHERE id=?").get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   db.prepare("DELETE FROM lead_university_applications WHERE id=?").run(req.params.id);
   res.json({ ok: true });
@@ -580,6 +882,10 @@ app.delete('/api/university-applications/:id', (req, res) => {
 app.get('/api/leads/:id/documents', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
   // If no docs yet and this lead has a destination, seed from template once.
@@ -597,6 +903,10 @@ app.get('/api/leads/:id/documents', (req, res) => {
 app.post('/api/leads/:id/documents', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
   const { doc_type, status = 'pending', notes = null, file_url = null } = req.body || {};
@@ -610,6 +920,10 @@ app.put('/api/documents/:id', (req, res) => {
   const doc = db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
   const { status, notes, file_url, received_on, requested_by_student } = req.body || {};
@@ -631,6 +945,10 @@ app.delete('/api/documents/:id', (req, res) => {
   const doc = db.prepare("SELECT * FROM lead_documents WHERE id=?").get(req.params.id);
   if (!doc) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   db.prepare("DELETE FROM lead_documents WHERE id=?").run(req.params.id);
   res.json({ ok: true });
@@ -720,7 +1038,7 @@ function buildAlerts() {
   return { idleLeads, unassigned, overdueFollowups, outstandingBalance, visaDeadlines };
 }
 
-app.get('/api/cockpit', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/cockpit', (req, res) => requireManagerOrAdmin(req, res, () => {
   const todayStr = new Date().toISOString().slice(0, 10);
   const yStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   const today = buildDaySummary(todayStr);
@@ -748,7 +1066,7 @@ app.get('/api/activity', (req, res) => {
   const where = []; const params = [];
   
   // Consultants are strictly locked to their own activities
-  if (req.user?.role === 'consultant') {
+  if (canViewOwnLeadsOnly(req.user)) {
     where.push("actor_user_id=?");
     params.push(req.user.id);
   } else {
@@ -784,7 +1102,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
 
     // Self-heal: verify every critical table actually exists. If any are missing
     // (e.g. after a crash/corruption), rebuild the schema before serving traffic.
-    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications','broadcasts','broadcast_dismissals','daily_logs'];
+    const REQUIRED = ['leads','channels','contacts','conversations','messages','quick_replies','users','payroll','activity_log','lead_documents','lead_university_applications','broadcasts','broadcast_dismissals','daily_logs','user_roles','channel_access'];
     let existing = db.tableNames ? db.tableNames() : [];
     let missing = REQUIRED.filter(t => !existing.includes(t));
     if (missing.length) {
@@ -803,7 +1121,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     // Trigger historical sync on startup in background for all active Messenger/Instagram channels
     setTimeout(async () => {
       try {
-        const activeChannels = db.prepare("SELECT id, name FROM channels WHERE active = 1 AND type IN ('messenger', 'instagram')").all();
+        const activeChannels = db.prepare("SELECT id, name FROM channels WHERE active = 1 AND type IN ('messenger', 'instagram', 'tiktok')").all();
         for (const chan of activeChannels) {
           console.log(`[startup-sync] Triggering background sync for channel: ${chan.name} (ID: ${chan.id})`);
           syncChannelMessages(chan.id, 6)
@@ -843,6 +1161,7 @@ function setupSchema() { db.exec(`
     lead_source TEXT,
     lead_status TEXT DEFAULT 'New Lead',
     assigned_consultant TEXT,
+    assigned_employee_id INTEGER,
     service_fee REAL DEFAULT 0,
     paid REAL DEFAULT 0,
     balance REAL DEFAULT 0,
@@ -859,13 +1178,16 @@ function setupSchema() { db.exec(`
   CREATE TABLE IF NOT EXISTS income (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT, month TEXT, category TEXT, lead_id TEXT,
-    client_name TEXT, reference TEXT, amount REAL DEFAULT 0, notes TEXT
+    client_name TEXT, reference TEXT, amount REAL DEFAULT 0, notes TEXT,
+    employee_id INTEGER,
+    exclude_from_cash INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT, month TEXT, category TEXT, paid_to TEXT,
-    reference TEXT, amount REAL DEFAULT 0, notes TEXT
+    reference TEXT, amount REAL DEFAULT 0, notes TEXT,
+    employee_id INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS employees (
@@ -908,6 +1230,26 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
   );
+
+  -- RBAC: Multi-role support (one employee can have 2-3 roles)
+  CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    PRIMARY KEY (user_id, role)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
+
+  -- RBAC: Channel access per user (many-to-many, for consultants)
+  CREATE TABLE IF NOT EXISTS channel_access (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_type TEXT DEFAULT 'reply', -- reply | view_only | admin
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(channel_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_channel_access_user ON channel_access(user_id);
+  CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
 
   CREATE TABLE IF NOT EXISTS daily_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1032,6 +1374,7 @@ function setupSchema() { db.exec(`
     wa_id TEXT UNIQUE,
     messenger_id TEXT,
     instagram_id TEXT,
+    tiktok_id TEXT,
     lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
     avatar_url TEXT,
     created_at TEXT DEFAULT (datetime('now'))
@@ -1151,6 +1494,103 @@ function setupSchema() { db.exec(`
     used_today INTEGER DEFAULT 0, status TEXT DEFAULT 'active',
     cooldown_until TEXT, notes TEXT
   );
+
+  -- ── AUTOMATION HUB ──────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS automation_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    trigger_config TEXT,
+    action_type TEXT NOT NULL,
+    action_config TEXT,
+    priority INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS message_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    category TEXT DEFAULT 'general',
+    language TEXT DEFAULT 'en',
+    content TEXT NOT NULL,
+    variables TEXT,
+    approved INTEGER DEFAULT 0,
+    usage_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS contact_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT '#3b82f6',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS contact_tag_assignments (
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES contact_tags(id) ON DELETE CASCADE,
+    assigned_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (contact_id, tag_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS conversation_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    note TEXT NOT NULL,
+    author_id INTEGER,
+    author_name TEXT,
+    is_internal INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS conversation_tags (
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES contact_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (conversation_id, tag_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    segment_type TEXT,
+    segment_config TEXT,
+    template_id INTEGER REFERENCES message_templates(id),
+    content TEXT,
+    status TEXT DEFAULT 'draft',
+    scheduled_at TEXT,
+    sent_count INTEGER DEFAULT 0,
+    delivered_count INTEGER DEFAULT 0,
+    failed_count INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS broadcast_recipients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id),
+    status TEXT DEFAULT 'pending',
+    sent_at TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS automation_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id INTEGER REFERENCES automation_rules(id),
+    event_type TEXT NOT NULL,
+    conversation_id INTEGER,
+    details TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_automation_rules_active ON automation_rules(active, trigger_type);
+  CREATE INDEX IF NOT EXISTS idx_conversation_notes_conv ON conversation_notes(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_broadcast_recipients_campaign ON broadcast_recipients(campaign_id);
+  CREATE INDEX IF NOT EXISTS idx_broadcast_recipients_contact ON broadcast_recipients(contact_id);
+  CREATE INDEX IF NOT EXISTS idx_automation_analytics_rule ON automation_analytics(rule_id, created_at);
 `); }
 
 function runMigrations() {
@@ -1197,8 +1637,53 @@ function runMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
+    `ALTER TABLE contacts ADD COLUMN tiktok_id TEXT`,
+    `ALTER TABLE leads ADD COLUMN assigned_employee_id INTEGER`,
+    `ALTER TABLE income ADD COLUMN employee_id INTEGER`,
+    `ALTER TABLE expenses ADD COLUMN employee_id INTEGER`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
+
+  // ── RBAC Migration: create user_roles and channel_access tables, migrate old roles ──
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_roles (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        PRIMARY KEY (user_id, role)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
+
+      CREATE TABLE IF NOT EXISTS channel_access (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        access_type TEXT DEFAULT 'reply',
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(channel_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_channel_access_user ON channel_access(user_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
+    `);
+
+    // Migrate legacy single-role users to user_roles junction table
+    const legacyUsers = db.prepare(`SELECT id, role FROM users WHERE id NOT IN (SELECT user_id FROM user_roles)`).all();
+    const roleMap = {
+      admin: 'founder_ceo',
+      manager: 'application_manager',
+      consultant: 'consultant'
+    };
+    const insertRole = db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)`);
+    for (const u of legacyUsers) {
+      const newRole = roleMap[u.role] || 'consultant';
+      insertRole.run(u.id, newRole);
+    }
+    if (legacyUsers.length) {
+      console.log(`[migration] Migrated ${legacyUsers.length} legacy users to user_roles table`);
+    }
+  } catch (e) {
+    console.error('[migration] RBAC migration failed:', e.message);
+  }
 
   // Custom migration for payroll UNIQUE constraint
   try {
@@ -1378,45 +1863,6 @@ function runMigrations() {
   }
 }
 
-function seedData() {
-  const seedFile = join(__dirname, 'seed_data.json');
-  if (existsSync(seedFile) && db.prepare('SELECT COUNT(*) as c FROM leads').get().c === 0) {
-    const seed = JSON.parse(readFileSync(seedFile, 'utf8'));
-    const insertLead = db.prepare(`INSERT OR IGNORE INTO leads
-      (lead_id,date_added,client_name,phone,email,destination,last_education,gpa,english_score,program,lead_source,lead_status,assigned_consultant,service_fee,paid,balance,payment_status,next_followup,notes)
-      VALUES (@lead_id,@date_added,@client_name,@phone,@email,@destination,@last_education,@gpa,@english_score,@program,@lead_source,@lead_status,@assigned_consultant,@service_fee,@paid,@balance,@payment_status,@next_followup,@notes)`);
-    const txn = db.transaction(leads => leads.forEach(l => {
-      if (l.lead_id) insertLead.run({ ...l, phone: String(l.phone || ''), service_fee: l.service_fee || 0, paid: l.paid || 0, balance: l.balance || 0 });
-    }));
-    txn(seed.leads);
-    const insertEmp = db.prepare(`INSERT INTO employees (emp_id,name,role,email,phone,device_id,salary,active) VALUES (@emp_id,@name,@role,@email,@phone,@device_id,@salary,@active)`);
-    seed.employees.filter(e => e.name).forEach(e => insertEmp.run({ ...e, salary: e.salary || 0, active: e.active || 'Yes' }));
-    const insertAttn = db.prepare(`INSERT INTO attendance (emp_id,name,date,check_in,status,device_id,ssid,source) VALUES (@emp_id,@name,@date,@check_in,@status,@device_id,@ssid,@source)`);
-    seed.attendance.forEach(a => insertAttn.run({ emp_id: a.emp_id, name: a.name, date: a.date?.slice(0,10), check_in: a.time, status: a.status, device_id: a.device_id, ssid: a.ssid, source: 'wifi' }));
-    console.log('✅ Seeded from Excel');
-  }
-  if (db.prepare('SELECT COUNT(*) as c FROM quick_replies').get().c === 0) {
-    const qr = db.prepare(`INSERT INTO quick_replies (title,content,category) VALUES (?,?,?)`);
-    [
-      ['Greeting', 'Hello! Thank you for reaching out to EduExpress International. How can we help you today? 🎓', 'greetings'],
-      ['China Info', 'We offer MBBS, BSc Engineering, and MBA programs in China. Tuition starts from ৳2.5 lakh. Would you like details?', 'info'],
-      ['Georgia Info', 'Georgia offers EU-recognized medical degrees at very affordable costs. Reply YES for a brochure!', 'info'],
-      ['Office Visit', 'Great! Please visit our office at Dhaka. Our consultants are available Sun–Thu, 11AM–6PM. 📍', 'appointment'],
-      ['Documents', 'Please bring: SSC/HSC certificates, NID/passport copy, 2 photos. Anything else you need?', 'documents'],
-      ['Follow Up', "Hi! This is a follow-up from EduExpress. Have you had a chance to consider our programs? We're here to help! 😊", 'followup'],
-      ['Not Available', 'Sorry, our office is closed right now. We will get back to you during business hours (11AM–6PM). Thank you!', 'auto'],
-    ].forEach(([t, c, cat]) => qr.run(t, c, cat));
-  }
-
-  // Seed the first admin user if there are none yet
-  if (db.prepare('SELECT COUNT(*) as c FROM users').get().c === 0) {
-    const email = process.env.ADMIN_EMAIL    || 'admin@eduexpressint.com';
-    const pass  = process.env.ADMIN_PASSWORD || 'ChangeMe!2026';
-    db.prepare(`INSERT INTO users (email,name,password_hash,role) VALUES (?,?,?,?)`)
-      .run(email.toLowerCase(), 'Administrator', hashPassword(pass), 'admin');
-    console.log(`🔐 Seeded admin user: ${email}  (password set from ADMIN_PASSWORD env or default)`);
-  }
-}
 
 // ─────────────────────────────────────────────────────────
 // SSE REAL-TIME BROADCAST
@@ -1648,13 +2094,15 @@ function autoCheckIn(user, opts = {}) {
   return { ok: true, created: info.lastInsertRowid, status, time, source, ssid };
 }
 
-function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email, avatar_url }) {
+function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_id, email, avatar_url }) {
   const existing = wa_id
     ? db.prepare("SELECT * FROM contacts WHERE wa_id=?").get(wa_id)
     : messenger_id
     ? db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(messenger_id)
     : instagram_id
     ? db.prepare("SELECT * FROM contacts WHERE instagram_id=?").get(instagram_id)
+    : tiktok_id
+    ? db.prepare("SELECT * FROM contacts WHERE tiktok_id=?").get(tiktok_id)
     : phone ? db.prepare("SELECT * FROM contacts WHERE phone=?").get(phone) : null;
 
   if (existing) {
@@ -1665,8 +2113,8 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, email, 
       db.prepare("UPDATE contacts SET avatar_url=? WHERE id=?").run(avatar_url, existing.id);
     return existing;
   }
-  const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id,avatar_url) VALUES (?,?,?,?,?,?,?)`)
-    .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null, avatar_url || null);
+  const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id,tiktok_id,avatar_url) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null, tiktok_id || null, avatar_url || null);
   return db.prepare("SELECT * FROM contacts WHERE id=?").get(info.lastInsertRowid);
 }
 
@@ -1683,7 +2131,13 @@ function createLeadFromContact(contactId, source, initialMessage) {
     if (!contact || contact.lead_id) return null;
 
     const lead_id = nextLeadId();
-    const client_name = contact.name || (source === 'whatsapp' ? 'WhatsApp Inquiry' : source === 'messenger' ? 'Messenger Inquiry' : 'Instagram Inquiry');
+    const sourceMap = {
+      whatsapp: 'WhatsApp Inquiry',
+      messenger: 'Messenger Inquiry',
+      instagram: 'Instagram Inquiry',
+      tiktok: 'TikTok Inquiry'
+    };
+    const client_name = contact.name || sourceMap[source] || 'Chat Inquiry';
     const phone = contact.phone || null;
     const email = contact.email || null;
 
@@ -1697,11 +2151,20 @@ function createLeadFromContact(contactId, source, initialMessage) {
       }
     }
 
+    const leadSourceMap = {
+      whatsapp: 'WhatsApp',
+      messenger: 'Messenger',
+      instagram: 'Instagram',
+      tiktok: 'TikTok'
+    };
+
     const params = leadParams({
       client_name,
       phone,
       email,
-      lead_source: source === 'whatsapp' ? 'WhatsApp' : source === 'messenger' ? 'Messenger' : 'Instagram',
+      destination: 'Bangladesh',
+      source: 'In-House',
+      lead_source: leadSourceMap[source] || 'Chat',
       lead_status: 'New Lead',
       assigned_consultant,
       notes: initialMessage ? `Initial Inquiry: "${initialMessage}"` : `Auto-created from ${source} chat integration.`
@@ -1732,10 +2195,6 @@ function createLeadFromContact(contactId, source, initialMessage) {
 }
 
 
-function getWelcomeMessage() {
-  return db.prepare("SELECT content FROM quick_replies WHERE title='Greeting' LIMIT 1").get()?.content
-    || 'Hello! Thank you for contacting EduExpress International. How can we help you today? 🎓';
-}
 
 // ── n8n AI Welcome Bot Integration ───────────────────────────────────────────
 // New messages are forwarded to n8n where Gemini generates a personalised reply.
@@ -1765,6 +2224,22 @@ function saveInboundMessage(convId, content, type = 'text', waMessageId = null, 
       contact_name: conv?.contact_name,
       channel_type: conv?.channel_type,
     }, (u) => userHasAccessToConversation(u, convId));
+
+    // Evaluate automation rules in background
+    if (conv) {
+      setImmediate(() => evaluateAutomationRules('keyword', conv, msg).catch(() => {}));
+      const inCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(convId).n;
+      if (inCount === 1) {
+        setImmediate(() => evaluateAutomationRules('new_conversation', conv, msg).catch(() => {}));
+        // Send CAPI Contact event for new conversation
+        sendCAPIEvent('Contact', {
+          lead_id: `CONV-${conv.id}`,
+          phone: conv?.contact_phone || undefined,
+          event_source_url: undefined,
+        }).catch(() => {});
+      }
+    }
+
     return msg;
   } catch (e) {
     if (!e.message.includes('UNIQUE')) console.error('saveInboundMessage:', e.message);
@@ -1786,9 +2261,14 @@ async function sendWhatsApp(channel, to, text, type = 'text', mediaUrl = null) {
     bodyObj.type = 'text';
     bodyObj.text = { body: text };
   }
+  const token = channel.access_token || getConfig('page_access_token');
+  if (!token) {
+    console.error('[sendWhatsApp] No access token for channel', channel.name || channel.id);
+    return { error: { message: 'No access token configured' } };
+  }
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.access_token}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(bodyObj)
   });
   return res.json();
@@ -1808,12 +2288,258 @@ async function sendMessenger(channel, recipientId, text, type = 'text', mediaUrl
     bodyObj.message = { text };
     bodyObj.messaging_type = 'RESPONSE';
   }
+  const token = channel.access_token || getConfig('page_access_token');
+  if (!token) {
+    console.error('[sendMessenger] No access token for channel', channel.name || channel.id);
+    return { error: { message: 'No access token configured' } };
+  }
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.access_token}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(bodyObj)
   });
   return res.json();
+}
+
+// ─── Automation Hub Helpers ───────────────────────────────
+function substituteTemplateVars(template, vars) {
+  if (!template || !vars) return template;
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replace(new RegExp(`{{${key}}}`, 'g'), value || '');
+  }
+  return result;
+}
+
+async function evaluateAutomationRules(triggerType, conversation, message) {
+  try {
+    const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 AND trigger_type=? ORDER BY priority DESC, id ASC").all(triggerType);
+    if (!rules.length) return;
+
+    const contact = conversation.contact_id ? db.prepare("SELECT * FROM contacts WHERE id=?").get(conversation.contact_id) : null;
+    const lead = conversation.lead_id ? db.prepare("SELECT * FROM leads WHERE id=?").get(conversation.lead_id) : null;
+    const channel = conversation.channel_id ? db.prepare("SELECT * FROM channels WHERE id=?").get(conversation.channel_id) : null;
+
+    for (const rule of rules) {
+      let matched = false;
+      const triggerConfig = rule.trigger_config ? JSON.parse(rule.trigger_config) : {};
+      const actionConfig = rule.action_config ? JSON.parse(rule.action_config) : {};
+
+      if (triggerType === 'keyword') {
+        const keywords = triggerConfig.keywords || [];
+        const matchMode = triggerConfig.match || 'contains';
+        const msgText = (message?.content || '').toLowerCase();
+        if (matchMode === 'exact') {
+          matched = keywords.some(k => msgText === String(k).toLowerCase().trim());
+        } else {
+          matched = keywords.some(k => msgText.includes(String(k).toLowerCase().trim()));
+        }
+      } else if (triggerType === 'new_conversation') {
+        matched = true;
+      } else if (triggerType === 'no_response') {
+        continue;
+      } else if (triggerType === 'lead_status') {
+        matched = lead && lead.lead_status === triggerConfig.lead_status;
+      } else if (triggerType === 'time') {
+        continue;
+      }
+
+      if (!matched) continue;
+
+      db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, details) VALUES (?,?,?,?)")
+        .run(rule.id, 'triggered', conversation.id, JSON.stringify({ trigger: triggerType, message: message?.content }));
+
+      let executed = false;
+      try {
+        if (rule.action_type === 'reply') {
+          let replyText = actionConfig.message || '';
+          if (actionConfig.template_id) {
+            const template = db.prepare("SELECT * FROM message_templates WHERE id=?").get(actionConfig.template_id);
+            if (template) {
+              replyText = substituteTemplateVars(template.content, {
+                name: contact?.name || '',
+                destination: lead?.destination || '',
+                consultant: lead?.assigned_consultant || '',
+                ...actionConfig.variables
+              });
+              db.prepare("UPDATE message_templates SET usage_count=usage_count+1 WHERE id=?").run(template.id);
+            }
+          }
+          if (replyText && channel) {
+            if (channel.type === 'whatsapp' && (contact?.wa_id || contact?.phone)) {
+              await sendWhatsApp(channel, contact.wa_id || contact.phone, replyText);
+            } else if (channel.type === 'messenger' && contact?.messenger_id) {
+              await sendMessenger(channel, contact.messenger_id, replyText);
+            } else if (channel.type === 'instagram' && (contact?.instagram_id || contact?.messenger_id)) {
+              await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, contact.instagram_id || contact.messenger_id, replyText);
+            }
+            const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,status,sent_by) VALUES (?,?,?,?,?,?)`)
+              .run(conversation.id, 'out', 'text', replyText, 'sent', 'Automation');
+            db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now') WHERE id=?").run(replyText, conversation.id);
+            const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
+            broadcast('new_message', { ...msg, conversation_id: conversation.id, direction: 'outbound' }, (u) => userHasAccessToConversation(u, conversation.id));
+            executed = true;
+          }
+        } else if (rule.action_type === 'assign') {
+          const assignTo = actionConfig.assign_to;
+          if (assignTo) {
+            db.prepare("UPDATE conversations SET assigned_to=? WHERE id=?").run(assignTo, conversation.id);
+            executed = true;
+          }
+        } else if (rule.action_type === 'tag') {
+          const tagName = actionConfig.tag;
+          if (tagName && contact) {
+            let tag = db.prepare("SELECT * FROM contact_tags WHERE name=?").get(tagName);
+            if (!tag) {
+              const info = db.prepare("INSERT INTO contact_tags (name, color) VALUES (?,?)").run(tagName, '#3b82f6');
+              tag = db.prepare("SELECT * FROM contact_tags WHERE id=?").get(info.lastInsertRowid);
+            }
+            db.prepare("INSERT OR IGNORE INTO contact_tag_assignments (contact_id, tag_id, assigned_by) VALUES (?,?,?)")
+              .run(contact.id, tag.id, 'Automation');
+            executed = true;
+          }
+        } else if (rule.action_type === 'create_lead') {
+          if (contact && !contact.lead_id) {
+            createLeadFromContact(contact.id, channel?.type || 'manual', message?.content);
+            executed = true;
+          }
+        } else if (rule.action_type === 'notify') {
+          logActivity({ type: 'automation_notify', actor: { name: 'Automation' }, lead, details: actionConfig.message || `Rule "${rule.name}" triggered` });
+          executed = true;
+        } else if (rule.action_type === 'webhook') {
+          if (actionConfig.webhook_url) {
+            fetch(actionConfig.webhook_url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rule: rule.name, conversation, message, contact, lead })
+            }).catch(() => {});
+            executed = true;
+          }
+        }
+      } catch (actionErr) {
+        console.error('[automation] Action failed for rule', rule.id, actionErr.message);
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, details) VALUES (?,?,?,?)")
+          .run(rule.id, 'failed', conversation.id, JSON.stringify({ error: actionErr.message }));
+        continue;
+      }
+
+      if (executed) {
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, details) VALUES (?,?,?,?)")
+          .run(rule.id, 'executed', conversation.id, JSON.stringify({ action: rule.action_type }));
+      }
+    }
+  } catch (e) {
+    console.error('[automation] evaluateAutomationRules error:', e.message);
+  }
+}
+
+async function sendBroadcast(campaignId) {
+  try {
+    const campaign = db.prepare("SELECT * FROM broadcast_campaigns WHERE id=?").get(campaignId);
+    if (!campaign) return { error: 'Campaign not found' };
+    if (campaign.status === 'sending' || campaign.status === 'sent') return { error: 'Already sent or sending' };
+
+    let contacts = [];
+    const segmentConfig = campaign.segment_config ? JSON.parse(campaign.segment_config) : {};
+    if (campaign.segment_type === 'all' || !campaign.segment_type) {
+      contacts = db.prepare("SELECT * FROM contacts WHERE wa_id IS NOT NULL OR messenger_id IS NOT NULL OR instagram_id IS NOT NULL").all();
+    } else if (campaign.segment_type === 'tag') {
+      const tagIds = segmentConfig.tag_ids || [];
+      if (tagIds.length) {
+        const placeholders = tagIds.map(() => '?').join(',');
+        contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN contact_tag_assignments ON contact_tag_assignments.contact_id = contacts.id WHERE contact_tag_assignments.tag_id IN (${placeholders}) GROUP BY contacts.id`).all(...tagIds);
+      }
+    } else if (campaign.segment_type === 'status') {
+      const statuses = segmentConfig.lead_statuses || [];
+      if (statuses.length) {
+        const placeholders = statuses.map(() => '?').join(',');
+        contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN leads ON leads.id = contacts.lead_id WHERE leads.lead_status IN (${placeholders}) GROUP BY contacts.id`).all(...statuses);
+      }
+    } else if (campaign.segment_type === 'channel') {
+      const channelTypes = segmentConfig.channel_types || [];
+      if (channelTypes.length) {
+        const placeholders = channelTypes.map(() => '?').join(',');
+        contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN conversations ON conversations.contact_id = contacts.id WHERE conversations.channel_type IN (${placeholders}) GROUP BY contacts.id`).all(...channelTypes);
+      }
+    }
+
+    if (!contacts.length) {
+      db.prepare("UPDATE broadcast_campaigns SET status='sent' WHERE id=?").run(campaignId);
+      return { sent: 0 };
+    }
+
+    db.prepare("UPDATE broadcast_campaigns SET status='sending' WHERE id=?").run(campaignId);
+
+    let template = null;
+    if (campaign.template_id) {
+      template = db.prepare("SELECT * FROM message_templates WHERE id=?").get(campaign.template_id);
+    }
+
+    let sent = 0, failed = 0;
+    const insertRecipient = db.prepare("INSERT INTO broadcast_recipients (campaign_id, contact_id, status) VALUES (?,?,?)");
+
+    for (const contact of contacts) {
+      try {
+        const recipientInfo = insertRecipient.run(campaignId, contact.id, 'pending');
+        const recipientId = recipientInfo.lastInsertRowid;
+
+        let messageText = campaign.content || '';
+        if (template) {
+          messageText = substituteTemplateVars(template.content, {
+            name: contact.name || '',
+            ...segmentConfig.variables
+          });
+        }
+
+        let channel = null;
+        if (contact.wa_id) {
+          channel = db.prepare("SELECT * FROM channels WHERE type='whatsapp' AND active=1 LIMIT 1").get();
+        } else if (contact.messenger_id) {
+          channel = db.prepare("SELECT * FROM channels WHERE type='messenger' AND active=1 LIMIT 1").get();
+        } else if (contact.instagram_id) {
+          channel = db.prepare("SELECT * FROM channels WHERE type='instagram' AND active=1 LIMIT 1").get();
+        }
+
+        if (!channel || !messageText) {
+          db.prepare("UPDATE broadcast_recipients SET status='failed', error=? WHERE id=?").run('No channel or message', recipientId);
+          failed++;
+          continue;
+        }
+
+        let apiResult = null;
+        if (channel.type === 'whatsapp') {
+          apiResult = await sendWhatsApp(channel, contact.wa_id || contact.phone, messageText);
+        } else if (channel.type === 'messenger') {
+          apiResult = await sendMessenger(channel, contact.messenger_id, messageText);
+        } else if (channel.type === 'instagram') {
+          apiResult = await sendMessenger({ ...channel, page_id: channel.ig_account_id || channel.page_id }, contact.instagram_id || contact.messenger_id, messageText);
+        } else if (channel.type === 'tiktok') {
+          apiResult = { error: { message: 'TikTok broadcast not yet supported' } };
+        }
+
+        if (apiResult?.error) {
+          db.prepare("UPDATE broadcast_recipients SET status='failed', error=?, sent_at=datetime('now') WHERE id=?").run(apiResult.error.message || 'API error', recipientId);
+          failed++;
+        } else {
+          db.prepare("UPDATE broadcast_recipients SET status='sent', sent_at=datetime('now') WHERE id=?").run(recipientId);
+          sent++;
+        }
+      } catch (err) {
+        console.error('[broadcast] send error for contact', contact.id, err.message);
+        failed++;
+      }
+    }
+
+    db.prepare("UPDATE broadcast_campaigns SET status='sent', sent_count=?, delivered_count=?, failed_count=? WHERE id=?").run(sent, sent, failed, campaignId);
+    if (template) {
+      db.prepare("UPDATE message_templates SET usage_count=usage_count+? WHERE id=?").run(sent, template.id);
+    }
+    return { sent, failed, total: contacts.length };
+  } catch (e) {
+    console.error('[broadcast] sendBroadcast error:', e.message);
+    db.prepare("UPDATE broadcast_campaigns SET status='failed' WHERE id=?").run(campaignId);
+    return { error: e.message };
+  }
 }
 
 // SHA-256 hash helper required by Meta CAPI for all PII fields
@@ -1826,18 +2552,25 @@ async function sendCAPIEvent(eventName, leadData) {
   if (!pixelId) return { skipped: true, reason: 'no_pixel_id' };
   const normalizedPhone = leadData.phone ? leadData.phone.replace(/\D/g, '') : null;
   const normalizedEmail = leadData.email ? leadData.email.toLowerCase().trim() : null;
+  const userData = {
+    ph: normalizedPhone ? [capiHash(normalizedPhone)] : undefined,
+    em: normalizedEmail ? [capiHash(normalizedEmail)] : undefined,
+    country: ['bd'],
+  };
+  if (leadData.fbp) userData.fbp = leadData.fbp;
+  if (leadData.fbc) userData.fbc = leadData.fbc;
   const payload = {
     data: [{
       event_name: eventName,
       event_time: Math.floor(Date.now() / 1000),
       event_id: `${leadData.lead_id || 'L'}-${eventName}-${Date.now()}`,
       action_source: 'system_generated',
-      user_data: {
-        ph: normalizedPhone ? [capiHash(normalizedPhone)] : undefined,
-        em: normalizedEmail ? [capiHash(normalizedEmail)] : undefined,
-        country: ['bd'],
+      user_data: userData,
+      custom_data: {
+        lead_id: leadData.lead_id,
+        destination: leadData.destination,
+        event_source_url: leadData.event_source_url || undefined,
       },
-      custom_data: { lead_id: leadData.lead_id, destination: leadData.destination },
     }],
   };
   const clean = o => {
@@ -1853,23 +2586,72 @@ async function sendCAPIEvent(eventName, leadData) {
   } catch (e) { return { error: e.message }; }
 }
 
+function getWhatsAppChannelForConsultant(consultantName) {
+  if (!consultantName) return null;
+  const chan = db.prepare("SELECT * FROM channels WHERE type = 'whatsapp' AND LOWER(TRIM(consultant)) = LOWER(TRIM(?)) AND active = 1 LIMIT 1").get(consultantName);
+  if (chan) return chan;
+  // fallback: any active WhatsApp channel
+  return db.prepare("SELECT * FROM channels WHERE type = 'whatsapp' AND active = 1 LIMIT 1").get();
+}
+
 // ─────────────────────────────────────────────────────────
 // DASHBOARD
 // ─────────────────────────────────────────────────────────
 app.get('/api/dashboard', (req, res) => {
-  const pipeline     = db.prepare("SELECT lead_status, COUNT(*) as count FROM leads GROUP BY lead_status").all();
-  const total        = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
-  const today        = new Date().toISOString().slice(0, 10);
-  const followupToday= db.prepare("SELECT COUNT(*) as c FROM leads WHERE next_followup=?").get(today).c;
-  const recentLeads  = db.prepare("SELECT * FROM leads ORDER BY id DESC LIMIT 5").all();
-  const totalPaid    = db.prepare("SELECT SUM(paid) as s FROM leads").get().s || 0;
-  const metaLeads    = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
-  const openConvs    = db.prepare("SELECT COUNT(*) as c FROM conversations WHERE status='open'").get().c;
-  const unreadMsgs   = db.prepare("SELECT SUM(unread_count) as s FROM conversations").get().s || 0;
-  const newToday     = db.prepare("SELECT COUNT(*) as c FROM leads WHERE date_added=?").get(today).c;
-  const by_source    = db.prepare("SELECT lead_source as k, COUNT(*) as n FROM leads WHERE lead_source IS NOT NULL AND lead_source!='' GROUP BY lead_source ORDER BY n DESC LIMIT 6").all();
-  const by_dest      = db.prepare("SELECT destination as k, COUNT(*) as n FROM leads WHERE destination IS NOT NULL AND destination!='' GROUP BY destination ORDER BY n DESC LIMIT 8").all();
-  res.json({ pipeline, total, followupToday, recentLeads, totalPaid, metaLeads, openConvs, unreadMsgs, newToday, by_source, by_dest });
+  const today = new Date().toISOString().slice(0, 10);
+  const user = req.user;
+  const isAdmin = isFullAdmin(user) || isInvestor(user) || userHasAnyRole(user, 'application_manager', 'marketing_manager');
+  const isConsultant = canViewOwnLeadsOnly(user);
+
+  // Build WHERE clause for consultant scoping
+  let leadWhere = '';
+  let leadParams = [];
+  if (isConsultant) {
+    const meName = user.consultant_name || user.name || '';
+    const meClean = meName.split(' ')[0];
+    leadWhere = `WHERE (TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(?)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(?)) OR TRIM(LOWER(?)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(?)) || '%')`;
+    leadParams = [meName, meClean, meName, meClean];
+  }
+
+  // China data isolation: exclude China leads from stats for unauthorized users
+  const chinaExclusion = !canViewChinaData(user) ? " AND (destination != 'China' AND source != 'China')" : '';
+  
+  // When leadWhere is empty, we need a base WHERE clause so chinaExclusion (which starts with AND) works
+  const baseWhere = leadWhere || 'WHERE 1=1';
+
+  const scalars = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM leads ${baseWhere}${chinaExclusion}) AS total,
+      (SELECT COUNT(*) FROM leads ${baseWhere} AND next_followup=?${chinaExclusion}) AS followup_today,
+      (SELECT SUM(paid) FROM leads ${baseWhere}${chinaExclusion}) AS total_paid,
+      (SELECT COUNT(*) FROM leads ${baseWhere} AND meta_lead_id IS NOT NULL${chinaExclusion}) AS meta_leads,
+      (SELECT COUNT(*) FROM leads ${baseWhere} AND date_added=?${chinaExclusion}) AS new_today
+  `).get(...leadParams, today, ...leadParams, today, ...leadParams, today, ...leadParams, today, ...leadParams, today);
+
+  const convScalars = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM conversations WHERE status='open') AS open_convs,
+      (SELECT SUM(unread_count) FROM conversations) AS unread_msgs
+  `).get();
+
+  const pipeline = db.prepare(`SELECT lead_status, COUNT(*) as count FROM leads ${baseWhere}${chinaExclusion} GROUP BY lead_status`).all(...leadParams);
+  const recentLeads = db.prepare(`SELECT * FROM leads ${baseWhere}${chinaExclusion} ORDER BY id DESC LIMIT 5`).all(...leadParams);
+  const by_source = db.prepare(`SELECT lead_source as k, COUNT(*) as n FROM leads WHERE lead_source IS NOT NULL AND lead_source!='' ${leadWhere ? 'AND ' + leadWhere.replace(/^WHERE /, '') : ''}${chinaExclusion} GROUP BY lead_source ORDER BY n DESC LIMIT 6`).all(...leadParams);
+  const by_dest = db.prepare(`SELECT destination as k, COUNT(*) as n FROM leads WHERE destination IS NOT NULL AND destination!='' ${leadWhere ? 'AND ' + leadWhere.replace(/^WHERE /, '') : ''}${chinaExclusion} GROUP BY destination ORDER BY n DESC LIMIT 8`).all(...leadParams);
+
+  res.json({
+    pipeline,
+    total: scalars.total,
+    followupToday: scalars.followup_today,
+    recentLeads,
+    totalPaid: scalars.total_paid || 0,
+    metaLeads: scalars.meta_leads,
+    openConvs: convScalars.open_convs,
+    unreadMsgs: convScalars.unread_msgs || 0,
+    newToday: scalars.new_today,
+    by_source,
+    by_dest,
+  });
 });
 
 // ─────────────────────────────────────────────────────────
@@ -1891,23 +2673,31 @@ app.get('/api/leads', (req, res) => {
     }
   }
   // Consultants are scoped to their own assigned leads — enforced server-side.
-  // Admins and Application Managers see everything.
-  if (req.user?.role === 'consultant') {
+  // Admins, Managing Directors, Investors, and Application Managers see everything.
+  if (canViewOwnLeadsOnly(req.user)) {
     const meName = req.user.consultant_name || req.user.name || '';
     const meClean = meName.split(' ')[0];
     where.push("(TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
     params.me = meName;
     params.meClean = meClean;
   }
+  // China data isolation: exclude China leads for unauthorized users
+  if (!canViewChinaData(req.user)) {
+    where.push("(destination != 'China' AND source != 'China')");
+  }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const total  = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
-  const leads  = db.prepare(`SELECT * FROM leads ${ws} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`).all(params);
+  const leads  = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id ${ws} ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}`).all(params);
   res.json({ leads, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
 });
 app.get('/api/leads/:id', (req, res) => {
-  const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
+  const lead = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id WHERE l.id=? OR l.lead_id=?`).get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
   }
@@ -1919,6 +2709,15 @@ app.get('/api/leads/:id', (req, res) => {
 function leadParams(d, lead_id, balance) {
   const num = v => v === '' || v == null ? 0 : Number(v);
   const txt = v => (v === '' || v == null) ? null : v;
+  let assigned_employee_id = d.assigned_employee_id ? Number(d.assigned_employee_id) : null;
+  let assigned_consultant = txt(d.assigned_consultant);
+  // If employee_id is provided but consultant name is not, resolve from employees table
+  if (assigned_employee_id && !assigned_consultant) {
+    try {
+      const emp = db.prepare("SELECT name FROM employees WHERE id=?").get(assigned_employee_id);
+      if (emp?.name) assigned_consultant = emp.name;
+    } catch {}
+  }
   return {
     lead_id, balance,
     date_added: d.date_added || new Date().toISOString().slice(0,10),
@@ -1931,7 +2730,8 @@ function leadParams(d, lead_id, balance) {
     program: txt(d.program || d.major),
     lead_source: d.lead_source || 'Manual',
     lead_status: d.lead_status || 'New Lead',
-    assigned_consultant: txt(d.assigned_consultant),
+    assigned_employee_id,
+    assigned_consultant,
     service_fee: num(d.service_fee), paid: num(d.paid),
     payment_status: txt(d.payment_status),
     next_followup: txt(d.next_followup),
@@ -1954,7 +2754,7 @@ function leadParams(d, lead_id, balance) {
 
 const LEAD_INSERT_SQL = `INSERT INTO leads (
   lead_id, date_added, client_name, phone, email, destination, last_education, gpa,
-  english_score, program, lead_source, lead_status, assigned_consultant,
+  english_score, program, lead_source, lead_status, assigned_consultant, assigned_employee_id,
   service_fee, paid, balance, payment_status, next_followup, notes,
   meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
   source, referrer, nationality, passport, degree, major, intake_term, university,
@@ -1962,7 +2762,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   application_stage
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
-  @english_score, @program, @lead_source, @lead_status, @assigned_consultant,
+  @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
   @service_fee, @paid, @balance, @payment_status, @next_followup, @notes,
   @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
@@ -1972,7 +2772,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
   last_education=@last_education, gpa=@gpa, english_score=@english_score, program=@program,
-  lead_source=@lead_source, lead_status=@lead_status, assigned_consultant=@assigned_consultant,
+  lead_source=@lead_source, lead_status=@lead_status, assigned_consultant=@assigned_consultant, assigned_employee_id=@assigned_employee_id,
   service_fee=@service_fee, paid=@paid, balance=@balance, payment_status=@payment_status,
   next_followup=@next_followup, notes=@notes,
   source=@source, referrer=@referrer, nationality=@nationality, passport=@passport,
@@ -1986,12 +2786,22 @@ WHERE id=@id`;
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
   const isChinaApp = d.isChinaApp || d.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-'));
+  // RBAC: Only full admins and Application Managers can create China applications
+  if (isChinaApp && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
+    return res.status(403).json({ error: 'Only Application Managers and Administrators can create China applications.' });
+  }
+  // Chat inbox leads must go to Bangladesh
+  const fromChat = d.lead_source === 'WhatsApp' || d.lead_source === 'Messenger' || d.lead_source === 'Instagram' || d.lead_source === 'TikTok';
+  if (fromChat && d.destination !== 'Bangladesh') {
+    d.destination = 'Bangladesh';
+    d.source = d.source || 'In-House';
+  }
   const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, lead_id, balance);
   const info = db.prepare(LEAD_INSERT_SQL).run(params);
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
-  sendCAPIEvent('Lead', lead);
+  sendCAPIEvent('Lead', lead).catch(() => {});
   logActivity({ type: 'lead_created', actor: req.user, lead, details: { source: lead.lead_source, destination: lead.destination, assigned_consultant: lead.assigned_consultant } });
   if (lead.assigned_consultant)
     logActivity({ type: 'lead_assigned', actor: req.user, lead, to: lead.assigned_consultant });
@@ -2002,19 +2812,57 @@ app.put('/api/leads/:id', async (req, res) => {
   const d = req.body;
   const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!oldLead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(oldLead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(oldLead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
+  }
+  // RBAC: Prevent unauthorized China destination changes
+  const isChangingToChina = (d.destination === 'China' || d.source === 'China') && oldLead.destination !== 'China' && oldLead.source !== 'China';
+  if (isChangingToChina && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
+    return res.status(403).json({ error: 'Only Application Managers and Administrators can change a lead to China.' });
   }
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, oldLead.lead_id, balance);
   db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
-  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  let lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
 
   // Audit the changes that matter to an owner.
+  let autoUpdates = [];
   if (oldLead?.lead_status !== lead.lead_status) {
     logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
     const evtMap = { 'Enrolled':'Purchase','File Opened':'InitiateCheckout','Office Visited':'Schedule','Positive':'Lead' };
-    if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead);
+    if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead).catch(() => {});
+
+    // Auto-move to applications when status becomes 'File Opened'
+    if (lead.lead_status === 'File Opened') {
+      let newStage = lead.application_stage || 'documents';
+      if (!lead.application_stage) {
+        autoUpdates.push("application_stage = 'documents'");
+      }
+      let newSource = lead.source;
+      let newDestination = lead.destination;
+      if (lead.destination === 'China') {
+        newSource = 'China';
+        if (lead.source !== 'China') autoUpdates.push("source = 'China'");
+      } else if (lead.destination === 'Bangladesh') {
+        if (lead.source === 'B2B') {
+          newSource = 'B2B';
+        } else {
+          newSource = 'In-House';
+          if (lead.source !== 'In-House') autoUpdates.push("source = 'In-House'");
+        }
+      }
+      if (autoUpdates.length) {
+        db.prepare(`UPDATE leads SET ${autoUpdates.join(', ')} WHERE id=?`).run(req.params.id);
+      }
+      logActivity({ type: 'application_stage_changed', actor: req.user, lead, details: { stage: newStage, source: newSource, destination: newDestination } });
+    }
+  }
+  if (autoUpdates.length) {
+    lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   }
   if ((oldLead?.assigned_consultant || '') !== (lead.assigned_consultant || '')) {
     logActivity({ type: 'lead_assigned', actor: req.user, lead, from: oldLead?.assigned_consultant, to: lead.assigned_consultant });
@@ -2025,9 +2873,36 @@ app.put('/api/leads/:id', async (req, res) => {
   }
   res.json(lead);
 });
+
+app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res, () => {
+  try {
+    const { ids, consultant } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array required' });
+    if (!consultant || typeof consultant !== 'string') return res.status(400).json({ error: 'consultant name required' });
+    const updated = [];
+    for (const id of ids) {
+      const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
+      if (!lead) continue;
+      if (!leadIsVisibleTo(lead, req.user)) continue;
+      if (!canViewChinaData(req.user) && leadIsChina(lead)) continue;
+      db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(consultant, id);
+      const updatedLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
+      updated.push(updatedLead);
+      logActivity({ type: 'lead_assigned', actor: req.user, lead: updatedLead, from: lead.assigned_consultant, to: consultant });
+    }
+    res.json({ ok: true, updated: updated.length, leads: updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
 app.delete('/api/leads/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
   }
@@ -2043,6 +2918,10 @@ app.delete('/api/leads/:id', (req, res) => {
 app.get('/api/leads/:id/timeline', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
 
   // 1) Activity log entries tied to this lead (numeric id link)
@@ -2080,6 +2959,10 @@ app.get('/api/leads/:id/timeline', (req, res) => {
 app.post('/api/leads/:id/notes', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text is required' });
@@ -2098,7 +2981,7 @@ app.get('/api/broadcasts', (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/broadcasts', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/broadcasts', (req, res) => requireAdmin(req, res, () => {
   const { message, color = 'amber', pinned = 1, expires_at = null } = req.body || {};
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
   const info = db.prepare(`INSERT INTO broadcasts (message, author_id, author_name, color, pinned, expires_at)
@@ -2108,7 +2991,7 @@ app.post('/api/broadcasts', (req, res, next) => requireAdmin(req, res, () => {
   res.json(db.prepare("SELECT * FROM broadcasts WHERE id=?").get(info.lastInsertRowid));
 }));
 
-app.delete('/api/broadcasts/:id', (req, res, next) => requireAdmin(req, res, () => {
+app.delete('/api/broadcasts/:id', (req, res) => requireAdmin(req, res, () => {
   db.prepare("DELETE FROM broadcast_dismissals WHERE broadcast_id=?").run(req.params.id);
   db.prepare("DELETE FROM broadcasts WHERE id=?").run(req.params.id);
   res.json({ ok: true });
@@ -2263,7 +3146,7 @@ function importApplicationRows(rows, actor) {
   return { inserted, updated, skipped };
 }
 
-app.post('/api/import/cashflow', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/import/cashflow', (req, res) => requireAdmin(req, res, () => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   if (rows.length === 0) return res.status(400).json({ error: 'No rows to import' });
   if (rows.length > 5000) return res.status(400).json({ error: 'Too many rows in one batch (max 5000)' });
@@ -2271,7 +3154,7 @@ app.post('/api/import/cashflow', (req, res, next) => requireAdmin(req, res, () =
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
-app.post('/api/import/applications', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/import/applications', (req, res) => requireAdmin(req, res, () => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   if (rows.length === 0) return res.status(400).json({ error: 'No rows to import' });
   if (rows.length > 5000) return res.status(400).json({ error: 'Too many rows in one batch (max 5000)' });
@@ -2282,7 +3165,7 @@ app.post('/api/import/applications', (req, res, next) => requireAdmin(req, res, 
 // ─── ADMIN: wipe all leads (+ documents, uni-apps, activity log, KPI targets) ───
 // Optional body: { conversations: true } → also wipes chat threads, messages & contacts.
 // Finance (income/expenses), employees, attendance, payroll, users & settings are NEVER touched.
-app.delete('/api/admin/wipe-leads', (req, res, next) => requireAdmin(req, res, () => {
+app.delete('/api/admin/wipe-leads', (req, res) => requireAdmin(req, res, () => {
   try {
     const wipeConversations = !!(req.body && req.body.conversations);
     const count = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
@@ -2309,10 +3192,55 @@ app.delete('/api/admin/wipe-leads', (req, res, next) => requireAdmin(req, res, (
   }
 }));
 
+// ─── SYSTEM HEALTH & BACKUP ───────────────────────────────────────────
+app.get('/api/health/db-size', (req, res) => {
+  try {
+    const stats = db.prepare("SELECT page_count * page_size as bytes FROM pragma_page_count(), pragma_page_size()").get();
+    res.json({ bytes: stats?.bytes || 0, tables: db.prepare("SELECT count(*) as c FROM sqlite_master WHERE type='table'").get().c });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/health/backup', (req, res) => requireAdmin(req, res, () => {
+  try {
+    db.flush();
+    const data = db.export();
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="crm_backup_${new Date().toISOString().slice(0,10)}.db"`);
+    res.send(Buffer.from(data));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+app.get('/api/health/export-json', (req, res) => requireAdmin(req, res, () => {
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
+    const exportData = {};
+    for (const t of tables) {
+      try {
+        exportData[t] = db.prepare(`SELECT * FROM "${t}"`).all();
+      } catch (err) {
+        exportData[t] = { error: err.message };
+      }
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="crm_export_${new Date().toISOString().slice(0,10)}.json"`);
+    res.json(exportData);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
 // ─── STAFF REPLY to a student through the portal thread ───────────────────
 app.post('/api/leads/:id/reply-to-student', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const { text } = req.body || {};
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });
@@ -2455,6 +3383,10 @@ app.get('/api/public/student/:token/thread', (req, res) => {
 app.post('/api/leads/:id/regenerate-token', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const token = generatePublicToken();
   db.prepare("UPDATE leads SET public_token=?, public_enabled=1 WHERE id=?").run(token, lead.id);
@@ -2465,6 +3397,10 @@ app.post('/api/leads/:id/regenerate-token', (req, res) => {
 app.put('/api/leads/:id/public', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
   const { enabled } = req.body || {};
   db.prepare("UPDATE leads SET public_enabled=? WHERE id=?").run(enabled ? 1 : 0, lead.id);
@@ -2476,6 +3412,10 @@ app.put('/api/leads/:id/public', (req, res) => {
 app.get('/api/leads/:id/qr', async (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).end();
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).end();
+  }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).end();
   if (!lead.public_token) {
     const token = generatePublicToken();
@@ -2492,7 +3432,7 @@ app.get('/api/leads/:id/qr', async (req, res) => {
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buf);
-  } catch (e) {
+  } catch {
     res.status(500).end();
   }
 });
@@ -2578,17 +3518,20 @@ app.post('/api/public/student/:token/message', (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/income', (req, res) => {
   const { month, page=1, limit=50 } = req.query;
-  const w = month 
-    ? `WHERE month='${month}' AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)` 
-    : `WHERE (exclude_from_cash IS NULL OR exclude_from_cash = 0)`;
-  const sum = db.prepare(`SELECT SUM(amount) as s FROM income ${w}`).get().s || 0;
-  const total = db.prepare(`SELECT COUNT(*) as c FROM income ${w}`).get().c;
-  const rows = db.prepare(`SELECT * FROM income ${w} ORDER BY date DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all();
-  res.json({ rows, total, sum, page: parseInt(page), pages: Math.ceil(total/limit) });
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.min(Math.max(1, parseInt(limit) || 50), 500);
+  const offset = (pageNum - 1) * limitNum;
+  const params = {};
+  let w = 'WHERE (exclude_from_cash IS NULL OR exclude_from_cash = 0)';
+  if (month) { w += ' AND month=@month'; params.month = month; }
+  const sum = db.prepare(`SELECT SUM(amount) as s FROM income ${w}`).get(params).s || 0;
+  const total = db.prepare(`SELECT COUNT(*) as c FROM income ${w}`).get(params).c;
+  const rows = db.prepare(`SELECT i.*, e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id ${w} ORDER BY i.date DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
+  res.json({ rows, total, sum, page: pageNum, pages: Math.ceil(total/limitNum) });
 });
 app.post('/api/income', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes)`).run({ ...d, month, amount: d.amount||0 });
+  const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes,employee_id) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes,@employee_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null });
   const row = db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid);
   // Try to attach to a real lead so this payment shows on the lead's timeline.
   const lead = row.lead_id ? db.prepare("SELECT * FROM leads WHERE lead_id=?").get(row.lead_id) : null;
@@ -2597,29 +3540,34 @@ app.post('/api/income', (req, res) => {
 });
 app.put('/api/income/:id', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  db.prepare(`UPDATE income SET date=@date,month=@month,category=@category,lead_id=@lead_id,client_name=@client_name,reference=@reference,amount=@amount,notes=@notes WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0 });
+  db.prepare(`UPDATE income SET date=@date,month=@month,category=@category,lead_id=@lead_id,client_name=@client_name,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null });
   res.json(db.prepare("SELECT * FROM income WHERE id=?").get(req.params.id));
 });
 app.delete('/api/income/:id', (req, res) => { db.prepare("DELETE FROM income WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
 app.get('/api/expenses', (req, res) => {
   const { month, page=1, limit=50 } = req.query;
-  const w = month ? `WHERE month='${month}'` : '';
-  const sum = db.prepare(`SELECT SUM(amount) as s FROM expenses ${w}`).get().s || 0;
-  const total = db.prepare(`SELECT COUNT(*) as c FROM expenses ${w}`).get().c;
-  const rows = db.prepare(`SELECT * FROM expenses ${w} ORDER BY date DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all();
-  res.json({ rows, total, sum, page: parseInt(page), pages: Math.ceil(total/limit) });
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.min(Math.max(1, parseInt(limit) || 50), 500);
+  const offset = (pageNum - 1) * limitNum;
+  const params = {};
+  let w = '';
+  if (month) { w = 'WHERE month=@month'; params.month = month; }
+  const sum = db.prepare(`SELECT SUM(amount) as s FROM expenses ${w}`).get(params).s || 0;
+  const total = db.prepare(`SELECT COUNT(*) as c FROM expenses ${w}`).get(params).c;
+  const rows = db.prepare(`SELECT x.*, e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id ${w} ORDER BY x.date DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
+  res.json({ rows, total, sum, page: pageNum, pages: Math.ceil(total/limitNum) });
 });
 app.post('/api/expenses', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes)`).run({ ...d, month, amount: d.amount||0 });
+  const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes,employee_id) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes,@employee_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null });
   const row = db.prepare("SELECT * FROM expenses WHERE id=?").get(info.lastInsertRowid);
   logActivity({ type: 'expense_recorded', actor: req.user, amount: row.amount, details: { paid_to: row.paid_to, category: row.category, reference: row.reference } });
   res.json(row);
 });
 app.put('/api/expenses/:id', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  db.prepare(`UPDATE expenses SET date=@date,month=@month,category=@category,paid_to=@paid_to,reference=@reference,amount=@amount,notes=@notes WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0 });
+  db.prepare(`UPDATE expenses SET date=@date,month=@month,category=@category,paid_to=@paid_to,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null });
   res.json(db.prepare("SELECT * FROM expenses WHERE id=?").get(req.params.id));
 });
 app.delete('/api/expenses/:id', (req, res) => { db.prepare("DELETE FROM expenses WHERE id=?").run(req.params.id); res.json({ ok:true }); });
@@ -2660,7 +3608,7 @@ app.get('/api/cashflow/categories', (req, res) => {
 });
 
 // Set initial cash (admin only) — the one-time opening balance.
-app.put('/api/cashflow/initial', (req, res, next) => requireAdmin(req, res, () => {
+app.put('/api/cashflow/initial', (req, res) => requireAdmin(req, res, () => {
   const v = Number(req.body?.amount);
   if (!Number.isFinite(v)) return res.status(400).json({ error: 'amount required' });
   setConfig('cash_initial', String(v));
@@ -2669,10 +3617,10 @@ app.put('/api/cashflow/initial', (req, res, next) => requireAdmin(req, res, () =
 
 // Monthly ledger — what the Excel shows for one month, side by side.
 // Includes running balance per row so the table reads like a real cashflow.
-app.get('/api/cashflow', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/cashflow', (req, res) => requireManagerOrAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
-  const incomeRows  = db.prepare("SELECT id,date,category,client_name,reference,amount,notes FROM income   WHERE month=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0) ORDER BY date, id").all(month);
-  const expenseRows = db.prepare("SELECT id,date,category,paid_to AS client_name,reference,amount,notes FROM expenses WHERE month=? ORDER BY date, id").all(month);
+  const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE i.month=? AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month);
+  const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to AS client_name,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.month=? ORDER BY x.date, x.id`).all(month);
   const opening = computeOpeningBalance(month);
   const totalIn  = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
   const totalOut = expenseRows.reduce((s, r) => s + (r.amount || 0), 0);
@@ -2684,7 +3632,6 @@ app.get('/api/cashflow', (req, res, next) => requireManagerOrAdmin(req, res, () 
   ].sort((a, b) => a.ts.localeCompare(b.ts));
   let running = opening;
   for (const e of events) { running += e.kind === 'in' ? e.amount : -e.amount; e.running = running; }
-  const rowsWithRunning = id => events.find(e => e.id === id && e.kind === 'in')  || events.find(e => e.id === id && e.kind === 'out');
 
   // Re-attach running balance back to each row in order
   const incomeWithRun  = incomeRows.map(r => ({ ...r, running: events.find(e => e.kind === 'in'  && e.id === r.id)?.running }));
@@ -2710,7 +3657,7 @@ app.get('/api/cashflow', (req, res, next) => requireManagerOrAdmin(req, res, () 
 }));
 
 // Year view — 12 months at a glance with running cash.
-app.get('/api/cashflow/year', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/cashflow/year', (req, res) => requireManagerOrAdmin(req, res, () => {
   const year = (req.query.year || new Date().toISOString().slice(0, 4)).toString();
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const initial = parseFloat(getConfig('cash_initial')) || 0;
@@ -2731,7 +3678,7 @@ app.get('/api/cashflow/year', (req, res, next) => requireManagerOrAdmin(req, res
 
 // Investor / partner contributions — derived from income where category='Investment'.
 // Tracks both totals by person and time-series.
-app.get('/api/cashflow/investors', (req, res, next) => requireAdmin(req, res, () => {
+app.get('/api/cashflow/investors', (req, res) => requireAdmin(req, res, () => {
   const rows = db.prepare(`SELECT date, month, client_name, reference, amount, notes
                            FROM income WHERE category='Investment' ORDER BY date, id`).all();
   const byPerson = {};
@@ -2749,7 +3696,48 @@ app.get('/api/cashflow/investors', (req, res, next) => requireAdmin(req, res, ()
 // ─────────────────────────────────────────────────────────
 // EMPLOYEES / ATTENDANCE / KPI  (unchanged from before)
 // ─────────────────────────────────────────────────────────
+app.post('/api/employees/auto-link', (req, res) => {
+  const user = req.user;
+  if (!user?.id) return res.status(401).json({ error: 'Unauthorized' });
+
+  // 1. Check if already linked
+  let emp = findEmployeeForUser(user);
+  if (emp) return res.json({ created: false, employee: emp });
+
+  // 2. Generate a unique emp_id
+  const prefix = 'E-';
+  const maxEmp = db.prepare("SELECT MAX(CAST(SUBSTR(emp_id,3) AS INTEGER)) as m FROM employees WHERE emp_id LIKE 'E-%'").get();
+  const nextNum = (maxEmp?.m || 0) + 1;
+  const newEmpId = `${prefix}${String(nextNum).padStart(2, '0')}`;
+
+  // 3. Create employee record using the user's data
+  const roleLabel = user.roles?.includes('founder_ceo') ? 'admin' :
+                    user.roles?.includes('managing_director') ? 'admin' :
+                    user.roles?.includes('consultant') ? 'consultant' : 'manager';
+
+  try {
+    const info = db.prepare(
+      `INSERT INTO employees (emp_id, name, role, email, phone, salary, active, join_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(newEmpId, user.name || user.email.split('@')[0], roleLabel, user.email, null, 0, 'Yes', new Date().toISOString().slice(0, 10));
+
+    emp = db.prepare("SELECT * FROM employees WHERE id=?").get(info.lastInsertRowid);
+
+    // 4. If the users table has an emp_id column, update it too (optional, best-effort)
+    try {
+      db.prepare("UPDATE users SET emp_id=? WHERE id=?").run(newEmpId, user.id);
+    } catch (e) {
+      // emp_id column may not exist on users table — that's fine, email match is enough
+    }
+
+    res.json({ created: true, employee: emp });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.get('/api/employees', (req, res) => res.json(db.prepare("SELECT * FROM employees ORDER BY id").all()));
+app.get('/api/employees/active', (req, res) => res.json(db.prepare("SELECT id, emp_id, name, role, email, phone, salary FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1' ORDER BY name").all()));
 app.post('/api/employees', (req, res) => {
   const d = req.body;
   const info = db.prepare(`INSERT INTO employees (emp_id,name,role,email,phone,device_id,salary,active,join_date) VALUES (@emp_id,@name,@role,@email,@phone,@device_id,@salary,@active,@join_date)`).run({ ...d, salary: d.salary||0, active: d.active||'Yes', join_date: d.join_date||null });
@@ -2831,7 +3819,18 @@ app.get('/api/attendance/summary/:month', (req, res) => {
 
 app.get('/api/kpi/:month', (req, res) => {
   const { month } = req.params;
-  const consultants = db.prepare("SELECT DISTINCT assigned_consultant FROM leads WHERE assigned_consultant IS NOT NULL AND assigned_consultant != ''").all().map(r=>r.assigned_consultant);
+  const user = req.user;
+
+  let consultants;
+  if (canViewOwnLeadsOnly(user)) {
+    // Consultant: only their own KPI
+    const me = user.consultant_name || user.name || '';
+    consultants = [me];
+  } else {
+    // Admin, MD, Investor, App Manager, Marketing Manager: all consultants
+    consultants = db.prepare("SELECT DISTINCT assigned_consultant FROM leads WHERE assigned_consultant IS NOT NULL AND assigned_consultant != ''").all().map(r=>r.assigned_consultant);
+  }
+
   res.json(consultants.map(c => {
     const total = db.prepare("SELECT COUNT(*) as n FROM leads WHERE assigned_consultant=?").get(c).n;
     const thisMonth = db.prepare("SELECT COUNT(*) as n FROM leads WHERE assigned_consultant=? AND (date_added LIKE ? OR created_at LIKE ?)").get(c,`${month}%`,`${month}%`).n;
@@ -2917,7 +3916,7 @@ function logPayrollExpense(row) {
 const PAYROLL_WHITELIST = ['Abdullah Al Rakib', 'Sakib Al Jubaer', 'Tahmid Imam', 'Taj Ahmed', 'Afsana Meme'];
 
 // List payroll entries for a month (auto-creates rows for active employees if missing)
-app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
+app.get('/api/payroll', (req, res) => requireAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const wd = workingDaysInMonth(month);
   // Only generate payroll for the 5 whitelisted employees who exist in the employees table
@@ -2965,7 +3964,7 @@ app.get('/api/payroll', (req, res, next) => requireAdmin(req, res, () => {
 }));
 
 // Adjust a single payroll line (bonus, deductions, status, paid_on, notes)
-app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
+app.put('/api/payroll/:id', (req, res) => requireAdmin(req, res, () => {
   const cur = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   const { bonus, deductions, status, paid_on, notes, base_salary } = req.body || {};
@@ -2988,7 +3987,7 @@ app.put('/api/payroll/:id', (req, res, next) => requireAdmin(req, res, () => {
   res.json(updated);
 }));
 
-app.post('/api/payroll/:id/mark-paid', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/payroll/:id/mark-paid', (req, res) => requireAdmin(req, res, () => {
   const cur = db.prepare("SELECT * FROM payroll WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   db.prepare("UPDATE payroll SET status='paid', paid_on=COALESCE(paid_on, ?) WHERE id=?")
@@ -3013,7 +4012,9 @@ app.get('/api/daily-logs', (req, res) => {
   if (date)           { where.push('date = ?'); params.push(date); }
 
   // Consultants only see their own logs (scoped by their linked emp_id or name match)
-  if (req.user?.role === 'consultant') {
+  // Consultants are scoped to their own leads — enforced server-side.
+  // Admins, Managing Directors, Investors, and Application Managers see everything.
+  if (canViewOwnLeadsOnly(req.user)) {
     const emp = findEmployeeForUser(req.user);
     if (!emp) return res.json([]);
     where.push('emp_id=?'); params.push(emp.emp_id);
@@ -3058,7 +4059,7 @@ app.get('/api/daily-logs/me/today', (req, res) => {
 });
 
 // Employee KPI dashboard — Attendance + Office Work + Activity per employee.
-app.get('/api/employee-kpi', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/employee-kpi', (req, res) => requireManagerOrAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const [y, m] = month.split('-').map(Number);
   const start = `${month}-01`;
@@ -3200,7 +4201,7 @@ function dayRangeFor(period, anchorIso) {
 }
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 
-app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/reports', (req, res) => requireManagerOrAdmin(req, res, () => {
   const period = req.query.period === 'week' ? 'week' : 'month';
   const anchor = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const range = dayRangeFor(period, anchor);
@@ -3336,7 +4337,7 @@ app.get('/api/reports', (req, res, next) => requireManagerOrAdmin(req, res, () =
 }));
 
 // Per-employee drilldown — full activity feed + daily logs for one person
-app.get('/api/employee-kpi/:emp_id', (req, res, next) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/employee-kpi/:emp_id', (req, res) => requireManagerOrAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const start = `${month}-01`;
   const endDate = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5)), 0);
@@ -3388,6 +4389,10 @@ const activeSyncs = new Set();
 async function syncChannelMessages(channelId, months = 6) {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
   if (!channel) return { imported: 0, skipped: 0 };
+  if (channel.type === 'tiktok') {
+    console.log(`[sync] Skipping TikTok channel ${channel.name} (id=${channelId}) — sync not yet supported`);
+    return { imported: 0, skipped: 0, reason: 'tiktok_not_supported' };
+  }
   if (channel.type !== 'messenger' && channel.type !== 'instagram') return { imported: 0, skipped: 0 };
 
   // Fallback: use global page_access_token if channel-level token is missing
@@ -3408,15 +4413,21 @@ async function syncChannelMessages(channelId, months = 6) {
   const MAX_MESSAGES = 5000;
   let imported = 0, skipped = 0, conversations = 0;
 
-  async function fbGet(url) {
+  async function fbGet(url, label = 'FB API') {
     const r = await fetch(url);
     const d = await r.json();
     if (d.error) {
-      console.error(`[sync] FB API error: code=${d.error.code} subcode=${d.error.error_subcode} msg=${d.error.message}`);
-      throw new Error(`FB API: ${d.error.message}`);
+      console.error(`[sync] ${label} error: code=${d.error.code} subcode=${d.error.error_subcode} msg=${d.error.message}`);
+      throw new Error(`${label}: ${d.error.message}`);
     }
     if (!d.data) {
-      console.warn(`[sync] FB API returned no data field. Response keys: ${Object.keys(d).join(', ')}`);
+      console.warn(`[sync] ${label} returned no data field. Response keys: ${Object.keys(d).join(', ')}`);
+    }
+    // Log first item for debugging when data is empty or suspicious
+    if (Array.isArray(d.data) && d.data.length > 0) {
+      console.log(`[sync] ${label}: ${d.data.length} items, first id=${d.data[0]?.id}, updated=${d.data[0]?.updated_time || d.data[0]?.created_time}`);
+    } else if (Array.isArray(d.data)) {
+      console.log(`[sync] ${label}: 0 items returned`);
     }
     return { items: d.data || [], nextUrl: d.paging?.next || null };
   }
@@ -3433,7 +4444,8 @@ async function syncChannelMessages(channelId, months = 6) {
 
   const insertBatch = db.transaction((rows, conv) => {
     let added = 0;
-    for (const msg of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const msg = rows[i];
       const fromPage = String(msg.from?.id) === String(pageId);
 
       let content, type = 'text', mediaUrl = null;
@@ -3457,12 +4469,20 @@ async function syncChannelMessages(channelId, months = 6) {
         ? new Date(msg.created_time).toISOString().replace('T', ' ').slice(0, 19)
         : null;
 
-      const result = stmtInsertMsg.run(
-        conv.id, fromPage ? 'out' : 'in', type, content, mediaUrl, msg.id, createdAt
-      );
-      if (result.changes > 0) {
-        added++;
-        if (createdAt) stmtConvUpdate.run(content, createdAt, conv.id, createdAt);
+      try {
+        const result = stmtInsertMsg.run(
+          conv.id, fromPage ? 'out' : 'in', type, content, mediaUrl, msg.id, createdAt
+        );
+        if (result.changes > 0) {
+          added++;
+          if (createdAt) stmtConvUpdate.run(content, createdAt, conv.id, createdAt);
+        } else if (i === 0) {
+          console.log(`[sync] insertBatch: msg.id=${msg.id} skipped (changes=0, likely duplicate wa_message_id)`);
+        }
+      } catch (insertErr) {
+        console.error(`[sync] insertBatch error: msg.id=${msg.id}`, insertErr.message);
+        // Log first insert error only to avoid console spam
+        if (i === 0) console.error(`[sync] First insert error details:`, insertErr);
       }
     }
     return added;
@@ -3487,7 +4507,7 @@ async function syncChannelMessages(channelId, months = 6) {
 
     let stop = false;
     while (convUrl && !stop && imported + skipped < MAX_MESSAGES) {
-      const { items: fbConvs, nextUrl } = await fbGet(convUrl);
+      const { items: fbConvs, nextUrl } = await fbGet(convUrl, 'conversations');
       console.log(`[sync] Got ${fbConvs.length} conversations from FB`);
       convUrl = nextUrl;
 
@@ -3525,7 +4545,7 @@ async function syncChannelMessages(channelId, months = 6) {
         let convMsgCount = 0;
 
         while (msgUrl && imported + skipped < MAX_MESSAGES && convMsgCount < 500) {
-          const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl);
+          const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl, 'messages');
           msgUrl = nextMsgUrl;
           if (msgs.length === 0) break;
 
@@ -3534,6 +4554,7 @@ async function syncChannelMessages(channelId, months = 6) {
           imported += added;
           skipped  += msgs.length - added;
           convMsgCount += msgs.length;
+          console.log(`[sync] conv ${conv.id}: ${msgs.length} msgs, ${added} added, ${msgs.length - added} skipped`);
           if (oldest && new Date(oldest).getTime() < cutoffMs) break;
         }
 
@@ -3569,12 +4590,29 @@ app.post('/api/channels/:id/sync', async (req, res) => {
   const effectiveToken = channel.access_token || getConfig('page_access_token');
   if (!effectiveToken) return res.status(400).json({ error: 'No access token configured for this channel' });
   if (!channel.page_id) return res.status(400).json({ error: 'No page_id set on this channel' });
-  if (channel.type !== 'messenger' && channel.type !== 'instagram')
+  if (channel.type !== 'messenger' && channel.type !== 'instagram' && channel.type !== 'tiktok')
     return res.status(400).json({ error: 'Sync only supported for Messenger and Instagram channels' });
+  if (channel.type === 'tiktok')
+    return res.status(400).json({ error: 'TikTok sync is not yet supported' });
   if (activeSyncs.has(channel.id))
     return res.status(409).json({ error: 'A sync is already running for this channel' });
 
   const { months = 6 } = req.body || {};
+
+  // ── Validate the token before starting background sync ──
+  try {
+    const platform = channel.type === 'instagram' ? 'instagram' : 'messenger';
+    const testUrl = `https://graph.facebook.com/v19.0/${channel.page_id}?fields=name&access_token=${effectiveToken}`;
+    const testRes = await fetch(testUrl);
+    const testData = await testRes.json();
+    if (testData.error) {
+      console.error(`[sync] Token validation failed for ${channel.name}: ${testData.error.message}`);
+      return res.status(400).json({ error: `Facebook API token invalid: ${testData.error.message}` });
+    }
+  } catch (e) {
+    console.error(`[sync] Token validation network error for ${channel.name}:`, e.message);
+    return res.status(400).json({ error: `Could not validate Facebook token: ${e.message}` });
+  }
 
   // Respond NOW — everything below runs in the background.
   activeSyncs.add(channel.id);
@@ -3590,8 +4628,13 @@ app.post('/api/channels/:id/sync', async (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/contacts', (req, res) => {
   const { search } = req.query;
-  const where = (search && search !== 'undefined' && search !== 'null') ? `WHERE name LIKE '%${search}%' OR phone LIKE '%${search}%'` : '';
-  res.json(db.prepare(`SELECT contacts.*, leads.lead_status, leads.lead_id as crm_lead_id, leads.destination FROM contacts LEFT JOIN leads ON leads.id=contacts.lead_id ${where} ORDER BY contacts.id DESC LIMIT 100`).all());
+  const params = {};
+  let where = '';
+  if (search && search !== 'undefined' && search !== 'null') {
+    where = 'WHERE contacts.name LIKE @search OR contacts.phone LIKE @search';
+    params.search = `%${search}%`;
+  }
+  res.json(db.prepare(`SELECT contacts.*, leads.lead_status, leads.lead_id as crm_lead_id, leads.destination FROM contacts LEFT JOIN leads ON leads.id=contacts.lead_id ${where} ORDER BY contacts.id DESC LIMIT 100`).all(params));
 });
 
 app.put('/api/contacts/:id', (req, res) => {
@@ -3608,54 +4651,110 @@ const CONV_SELECT = `
     contacts.name  AS contact_name,
     contacts.phone AS contact_phone,
     contacts.avatar_url AS contact_avatar,
-    contacts.wa_id, contacts.messenger_id, contacts.instagram_id,
+    contacts.wa_id, contacts.messenger_id, contacts.instagram_id, contacts.tiktok_id,
     contacts.lead_id AS contact_lead_id,
     channels.name  AS channel_name,
     channels.type  AS channel_type,
     channels.color AS channel_color,
     channels.consultant AS channel_consultant,
     channels.phone_number_id,
+    leads.lead_id AS lead_id,
+    leads.lead_status,
+    leads.destination AS lead_destination,
+    leads.assigned_consultant AS lead_assigned_consultant,
+    employees.name AS lead_employee_name,
+    leads.assigned_employee_id AS lead_assigned_employee_id,
     (SELECT direction FROM messages WHERE conversation_id = conversations.id ORDER BY created_at DESC, id DESC LIMIT 1) AS last_message_direction,
-    (SELECT status FROM messages WHERE conversation_id = conversations.id ORDER BY created_at DESC, id DESC LIMIT 1) AS last_message_status
+    (SELECT status FROM messages WHERE conversation_id = conversations.id ORDER BY created_at DESC, id DESC LIMIT 1) AS last_message_status,
+    (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id AND direction = 'out') AS outbound_count
   FROM conversations
   LEFT JOIN contacts  ON contacts.id  = conversations.contact_id
   LEFT JOIN channels  ON channels.id  = conversations.channel_id
+  LEFT JOIN leads   ON leads.id     = conversations.lead_id
+  LEFT JOIN employees ON employees.id = leads.assigned_employee_id
 `;
 
+
 app.get('/api/conversations', (req, res) => {
-  const { status, channel_type, channel_id, search, lead_id, page=1, limit=30 } = req.query;
+  const { status, channel_type, channel_id, assigned_to, search, page=1, limit=30 } = req.query;
   const where=[]; const params={};
   if (status && status !== 'all') { where.push("conversations.status=@status"); params.status=status; }
   if (channel_type && channel_type !== 'all') { where.push("conversations.channel_type=@channel_type"); params.channel_type=channel_type; }
   if (channel_id && channel_id !== 'all') { where.push("conversations.channel_id=@channel_id"); params.channel_id=channel_id; }
+  if (assigned_to && assigned_to !== 'all') { where.push("conversations.assigned_to=@assigned_to"); params.assigned_to=assigned_to; }
   if (search && search !== 'undefined' && search !== 'null') { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
 
-  // RBAC Access Filter: non-admin/non-manager employees can only access their assigned WhatsApp/Facebook channels
-  const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
-    where.push("(channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id)");
-    params.user_consultant = (loggedInUser.consultant_name || '').trim();
-    params.user_id = loggedInUser.id;
+  // RBAC Access Filter: new role-based rules
+  const user = req.user;
+  if (!isFullAdmin(user) && !canViewAllConversations(user)) {
+    // Consultant or other restricted role
+    const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+    const meConsultant = (loggedInUser?.consultant_name || '').trim();
+    // For WhatsApp: only own account. For other channels: all access.
+    where.push(`(
+      (channels.type != 'whatsapp' AND channels.type != 'waba')
+      OR (channels.type = 'whatsapp' AND (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id OR EXISTS (SELECT 1 FROM channel_access WHERE channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @user_id)))
+      OR (channels.type = 'waba' AND (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id OR EXISTS (SELECT 1 FROM channel_access WHERE channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @user_id)))
+    )`);
+    params.user_consultant = meConsultant;
+    params.user_id = user.id;
+  }
+  // China data isolation: exclude conversations linked to China leads for unauthorized users
+  if (!canViewChinaData(req.user)) {
+    where.push("(leads.destination != 'China' OR leads.destination IS NULL) AND (leads.source != 'China' OR leads.source IS NULL)");
+  }
+
+  // Investors: no conversation access at all
+  if (isInvestor(user) && !isFullAdmin(user)) {
+    return res.json({ conversations: [], total: 0, page: 1, pages: 0 });
   }
 
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
-  const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id ${ws}`).get(params).c;
+  const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id LEFT JOIN leads ON leads.id = conversations.lead_id ${ws}`).get(params).c;
   const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
-  res.json({ conversations: convs, total, page: parseInt(page), pages: Math.ceil(total/limit) });
+
+  // Compute SLA status and priority per conversation
+  const now = Date.now();
+  const priorityTagIds = db.prepare("SELECT id FROM contact_tags WHERE LOWER(name)='priority'").all().map(r => r.id);
+  const convWithMeta = convs.map(c => {
+    const lastAt = c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+    const minsSince = lastAt ? (now - lastAt) / 60000 : Infinity;
+    let sla_status;
+    if (!lastAt || c.last_message_direction !== 'out') {
+      sla_status = 'red';
+    } else if (minsSince < 30) {
+      sla_status = 'green';
+    } else if (minsSince < 120) {
+      sla_status = 'yellow';
+    } else {
+      sla_status = 'red';
+    }
+    // Priority: has 'priority' tag OR new lead without any outbound response
+    let priority = 0;
+    if (priorityTagIds.length) {
+      const hasTag = db.prepare("SELECT 1 FROM conversation_tags WHERE conversation_id=? AND tag_id IN (" + priorityTagIds.map(() => '?').join(',') + ") LIMIT 1").get(c.id, ...priorityTagIds);
+      if (hasTag) priority = 1;
+    }
+    if (!priority && c.lead_id && c.outbound_count === 0) priority = 1;
+    return { ...c, sla_status, priority };
+  });
+
+  // Sort by priority first, then by last_message_at desc
+  convWithMeta.sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority;
+    return (b.last_message_at || '').localeCompare(a.last_message_at || '');
+  });
+
+  res.json({ conversations: convWithMeta, total, page: parseInt(page), pages: Math.ceil(total/limit) });
 });
 
 app.get('/api/conversations/:id', (req, res) => {
   const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
   if (!conv) return res.status(404).json({ error:'Not found' });
 
-  // RBAC check
-  const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
-    const matchConsultant = conv.channel_consultant && loggedInUser.consultant_name &&
-      conv.channel_consultant.trim().toLowerCase() === loggedInUser.consultant_name.trim().toLowerCase();
-    if (!matchConsultant && conv.assigned_to !== loggedInUser.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+  // RBAC check using new role-based rules
+  if (!userHasAccessToConversation(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
   }
 
   res.json(conv);
@@ -3664,6 +4763,7 @@ app.get('/api/conversations/:id', (req, res) => {
 // Convert conversation contact into a CRM lead (creating new lead or linking to existing)
 app.post('/api/conversations/:id/convert-lead', (req, res) => {
   try {
+    if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const { lead_id } = req.body;
     const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
@@ -3702,7 +4802,98 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
   }
 });
 
+// Quick Convert to Lead from conversation (manual override with provided data)
+app.post('/api/conversations/:id/convert-to-lead', (req, res) => {
+  try {
+    const { client_name, phone, email, destination, source, notes } = req.body || {};
+    const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
+    const assigned_consultant = channel?.consultant || null;
+
+    const leadSourceMap = {
+      whatsapp: 'WhatsApp',
+      messenger: 'Messenger',
+      instagram: 'Instagram',
+      tiktok: 'TikTok'
+    };
+    const lead_id = nextLeadId();
+    const params = leadParams({
+      client_name: client_name || contact.name || 'Unknown',
+      phone: phone || contact.phone || null,
+      email: email || contact.email || null,
+      destination: destination || 'Bangladesh',
+      source: source || 'In-House',
+      lead_source: leadSourceMap[conv.channel_type] || 'Chat',
+      lead_status: 'New Lead',
+      assigned_consultant,
+      notes: notes || null,
+    }, lead_id, 0);
+
+    const info = db.prepare(LEAD_INSERT_SQL).run(params);
+    const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
+
+    db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, contact.id);
+    db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conv.id);
+
+    sendCAPIEvent('Lead', lead).catch(() => {});
+    logActivity({ type: 'lead_created', actor: req.user, lead, details: { source: lead.lead_source, destination: lead.destination, assigned_consultant: lead.assigned_consultant, note: 'Converted from conversation' } });
+    broadcast('new_lead', { lead });
+
+    res.json({ success: true, lead_id: lead.id, lead });
+  } catch (err) {
+    console.error('Convert to lead error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Move a lead to application pipeline (convert to application)
+app.post('/api/leads/:id/convert-to-application', (req, res) => {
+  const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  // China data isolation: block unauthorized access to China leads
+  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+    return res.status(403).json({ error: 'Access denied to China lead records' });
+  }
+  if (!leadIsVisibleTo(lead, req.user)) {
+    return res.status(403).json({ error: 'Access denied to this lead record' });
+  }
+
+  const updates = [];
+  if (lead.lead_status !== 'File Opened') updates.push("lead_status = 'File Opened'");
+  if (lead.application_stage !== 'documents') updates.push("application_stage = 'documents'");
+
+  let newSource = lead.source;
+  if (lead.destination === 'China') {
+    if (lead.source !== 'China') {
+      newSource = 'China';
+      updates.push("source = 'China'");
+    }
+  } else if (lead.destination === 'Bangladesh') {
+    if (lead.source === 'B2B') {
+      newSource = 'B2B';
+    } else if (lead.source !== 'In-House') {
+      newSource = 'In-House';
+      updates.push("source = 'In-House'");
+    }
+  }
+
+  if (updates.length) {
+    db.prepare(`UPDATE leads SET ${updates.join(', ')} WHERE id=?`).run(req.params.id);
+  }
+
+  const updatedLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+  logActivity({ type: 'application_stage_changed', actor: req.user, lead: updatedLead, details: { stage: updatedLead.application_stage || 'documents', source: newSource, destination: updatedLead.destination } });
+  sendCAPIEvent('InitiateCheckout', updatedLead).catch(() => {});
+  res.json(updatedLead);
+});
+
 app.put('/api/conversations/:id', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const { status, assigned_to, lead_id } = req.body;
   db.prepare("UPDATE conversations SET status=COALESCE(@status,status), assigned_to=COALESCE(@assigned_to,assigned_to), lead_id=COALESCE(@lead_id,lead_id), unread_count=CASE WHEN @status='open' THEN unread_count ELSE 0 END WHERE id=@id")
     .run({ status: status||null, assigned_to: assigned_to||null, lead_id: lead_id||null, id: req.params.id });
@@ -3728,6 +4919,10 @@ app.post('/api/conversations', (req, res) => {
     if (!channel_id || !phone) return res.status(400).json({ error: 'channel_id and phone required' });
     const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channel_id);
     if (!channel) return res.status(404).json({ error: 'Channel not found' });
+    // RBAC: check if user can access this channel
+    if (!userHasAccessToConversation(req.user, { channel_id, channel_type: channel.type })) {
+      return res.status(403).json({ error: 'Access denied to this channel' });
+    }
     const contact = upsertContact({ name: name || phone, phone, wa_id: channel.type === 'whatsapp' ? phone : null });
     
     // Link contact and conversation to lead if lead_id is provided
@@ -3785,16 +4980,14 @@ app.post('/api/conversations/:id/read', (req, res) => {
 // Delete an entire conversation (and its messages)
 app.delete('/api/conversations/:id', (req, res) => {
   try {
+    if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
     if (conv) {
       db.prepare("DELETE FROM messages WHERE conversation_id=?").run(req.params.id);
       db.prepare("DELETE FROM conversations WHERE id=?").run(req.params.id);
       broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id) }, (u) => {
         if (!u) return false;
-        if (u.role === 'admin') return true;
-        const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
-        const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(u.id);
-        return channel?.consultant === meUser?.consultant_name || conv.assigned_to === u.id;
+        return userHasAccessToConversation(u, req.params.id);
       });
     }
     res.json({ ok: true });
@@ -3826,26 +5019,26 @@ app.delete('/api/messages/:id', (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get('/api/conversations/:id/messages', (req, res) => {
   const { before, limit=500 } = req.query;
-  const lim = Math.min(parseInt(limit) || 500, 2000);
   // Order CHRONOLOGICALLY by timestamp (not insert id) — synced messages are
   // inserted newest-first, so id order ≠ time order. Grab the most-recent N,
   // then flip to ascending so the chat reads oldest→newest top-to-bottom.
-  const beforeClause = before ? `AND id < ${parseInt(before)}` : '';
+  const beforeClause = before ? 'AND id < @before' : '';
+  const msgParams = { conv_id: req.params.id, before: before ? parseInt(before) : undefined, lim: Math.min(parseInt(limit) || 500, 2000) };
   const msgs = db.prepare(
     `SELECT * FROM (
        SELECT * FROM messages
-       WHERE conversation_id=? ${beforeClause}
+       WHERE conversation_id=@conv_id ${beforeClause}
        ORDER BY created_at DESC, id DESC
-       LIMIT ${lim}
+       LIMIT @lim
      ) ORDER BY created_at ASC, id ASC`
-  ).all(req.params.id);
+  ).all(msgParams);
   res.json(msgs);
 });
 
 // File upload endpoint for base64 encoded media attachments
 app.post('/api/upload', (req, res) => {
   try {
-    const { name, type, data } = req.body;
+    const { name, data } = req.body;
     if (!name || !data) {
       return res.status(400).json({ error: 'name and data (base64) are required' });
     }
@@ -3876,6 +5069,7 @@ app.post('/api/upload', (req, res) => {
 // Send message
 app.post('/api/conversations/:id/messages', async (req, res) => {
   try {
+    if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const { content, type='text', sent_by='Admin', media_url } = req.body;
     if (!content && !media_url) return res.status(400).json({ error: 'content is required' });
 
@@ -3941,7 +5135,60 @@ app.put('/api/quick-replies/:id', (req, res) => {
 app.delete('/api/quick-replies/:id', (req, res) => { db.prepare("DELETE FROM quick_replies WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
 // ─────────────────────────────────────────────────────────
-// META WEBHOOK — WhatsApp + Messenger + Instagram + Lead Ads
+// WEBSITE LEAD INGESTION WEBHOOK (public)
+// ─────────────────────────────────────────────────────────
+app.post('/api/webhook/website-lead', async (req, res) => {
+  try {
+    const { name, phone, email, destination, source, referrer, message, page_url } = req.body || {};
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const lead_id = nextLeadId();
+    let assigned_consultant = null;
+    let leadSource = 'Website';
+    let actualSource = source || null;
+    let actualDestination = destination || null;
+
+    if (source === 'China') {
+      assigned_consultant = 'Abdullah Al Rakib';
+      actualDestination = actualDestination || 'China';
+    } else if (source === 'Bangladesh Office') {
+      assigned_consultant = 'Taj Ahmed';
+      actualDestination = actualDestination || 'Bangladesh';
+      actualSource = actualSource || 'In-House';
+    } else if (source === 'B2B') {
+      assigned_consultant = 'Tahmid Imam';
+      actualDestination = actualDestination || 'Bangladesh';
+      actualSource = actualSource || 'B2B';
+    }
+
+    const params = leadParams({
+      client_name: name,
+      phone: phone || null,
+      email: email || null,
+      destination: actualDestination,
+      lead_source: leadSource,
+      source: actualSource,
+      referrer: referrer || null,
+      assigned_consultant,
+      notes: message || null,
+      event_source_url: page_url || null,
+    }, lead_id, 0);
+
+    const info = db.prepare(LEAD_INSERT_SQL).run(params);
+    const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
+
+    sendCAPIEvent('Lead', { ...lead, event_source_url: page_url || undefined }).catch(() => {});
+    logActivity({ type: 'lead_created', actor: { name: 'Website Webhook' }, lead, details: { source: leadSource, destination: lead.destination, assigned_consultant: lead.assigned_consultant } });
+    broadcast('new_lead', { lead });
+
+    res.json({ success: true, lead_id: lead.id });
+  } catch (e) {
+    console.error('[website-lead] webhook error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// META WEBHOOK — WhatsApp + Messenger + Instagram + Lead Ads + TikTok placeholder
 // ─────────────────────────────────────────────────────────
 app.get('/webhook/meta', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -4003,17 +5250,17 @@ app.post('/webhook/meta', async (req, res) => {
           else { content = `[${msg.type}]`; }
 
           saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
-                  const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
-        if (waInCount === 1) {
-          // Forward to n8n — Gemini generates personalised AI welcome
-          setImmediate(() => forwardToN8N({
-            platform: 'whatsapp',
-            conversationId: conv.id,
-            senderName: profileName,
-            messageText: content || ''
-          }));
-        }
-        console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
+          const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+          if (waInCount === 1) {
+            // Forward to n8n — Gemini generates personalised AI welcome
+            setImmediate(() => forwardToN8N({
+              platform: 'whatsapp',
+              conversationId: conv.id,
+              senderName: profileName,
+              messageText: content || ''
+            }));
+          }
+          console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
       }
     }
@@ -4038,20 +5285,40 @@ app.post('/webhook/meta', async (req, res) => {
             if (metaData.error) continue;
             const fields = {};
             (metaData.field_data||[]).forEach(f => { fields[f.name] = f.values?.[0]||null; });
+
+            // Determine routing based on campaign/ad name
+            const campaignName = (metaData.campaign_name || metaData.ad_name || '').toLowerCase();
+            let destination = fields.destination || null;
+            let source = metaData.campaign_name || 'Meta Ad';
+            let assigned_consultant = null;
+            if (campaignName.includes('china') || campaignName.includes('chinese') || campaignName.includes('中国')) {
+              destination = 'China';
+              source = 'China';
+              assigned_consultant = 'Abdullah Al Rakib';
+            } else if (campaignName.includes('bangladesh') || campaignName.includes('bd') || campaignName.includes('office')) {
+              destination = 'Bangladesh';
+              source = 'In-House';
+              assigned_consultant = 'Taj Ahmed';
+            } else if (campaignName.includes('b2b') || campaignName.includes('agent')) {
+              destination = 'Bangladesh';
+              source = 'B2B';
+              assigned_consultant = 'Tahmid Imam';
+            }
+
             const lead_id = nextLeadId();
             const client_name = fields.full_name||fields.name||`${fields.first_name||''} ${fields.last_name||''}`.trim()||'Unknown';
-            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,notes)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-              .run(lead_id, new Date().toISOString().slice(0,10), client_name, fields.phone_number||null, fields.email||null, fields.destination||null,
-                metaData.campaign_name||'Meta Ad','New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,JSON.stringify(fields));
+            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,source,assigned_consultant,notes)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+              .run(lead_id, new Date().toISOString().slice(0,10), client_name, fields.phone_number||null, fields.email||null, destination,
+                source,'New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,source,assigned_consultant,JSON.stringify(fields));
             const lead = db.prepare("SELECT * FROM leads WHERE meta_lead_id=?").get(leadgen_id);
-            if (lead) { 
-              sendCAPIEvent('Lead', lead); 
-              broadcast('new_lead', { lead }); 
+            if (lead) {
+              sendCAPIEvent('Lead', { ...lead, event_source_url: fields.link_url || fields.page_url || undefined });
+              broadcast('new_lead', { lead });
 
               // Automatically create a contact and conversation if phone is available
               if (lead.phone) {
-                const whatsappChannel = db.prepare("SELECT * FROM channels WHERE type='whatsapp' AND active=1 LIMIT 1").get();
+                const whatsappChannel = getWhatsAppChannelForConsultant(lead.assigned_consultant);
                 if (whatsappChannel) {
                   const contact = upsertContact({
                     name: lead.client_name,
@@ -4061,12 +5328,8 @@ app.post('/webhook/meta', async (req, res) => {
                   });
                   const conv = upsertConversation(contact.id, whatsappChannel.id, 'whatsapp');
                   db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conv.id);
-                  
-                  // Auto-assign consultant to the lead if not set
-                  if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
-                    db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(whatsappChannel.consultant || 'Abdullah Al Rakib', lead.id);
-                  }
-                                    // Forward to n8n — Gemini generates personalised AI welcome for Lead Ad
+
+                  // Forward to n8n — Gemini generates personalised AI welcome for Lead Ad
                   setImmediate(() => forwardToN8N({
                     platform: 'whatsapp',
                     conversationId: conv.id,
@@ -4114,7 +5377,7 @@ app.post('/webhook/meta', async (req, res) => {
         }
         if (!text) text = '[message]';
         saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
-                const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+        const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (msInCount === 1) {
           // Forward to n8n — Gemini generates personalised AI welcome
           setImmediate(() => forwardToN8N({
@@ -4154,6 +5417,11 @@ app.post('/webhook/meta', async (req, res) => {
       }
     }
   }
+
+  // ── TikTok placeholder (future integration) ─────────────
+  if (body.object === 'tiktok') {
+    console.log('[tiktok] Webhook received but integration not yet implemented.');
+  }
 });
 
 // ─────────────────────────────────────────────────────────
@@ -4187,6 +5455,159 @@ app.get('/api/meta/stats', (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// AUTOMATION HUB
+// ─────────────────────────────────────────────────────────
+
+// Automation Rules
+app.get('/api/automation/rules', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM automation_rules ORDER BY priority DESC, id DESC").all();
+  res.json(rows);
+}));
+
+app.post('/api/automation/rules', (req, res) => requireAdmin(req, res, () => {
+  const { name, trigger_type, trigger_config, action_type, action_config, priority, active } = req.body || {};
+  if (!name || !trigger_type || !action_type) return res.status(400).json({ error: 'name, trigger_type, and action_type are required' });
+  const info = db.prepare(`INSERT INTO automation_rules (name, trigger_type, trigger_config, action_type, action_config, priority, active)
+    VALUES (?,?,?,?,?,?,?)`).run(name, trigger_type, trigger_config ? JSON.stringify(trigger_config) : null, action_type, action_config ? JSON.stringify(action_config) : null, priority ?? 0, active ?? 1);
+  res.json(db.prepare("SELECT * FROM automation_rules WHERE id=?").get(info.lastInsertRowid));
+}));
+
+app.put('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
+  const { name, trigger_type, trigger_config, action_type, action_config, priority, active } = req.body || {};
+  const cur = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE automation_rules SET name=COALESCE(?,name), trigger_type=COALESCE(?,trigger_type), trigger_config=COALESCE(?,trigger_config), action_type=COALESCE(?,action_type), action_config=COALESCE(?,action_config), priority=COALESCE(?,priority), active=COALESCE(?,active) WHERE id=?`)
+    .run(name ?? null, trigger_type ?? null, trigger_config ? JSON.stringify(trigger_config) : null, action_type ?? null, action_config ? JSON.stringify(action_config) : null, priority ?? null, active ?? null, req.params.id);
+  res.json(db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id));
+}));
+
+app.delete('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM automation_rules WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Message Templates
+app.get('/api/templates', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM message_templates ORDER BY category, usage_count DESC, id DESC").all();
+  res.json(rows);
+}));
+
+app.post('/api/templates', (req, res) => requireAdmin(req, res, () => {
+  const { name, category, language, content, variables, approved } = req.body || {};
+  if (!name || !content) return res.status(400).json({ error: 'name and content are required' });
+  const info = db.prepare(`INSERT INTO message_templates (name, category, language, content, variables, approved)
+    VALUES (?,?,?,?,?,?)`).run(name, category || 'general', language || 'en', content, variables ? JSON.stringify(variables) : null, approved ?? 0);
+  res.json(db.prepare("SELECT * FROM message_templates WHERE id=?").get(info.lastInsertRowid));
+}));
+
+app.put('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
+  const { name, category, language, content, variables, approved } = req.body || {};
+  const cur = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE message_templates SET name=COALESCE(?,name), category=COALESCE(?,category), language=COALESCE(?,language), content=COALESCE(?,content), variables=COALESCE(?,variables), approved=COALESCE(?,approved) WHERE id=?`)
+    .run(name ?? null, category ?? null, language ?? null, content ?? null, variables ? JSON.stringify(variables) : null, approved ?? null, req.params.id);
+  res.json(db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id));
+}));
+
+app.delete('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM message_templates WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Contact Tags
+app.get('/api/tags', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM contact_tags ORDER BY name").all();
+  res.json(rows);
+}));
+
+app.post('/api/tags', (req, res) => requireAdmin(req, res, () => {
+  const { name, color } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  try {
+    const info = db.prepare("INSERT INTO contact_tags (name, color) VALUES (?,?)").run(name, color || '#3b82f6');
+    res.json(db.prepare("SELECT * FROM contact_tags WHERE id=?").get(info.lastInsertRowid));
+  } catch (e) {
+    res.status(400).json({ error: e.message.includes('UNIQUE') ? 'Tag name already exists' : e.message });
+  }
+}));
+
+app.delete('/api/tags/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM contact_tags WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Conversation Notes
+app.get('/api/conversations/:id/notes', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
+  const rows = db.prepare("SELECT * FROM conversation_notes WHERE conversation_id=? ORDER BY id DESC").all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/conversations/:id/notes', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
+  const { note, is_internal } = req.body || {};
+  if (!note || !note.trim()) return res.status(400).json({ error: 'note is required' });
+  const info = db.prepare(`INSERT INTO conversation_notes (conversation_id, note, author_id, author_name, is_internal)
+    VALUES (?,?,?,?,?)`).run(req.params.id, note.trim(), req.user?.id || null, req.user?.name || null, is_internal == null ? 1 : (is_internal ? 1 : 0));
+  res.json(db.prepare("SELECT * FROM conversation_notes WHERE id=?").get(info.lastInsertRowid));
+});
+
+// Conversation Tags
+app.post('/api/conversations/:id/tags', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
+  const { tag_id } = req.body || {};
+  if (!tag_id) return res.status(400).json({ error: 'tag_id is required' });
+  const tag = db.prepare("SELECT * FROM contact_tags WHERE id=?").get(tag_id);
+  if (!tag) return res.status(404).json({ error: 'Tag not found' });
+  db.prepare("INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?,?)").run(req.params.id, tag_id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/conversations/:id/tags', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
+  const { tag_id } = req.body || {};
+  if (!tag_id) return res.status(400).json({ error: 'tag_id is required' });
+  db.prepare("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?").run(req.params.id, tag_id);
+  res.json({ ok: true });
+});
+
+// Broadcast Campaigns
+app.get('/api/broadcast-campaigns', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM broadcast_campaigns ORDER BY id DESC").all();
+  res.json(rows);
+}));
+
+app.post('/api/broadcast-campaigns', (req, res) => requireAdmin(req, res, () => {
+  const { name, segment_type, segment_config, template_id, content, scheduled_at } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const info = db.prepare(`INSERT INTO broadcast_campaigns (name, segment_type, segment_config, template_id, content, scheduled_at, created_by)
+    VALUES (?,?,?,?,?,?,?)`).run(name, segment_type || null, segment_config ? JSON.stringify(segment_config) : null, template_id || null, content || null, scheduled_at || null, req.user?.name || req.user?.email || null);
+  res.json(db.prepare("SELECT * FROM broadcast_campaigns WHERE id=?").get(info.lastInsertRowid));
+}));
+
+app.post('/api/broadcast-campaigns/:id/send', (req, res) => requireAdmin(req, res, async () => {
+  const result = await sendBroadcast(req.params.id);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result);
+}));
+
+app.delete('/api/broadcast-campaigns/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM broadcast_recipients WHERE campaign_id=?").run(req.params.id);
+  db.prepare("DELETE FROM broadcast_campaigns WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Automation Analytics
+app.get('/api/automation/stats', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const totalTriggered = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='triggered'").get().c;
+  const totalExecuted = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='executed'").get().c;
+  const totalFailed = db.prepare("SELECT COUNT(*) as c FROM automation_analytics WHERE event_type='failed'").get().c;
+  const byRule = db.prepare("SELECT rule_id, event_type, COUNT(*) as c FROM automation_analytics GROUP BY rule_id, event_type").all();
+  const recent = db.prepare("SELECT * FROM automation_analytics ORDER BY id DESC LIMIT 50").all();
+  res.json({ totalTriggered, totalExecuted, totalFailed, byRule, recent });
+}));
+
+// ─────────────────────────────────────────────────────────
 // SETTINGS
 // ─────────────────────────────────────────────────────────
 app.get('/api/settings', (req, res) => {
@@ -4195,21 +5616,29 @@ app.get('/api/settings', (req, res) => {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
-  
+
   // Auto-align with active employees list (all employees are consultants by default)
   let activeEmployees = [];
   try {
-    activeEmployees = db.prepare("SELECT name FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1'").all().map(e => e.name).filter(Boolean);
+    activeEmployees = db.prepare("SELECT id, name, emp_id, role FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1' ORDER BY name").all();
   } catch (e) {
     console.error("Could not fetch active employees for settings:", e);
   }
   const customConsultants = getList('settings_consultants', ['Ema','Afsana','Sakib','Mukta','Rafi','Admin']);
-  const combinedConsultants = Array.from(new Set([...activeEmployees, ...customConsultants])).filter(Boolean).sort();
+  const combinedConsultants = Array.from(new Set([...activeEmployees.map(e => e.name), ...customConsultants])).filter(Boolean).sort();
+
+  // Document templates from settings (object keyed by destination)
+  let docTemplates = DOC_TEMPLATES;
+  try {
+    const saved = getConfig('settings_docTemplates');
+    if (saved) docTemplates = JSON.parse(saved);
+  } catch {}
 
   res.json({
     consultants: combinedConsultants,
+    employees: activeEmployees,
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
-    destinations: getList('settings_destinations', ['China','Georgia','Malta']),
+    destinations: getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
       'Documents Collecting',
@@ -4229,13 +5658,14 @@ app.get('/api/settings', (req, res) => {
     paymentStatuses: getList('settings_paymentStatuses', ['Pending','Partial','Paid','Refunded']),
     incomeCategories: getList('settings_incomeCategories', ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income']),
     expenseCategories: getList('settings_expenseCategories', ['Salary','Office Rent','Marketing','Air Ticket','Airport Pickup','App Fee','Visa Fee','Medical','Mobile Recharge','Client Lunch+Snacks','Transport','Bua Bill','Tissue+Room Spray','Letterhead','Logo','Job Post','Testimonial Video','Review','Yearly Fee','Electrician+Sign Board','Mata Support','Other Expense']),
+    docTemplates,
   });
 });
 
-app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
+app.post('/api/settings', (req, res) => requireAdmin(req, res, () => {
   const { key, value } = req.body || {};
-  if (!key || !Array.isArray(value)) {
-    return res.status(400).json({ error: 'key and array value are required' });
+  if (!key) {
+    return res.status(400).json({ error: 'key is required' });
   }
   const allowedKeys = [
     'settings_consultants',
@@ -4245,7 +5675,8 @@ app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
     'settings_fileStages',
     'settings_paymentStatuses',
     'settings_incomeCategories',
-    'settings_expenseCategories'
+    'settings_expenseCategories',
+    'settings_docTemplates'
   ];
   if (!allowedKeys.includes(key)) {
     return res.status(400).json({ error: 'invalid settings key' });
@@ -4259,8 +5690,7 @@ app.post('/api/settings', (req, res, next) => requireAdmin(req, res, () => {
 // ─────────────────────────────────────────────────────────
 // Access guard: admin, manager, or trusted n8n service (super_admin via x-api-key).
 function requireMarketing(req, res, next) {
-  const r = req.user?.role;
-  if (r === 'admin' || r === 'manager' || r === 'super_admin') return next();
+  if (isFullAdmin(req.user) || userHasAnyRole(req.user, 'marketing_manager') || req.user?.role === 'super_admin') return next();
   return res.status(403).json({ error: 'Marketing access required' });
 }
 // Keep only whitelisted, present keys from a request body.

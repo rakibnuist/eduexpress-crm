@@ -3,13 +3,14 @@
    - Recognises pages by name: dashboard, cockpit, reports, my day, leads, etc.
    - ↑↓ to navigate, Enter to go.
 */
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import {
   Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Users,
-  Plane, DollarSign, UserCheck, Settings, MessageSquare, GraduationCap,
+  Plane, DollarSign, UserCheck, Settings, GraduationCap,
 } from 'lucide-react';
+import { isFullAdmin, userHasAnyRole } from '../lib/roles';
 
 const PAGES = [
   { id: 'dashboard',    label: 'Dashboard',      to: '/',             icon: LayoutDashboard, keys: 'home dashboard' },
@@ -19,7 +20,7 @@ const PAGES = [
   { id: 'leads',        label: 'Leads & Pipeline', to: '/leads',        icon: Users,           keys: 'leads students pipeline sales board kanban' },
   { id: 'applications', label: 'Applications',   to: '/applications', icon: Plane,           keys: 'applications kanban' },
   { id: 'finance',      label: 'Finance',        to: '/finance',      icon: DollarSign,      keys: 'finance cashflow money',  adminOnly: true },
-  { id: 'hr',           label: 'HR',             to: '/hr',           icon: UserCheck,       keys: 'hr employees attendance payroll', adminOnly: true },
+  { id: 'hr',           label: 'HR',             to: '/hr',           icon: UserCheck,       keys: 'hr consultants attendance payroll', adminOnly: true },
   { id: 'settings',     label: 'Settings',       to: '/settings',     icon: Settings,        keys: 'settings users import',   adminOnly: true },
 ];
 
@@ -49,8 +50,8 @@ export default function CommandPalette({ user }) {
   // Reset state when opening
   useEffect(() => { if (open) { setTimeout(() => inputRef.current?.focus(), 0); setQuery(''); setActive(0); } }, [open]);
 
-  const isStaff = user?.role === 'admin' || user?.role === 'manager';
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isFullAdmin(user);
+  const isStaff = isAdmin || userHasAnyRole(user, 'application_manager', 'marketing_manager');
   const visiblePages = useMemo(() => PAGES.filter(p =>
     (!p.staffOnly || isStaff) && (!p.adminOnly || isAdmin)
   ), [isStaff, isAdmin]);
@@ -121,7 +122,7 @@ export default function CommandPalette({ user }) {
             placeholder="Search leads, jump to a page…"
             className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-slate-400" />
           {searching && <span className="text-[11px] text-slate-400">searching…</span>}
-          <button onClick={() => setOpen(false)} className="p-1 text-slate-400 hover:text-slate-600"><X size={15} /></button>
+          <button onClick={() => setOpen(false)} className="p-1 text-slate-400 hover:text-slate-600" aria-label="Close"><X size={15} /></button>
         </div>
 
         {/* Results */}
