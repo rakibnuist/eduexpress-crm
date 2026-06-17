@@ -1,0 +1,249 @@
+{
+  "name": "EduExpress — Auto-Publish Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2,
+              "triggerAtHour": 1
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 340]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CRM_BASE || 'https://crm.eduexpressint.com' }}/api/marketing/posts/due",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.CRM_KEY || 'eduexpress-n8n-2024' }}" }
+          ]
+        }
+      },
+      "name": "Get Approved Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.first().json;
+if (!Array.isArray(posts) || posts.length === 0) {
+  return [{ json: { message: 'No posts due for publishing' } }];
+}
+// Split by page/platform for parallel processing
+const byPage = {};
+for (const p of posts) {
+  const page = p.page || 'bd';
+  if (!byPage[page]) byPage[page] = [];
+  byPage[page].push(p);
+}
+return Object.entries(byPage).map(([page, items]) => ({ json: { page, items } }));"
+      },
+      "name": "Split by Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "page-china",
+              "leftValue": "={{ $json.page }}",
+              "rightValue": "china",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "China Page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [860, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "page-bd",
+              "leftValue": "={{ $json.page }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "bd"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "BD Page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [860, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/me/feed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "message", "value": "={{ $json.items[0].body }}" },
+            { "name": "access_token", "value": "={{ $credentials.fbPageAccessToken }}" }
+          ]
+        }
+      },
+      "name": "Post to FB China",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1060, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/me/feed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "message", "value": "={{ $json.items[0].body }}" },
+            { "name": "access_token", "value": "={{ $credentials.fbPageAccessToken }}" }
+          ]
+        }
+      },
+      "name": "Post to FB BD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1060, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE || 'https://crm.eduexpressint.com' }}/api/marketing/posts/{{ $json.items[0].id }}/published",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.CRM_KEY || 'eduexpress-n8n-2024' }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "published_url", "value": "={{ $json.publishUrl || '' }}" },
+            { "name": "reach", "value": "={{ $json.reach || 0 }}" },
+            { "name": "engagement", "value": "={{ $json.engagement || 0 }}" }
+          ]
+        }
+      },
+      "name": "Mark Published in CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1260, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE || 'https://crm.eduexpressint.com' }}/api/marketing/publishing-queue",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.CRM_KEY || 'eduexpress-n8n-2024' }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "post_id", "value": "={{ $json.items[0].id }}" },
+            { "name": "platform", "value": "={{ $json.page === 'china' ? 'facebook_china' : $json.page === 'bd' ? 'facebook_bd' : $json.page }}" },
+            { "name": "status", "value": "published" },
+            { "name": "published_at", "value": "={{ new Date().toISOString() }}" },
+            { "name": "publish_url", "value": "={{ $json.publishUrl || '' }}" }
+          ]
+        }
+      },
+      "name": "Log to Publishing Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1460, 340]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Dhaka"
+  },
+  "staticData": null,
+  "tags": [],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Get Approved Posts", "type": "main", "index": 0 }]]
+    },
+    "Get Approved Posts": {
+      "main": [[{ "node": "Split by Page", "type": "main", "index": 0 }]]
+    },
+    "Split by Page": {
+      "main": [[{ "node": "China Page?", "type": "main", "index": 0 }, { "node": "BD Page?", "type": "main", "index": 0 }]]
+    },
+    "China Page?": {
+      "main": [
+        [{ "node": "Post to FB China", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "BD Page?": {
+      "main": [
+        [{ "node": "Post to FB BD", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Post to FB China": {
+      "main": [[{ "node": "Mark Published in CRM", "type": "main", "index": 0 }]]
+    },
+    "Post to FB BD": {
+      "main": [[{ "node": "Mark Published in CRM", "type": "main", "index": 0 }]]
+    },
+    "Mark Published in CRM": {
+      "main": [[{ "node": "Log to Publishing Queue", "type": "main", "index": 0 }]]
+    }
+  }
+}

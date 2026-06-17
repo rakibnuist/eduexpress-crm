@@ -139,7 +139,7 @@ EduExpress International is an education consultancy based in Dhaka, Bangladesh.
 
 # OpenCode Go API Configuration
 OPENCODE_CONFIG = {
-    "key": "sk-KF63PVImS4EsF2iaEvwTNHcFNqNVzEoIHJZ8K01poqEM97qZ8smo52DEye5g9KaL",
+    "key": "YOUR-OPENCODE-API-KEY-HERE",
     "provider": "opencode-go",
     "model": "minimax-m3",  # Working model: produces great Bangla content
     "fallback_models": ["glm-5.1", "deepseek-v4-pro"],
