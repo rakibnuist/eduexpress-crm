@@ -2104,11 +2104,12 @@ function PublishingQueueTab() {
               <select className="inp w-full" value={llmForm.provider} onChange={e => setLlmForm({ ...llmForm, provider: e.target.value })}>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Google Gemini</option>
+                <option value="opencode-go">OpenCode GO (GLM-5.1)</option>
               </select>
             </div>
             <div>
               <label className="text-xs text-slate-500 mb-1 block">Model</label>
-              <input className="inp w-full" value={llmForm.model} onChange={e => setLlmForm({ ...llmForm, model: e.target.value })} placeholder="gpt-4o-mini or gemini-1.5-pro-latest" />
+              <input className="inp w-full" value={llmForm.model} onChange={e => setLlmForm({ ...llmForm, model: e.target.value })} placeholder="gpt-4o-mini / gemini-1.5-pro / glm-5.1" />
             </div>
             <div>
               <label className="text-xs text-slate-500 mb-1 block">API Key</label>

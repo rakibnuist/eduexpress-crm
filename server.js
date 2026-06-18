@@ -6591,14 +6591,39 @@ app.post('/api/marketing/generate', async (req, res) => {
   try {
     const { page, pillar, format, language, tone, topic, hook, selectedUniversity, selectedScholarship, researchIntel } = req.body || {};
 
-    // Get LLM API config from meta_config or env
-    const llmApiKey = process.env.OPENAI_API_KEY || db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value || '';
-    const llmProvider = process.env.LLM_PROVIDER || db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || 'openai';
-    const llmModel = process.env.LLM_MODEL || db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || 'gpt-4o-mini';
+    // Get LLM API config from meta_config or env or hardcoded fallback
+    const HARD_CODED_KEYS = [
+      { key:'sk-KF63PVImS4EsF2iaEvwTNHcFNqNVzEoIHJZ8K01poqEM97qZ8smo52DEye5g9KaL', provider:'opencode-go', model:'glm-5.1' }
+    ];
+    const dbProvider = db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value;
+    const dbModel = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value;
+    const dbKey = db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value;
+    const envKey = process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENCODE_GO_API_KEY || '';
+    
+    let llmProvider = dbProvider || process.env.LLM_PROVIDER || '';
+    let llmModel = dbModel || process.env.LLM_MODEL || '';
+    let llmApiKey = dbKey || envKey || '';
+    
+    // Auto-detect from hardcoded keys if nothing configured
+    if (!llmApiKey && HARD_CODED_KEYS.length > 0) {
+      const fallback = HARD_CODED_KEYS[0];
+      llmApiKey = fallback.key;
+      llmProvider = fallback.provider;
+      llmModel = fallback.model;
+    }
+    
+    // Auto-detect provider from key prefix if not set
+    if (!llmProvider && llmApiKey) {
+      if (llmApiKey.startsWith('sk-')) llmProvider = 'openai'; // could be OpenAI or OpenCode
+      if (llmApiKey.startsWith('AIza')) llmProvider = 'gemini';
+    }
+    if (!llmModel && llmProvider === 'opencode-go') llmModel = 'glm-5.1';
+    if (!llmModel && llmProvider === 'openai') llmModel = 'gpt-4o-mini';
+    if (!llmModel && llmProvider === 'gemini') llmModel = 'gemini-1.5-pro-latest';
 
     if (!llmApiKey) {
       return res.status(400).json({
-        error: 'No LLM API key configured. Add OPENAI_API_KEY env var or set llm_api_key in meta_config.',
+        error: 'No LLM API key configured. Add OPENAI_API_KEY or GEMINI_API_KEY env var, or set via LLM Config panel.',
         fallback: true
       });
     }
@@ -6667,17 +6692,35 @@ Write the complete post now. Return ONLY JSON.`;
       const geminiData = await geminiRes.json();
       if (geminiData.error) throw new Error(geminiData.error.message);
       const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      // Try to parse JSON from response
       try {
         generatedContent = JSON.parse(text);
       } catch (e) {
-        // Extract JSON from markdown code block if present
         const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) generatedContent = JSON.parse(jsonMatch[1]);
         else throw new Error('Could not parse LLM response as JSON');
       }
+    } else if (llmProvider === 'opencode-go') {
+      // OpenCode GO — GLM models (OpenAI-compatible)
+      const openCodeRes = await fetch('https://api.opencode-go.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: llmModel || 'glm-5.1',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 1500,
+          response_format: { type: 'json_object' }
+        })
+      });
+      const openCodeData = await openCodeRes.json();
+      if (openCodeData.error) throw new Error(openCodeData.error.message || JSON.stringify(openCodeData.error));
+      const content = openCodeData.choices?.[0]?.message?.content;
+      generatedContent = JSON.parse(content);
     } else {
-      return res.status(400).json({ error: `Unsupported LLM provider: ${llmProvider}. Use 'openai' or 'gemini'.` });
+      return res.status(400).json({ error: `Unsupported LLM provider: ${llmProvider}. Use 'openai', 'gemini', or 'opencode-go'.` });
     }
 
     res.json({
