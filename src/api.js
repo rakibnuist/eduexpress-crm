@@ -285,6 +285,7 @@ export const api = {
     researchGapAnalysis: () => req('/marketing/research/gap-analysis'),
     llmConfig:      () => req('/marketing/llm-config'),
     saveLlmConfig:  (d) => req('/marketing/llm-config', { method: 'POST', body: JSON.stringify(d) }),
+    testLlm:        (d) => req('/marketing/llm-test', { method: 'POST', body: JSON.stringify(d) }),
     // Offer Sources
     offerSources:      () => req('/marketing/offer-sources'),
     createOfferSource: (d) => req('/marketing/offer-sources', { method: 'POST', body: JSON.stringify(d) }),

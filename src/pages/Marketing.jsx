@@ -1968,6 +1968,8 @@ function PublishingQueueTab() {
 
   const [llmConfig, setLlmConfig] = useState(null);
   const [llmEditing, setLlmEditing] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState(null);
+  const [llmTesting, setLlmTesting] = useState(false);
   const [llmForm, setLlmForm] = useState({ provider: 'openai', model: 'gpt-4o-mini', apiKey: '' });
 
   const load = useCallback(() => {
@@ -1998,6 +2000,23 @@ function PublishingQueueTab() {
       setLlmEditing(false);
       load();
     } catch (e) { toast.error(e.message); }
+  };
+
+  const handleTestLlm = async () => {
+    setLlmTesting(true);
+    setLlmTestResult(null);
+    try {
+      const res = await api.marketing.testLlm({ prompt: 'Say hello in Bangla and return a JSON with key "status" set to "ok"' });
+      setLlmTestResult(res);
+      if (res.error) toast.error('LLM test failed: ' + res.error);
+      else if (res.statusCode >= 400) toast.error('LLM returned HTTP ' + res.statusCode);
+      else toast.success('LLM connection OK! Provider: ' + res.provider + ', Model: ' + res.model);
+    } catch (e) {
+      toast.error('Test failed: ' + e.message);
+      setLlmTestResult({ error: e.message });
+    } finally {
+      setLlmTesting(false);
+    }
   };
 
   const filteredQueue = useMemo(() => {
@@ -2085,6 +2104,9 @@ function PublishingQueueTab() {
           <button onClick={() => setLlmEditing(!llmEditing)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 font-medium">
             {llmEditing ? 'Cancel' : 'Configure'}
           </button>
+          <button onClick={handleTestLlm} disabled={llmTesting} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium disabled:opacity-50">
+            {llmTesting ? 'Testing…' : 'Test Connection'}
+          </button>
         </div>
         <div className="flex gap-3 flex-wrap">
           <div className={`px-3 py-1.5 rounded-lg text-xs font-medium ${llmConfig?.hasKey ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
@@ -2097,6 +2119,12 @@ function PublishingQueueTab() {
             Model: {llmConfig?.model || '—'}
           </div>
         </div>
+        {llmTestResult && (
+          <div className={`mt-3 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap ${llmTestResult.error || llmTestResult.statusCode >= 400 ? 'bg-rose-50 border border-rose-200 text-rose-700' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
+            {llmTestResult.error ? `Error: ${llmTestResult.error}` : `HTTP ${llmTestResult.statusCode} | Provider: ${llmTestResult.provider} | Model: ${llmTestResult.model}`}
+            {llmTestResult.rawResponse && <div className="mt-1 text-[10px] opacity-70">Raw: {llmTestResult.rawResponse.slice(0, 300)}…</div>}
+          </div>
+        )}
         {llmEditing && (
           <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>

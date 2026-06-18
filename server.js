@@ -6585,6 +6585,100 @@ app.post('/api/marketing/llm-config', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── LLM Test / Debug Endpoint ────────────────────────────────────────
+app.post('/api/marketing/llm-test', async (req, res) => {
+  try {
+    const { provider, prompt } = req.body || {};
+    
+    const HARD_CODED_KEYS = [
+      { key:'sk-KF63PVImS4EsF2iaEvwTNHcFNqNVzEoIHJZ8K01poqEM97qZ8smo52DEye5g9KaL', provider:'opencode-go', model:'glm-5.1' }
+    ];
+    
+    let llmProvider = provider || db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || '';
+    let llmModel = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || '';
+    let llmApiKey = db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENCODE_GO_API_KEY || '';
+    
+    if (!llmApiKey && HARD_CODED_KEYS.length > 0) {
+      const fallback = HARD_CODED_KEYS[0];
+      llmApiKey = fallback.key;
+      llmProvider = fallback.provider;
+      llmModel = fallback.model;
+    }
+    
+    if (!llmApiKey) return res.status(400).json({ error: 'No LLM API key available' });
+    if (!llmProvider) {
+      if (llmApiKey.startsWith('AIza')) llmProvider = 'gemini';
+      else llmProvider = 'opencode-go';
+    }
+    if (!llmModel) {
+      if (llmProvider === 'opencode-go') llmModel = 'glm-5.1';
+      if (llmProvider === 'openai') llmModel = 'gpt-4o-mini';
+      if (llmProvider === 'gemini') llmModel = 'gemini-1.5-pro-latest';
+    }
+    
+    let result = null;
+    let error = null;
+    let statusCode = null;
+    let rawResponse = null;
+    
+    try {
+      if (llmProvider === 'opencode-go') {
+        const resp = await fetch('https://api.opencode-go.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: llmModel,
+            messages: [{ role: 'user', content: prompt || 'Say "hello" and return a JSON with key "status" set to "ok"' }],
+            temperature: 0.7,
+            max_tokens: 200
+          })
+        });
+        statusCode = resp.status;
+        rawResponse = await resp.text();
+        try { result = JSON.parse(rawResponse); } catch {}
+      } else if (llmProvider === 'openai') {
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: llmModel,
+            messages: [{ role: 'user', content: prompt || 'Say hello' }],
+            temperature: 0.7,
+            max_tokens: 200
+          })
+        });
+        statusCode = resp.status;
+        rawResponse = await resp.text();
+        try { result = JSON.parse(rawResponse); } catch {}
+      } else if (llmProvider === 'gemini') {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${llmModel}:generateContent?key=${llmApiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt || 'Say hello' }] }] })
+        });
+        statusCode = resp.status;
+        rawResponse = await resp.text();
+        try { result = JSON.parse(rawResponse); } catch {}
+      }
+    } catch (netErr) {
+      error = netErr.message;
+    }
+    
+    res.json({
+      provider: llmProvider,
+      model: llmModel,
+      hasKey: !!llmApiKey,
+      keyPrefix: llmApiKey.slice(0, 7) + '...',
+      statusCode,
+      error,
+      rawResponse: rawResponse?.slice(0, 1000),
+      parsedResponse: result
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── AI Content Generator ────────────────────────────────────────
 // Calls LLM API to generate real content based on user inputs
 app.post('/api/marketing/generate', async (req, res) => {
@@ -6701,24 +6795,63 @@ Write the complete post now. Return ONLY JSON.`;
       }
     } else if (llmProvider === 'opencode-go') {
       // OpenCode GO — GLM models (OpenAI-compatible)
-      const openCodeRes = await fetch('https://api.opencode-go.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: llmModel || 'glm-5.1',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.7,
-          max_tokens: 1500,
-          response_format: { type: 'json_object' }
-        })
-      });
-      const openCodeData = await openCodeRes.json();
-      if (openCodeData.error) throw new Error(openCodeData.error.message || JSON.stringify(openCodeData.error));
-      const content = openCodeData.choices?.[0]?.message?.content;
-      generatedContent = JSON.parse(content);
+      let openCodeRes;
+      try {
+        openCodeRes = await fetch('https://api.opencode-go.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: llmModel || 'glm-5.1',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 1500
+            // Note: response_format may not be supported by all providers
+          })
+        });
+      } catch (netErr) {
+        console.error('[generate] Network error calling opencode-go:', netErr.message);
+        throw new Error(`Network error calling OpenCode GO: ${netErr.message}. Check if the API endpoint is reachable.`);
+      }
+      
+      let openCodeData;
+      try {
+        openCodeData = await openCodeRes.json();
+      } catch (parseErr) {
+        const rawText = await openCodeRes.text().catch(() => '');
+        console.error('[generate] Failed to parse opencode-go response:', rawText.slice(0, 500));
+        throw new Error(`OpenCode GO returned non-JSON (HTTP ${openCodeRes.status}): ${rawText.slice(0, 200)}`);
+      }
+      
+      if (!openCodeRes.ok) {
+        console.error('[generate] OpenCode GO error:', openCodeData);
+        throw new Error(openCodeData.error?.message || openCodeData.message || `HTTP ${openCodeRes.status}: ${JSON.stringify(openCodeData).slice(0, 200)}`);
+      }
+      
+      const content = openCodeData.choices?.[0]?.message?.content || openCodeData.choices?.[0]?.content;
+      if (!content) {
+        console.error('[generate] No content in opencode-go response:', openCodeData);
+        throw new Error('OpenCode GO returned empty content. Response: ' + JSON.stringify(openCodeData).slice(0, 300));
+      }
+      
+      try {
+        generatedContent = JSON.parse(content);
+      } catch (e) {
+        // Try to extract JSON from markdown code block
+        const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) generatedContent = JSON.parse(jsonMatch[1]);
+        else {
+          // Fallback: try to find JSON object in text
+          const objMatch = content.match(/\{[\s\S]*"hook"[\s\S]*\}/);
+          if (objMatch) generatedContent = JSON.parse(objMatch[0]);
+          else {
+            console.error('[generate] Could not parse content as JSON:', content.slice(0, 500));
+            throw new Error('OpenCode GO returned non-JSON content. Raw: ' + content.slice(0, 200));
+          }
+        }
+      }
     } else {
       return res.status(400).json({ error: `Unsupported LLM provider: ${llmProvider}. Use 'openai', 'gemini', or 'opencode-go'.` });
     }
