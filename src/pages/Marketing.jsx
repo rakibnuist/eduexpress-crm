@@ -377,6 +377,7 @@ function CalendarTab() {
         </div>
         <button onClick={load} className="text-sm flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"><RefreshCw size={13} />Refresh</button>
         <div className="flex-1" />
+        <button onClick={() => setEditing({ id: null, hook: '', body: '', hashtags: '', pillar: '', page: 'bd', format: 'Single image', language: 'bangla', post_date: '', slot_time: '', status: 'drafted' })} className="text-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium"><Plus size={14} />New Post</button>
         <button onClick={approveWeek} className="text-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium"><ThumbsUp size={14} />Approve week</button>
       </div>
 
@@ -473,6 +474,7 @@ function CalendarTab() {
 
 function PostEditor({ post, onClose, onSaved }) {
   const toast = useToast();
+  const isNew = !post.id;
   const [f, setF] = useState({
     hook: post.hook || '', body: post.body || '', hashtags: post.hashtags || '',
     brief: post.brief || '', slot_time: post.slot_time || '', status: post.status || 'drafted',
@@ -481,11 +483,19 @@ function PostEditor({ post, onClose, onSaved }) {
   });
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
   const save = async () => {
-    try { await api.marketing.updatePost(post.id, f); toast.success('Saved'); onSaved(); }
-    catch (e) { toast.error(e.message); }
+    try {
+      if (isNew) {
+        await api.marketing.createPost({ ...f, week: post.week || '' });
+        toast.success('Post created');
+      } else {
+        await api.marketing.updatePost(post.id, f);
+        toast.success('Saved');
+      }
+      onSaved();
+    } catch (e) { toast.error(e.message); }
   };
   return (
-    <Modal title="Edit post" onClose={onClose} wide>
+    <Modal title={isNew ? 'New post' : 'Edit post'} onClose={onClose} wide>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Page">
@@ -522,7 +532,7 @@ function PostEditor({ post, onClose, onSaved }) {
         </Field>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 text-slate-600">Cancel</button>
-          <button onClick={save} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">Save</button>
+          <button onClick={save} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">{isNew ? 'Create' : 'Save'}</button>
         </div>
       </div>
     </Modal>
