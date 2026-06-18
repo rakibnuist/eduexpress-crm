@@ -9,7 +9,7 @@ import {
   Plus, RefreshCw, ThumbsUp, Megaphone, Brain, TrendingUp, Users, Zap,
   Target, Lightbulb, BookOpen, FlaskConical, Rocket, ArrowUpRight, Star,
   AlertTriangle, Eye, Heart, Globe, Hash, Sparkles, Palette, Wand2,
-  Settings, Filter, Grid3X3, List, Layout, ChevronLeft, ChevronRight, Send
+  Settings, Filter, Grid3X3, List, Layout, ChevronLeft, ChevronRight, Send, Search, MessageCircle, Share2
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
@@ -518,6 +518,7 @@ function PostEditor({ post, onClose, onSaved }) {
             <select className="inp" value={f.language} onChange={e => set('language', e.target.value)}>
               <option value="bangla">Bangla</option>
               <option value="english">English</option>
+              <option value="mixed">Bangla + English (Mixed)</option>
             </select>
           </Field>
         </div>
@@ -555,39 +556,89 @@ function RejectModal({ onClose, onReject }) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  CONTENT FACTORY TAB — AI Generator + Quality Gate + Real Data
+//  CONTENT FACTORY TAB — Professional Step-by-Step Builder + Quality Gate + Live Preview
 // ═══════════════════════════════════════════════════════════
 function ContentFactoryTab() {
   const toast = useToast();
+
+  // ── Builder Steps ──
+  const [step, setStep] = useState(1);
+
+  // ── Post Core Data ──
   const [page, setPage] = useState('china');
   const [pillar, setPillar] = useState('scholarship');
   const [format, setFormat] = useState('Carousel');
   const [language, setLanguage] = useState('bangla');
-  const [topic, setTopic] = useState('');
-  const [tone, setTone] = useState('expert_consultant');
-  const [generated, setGenerated] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [previewTab, setPreviewTab] = useState('facebook');
+  const [platform, setPlatform] = useState('facebook');
+  const [hook, setHook] = useState('');
+  const [body, setBody] = useState('');
+  const [hashtags, setHashtags] = useState('');
+  const [cta, setCta] = useState('');
+  const [brief, setBrief] = useState('');
 
-  // Real data sources
+  // ── Selected Items from KB / Hooks ──
+  const [selectedHook, setSelectedHook] = useState(null);
+  const [selectedUniversity, setSelectedUniversity] = useState(null);
+  const [selectedScholarship, setSelectedScholarship] = useState(null);
+
+  // ── UI ──
+  const [activeTab, setActiveTab] = useState('generator'); // generator | kb | hooks
+  const [previewTab, setPreviewTab] = useState('facebook');
+  const [loading, setLoading] = useState(false);
+
+  // ── Data Sources ──
   const [researchIntel, setResearchIntel] = useState([]);
   const [bestHooks, setBestHooks] = useState([]);
   const [kbUniversities, setKbUniversities] = useState([]);
   const [kbScholarships, setKbScholarships] = useState([]);
   const [kbSearch, setKbSearch] = useState('');
-  const [selectedUniversity, setSelectedUniversity] = useState(null);
-  const [selectedScholarship, setSelectedScholarship] = useState(null);
-  const [activeTab, setActiveTab] = useState('generator'); // generator | kb | hooks
+  const [kbCountry, setKbCountry] = useState('');
+  const [kbProgramType, setKbProgramType] = useState('');
+  const [kbPartnerStatus, setKbPartnerStatus] = useState('');
+  const [hooksFilter, setHooksFilter] = useState({ hook_type: '', destination: '', pillar: '', status: '' });
+
+  // ── Quality Gate ──
+  const [qualityScore, setQualityScore] = useState(100);
+  const [qualityChecks, setQualityChecks] = useState({ fact_check: true, banned_words: [], tone_ok: true, figure_verified: 'pending', severity: [] });
 
   // Banned words from quality gate config
   const BANNED_CRITICAL = ['guaranteed visa', '100% visa success', '100% admission', 'guaranteed admission', 'visa confirmed', 'no rejection', 'zero rejection', 'government registered', 'licensed by government', 'official representative', 'authorized agent', 'best consultancy', 'no. 1 consultancy', '100% scholarship guaranteed', 'free education', 'no cost at all'];
   const BANNED_HIGH = ['csc scholarship', 'gks scholarship', 'stipendium hungaricum', 'turkiye burslari', 'our students in korea', 'our alumni in hungary', 'visa success for korea', 'visa success for europe', 'no ielts', 'no csca required', 'payment after visa', 'no file opening charge', 'free counselling', 'expert guidance', 'partnered with 500+', '5000+ students', '99% visa success', '7 years', '$5m revenue'];
 
+  const CTA_OPTIONS = [
+    { label: 'DM us for free consultation', value: 'DM us for free consultation 📩' },
+    { label: 'Click link in bio', value: 'Click link in bio 🔗' },
+    { label: "Comment 'INFO' below", value: "Comment 'INFO' below 👇" },
+    { label: 'WhatsApp: +8801983333566', value: 'WhatsApp: +8801983333566 📞' },
+    { label: 'Visit our Dhanmondi office', value: 'Visit our Dhanmondi office 📍' },
+    { label: 'Apply now — limited seats', value: 'Apply now — limited seats 🏃' },
+    { label: 'Join our free webinar', value: 'Join our free webinar 🎓' },
+    { label: 'Custom…', value: '' },
+  ];
+
+  const HASHTAG_SUGGESTIONS = {
+    scholarship: ['#Scholarship2026', '#FullScholarship', '#StudyForFree', '#EduExpressBD'],
+    trust: ['#TrustedConsultancy', '#EduExpressBD', '#VerifiedInfo', '#StudentFirst'],
+    career: ['#CareerAbroad', '#GlobalJobs', '#EduExpressBD', '#WorkAfterStudy'],
+    urgency: ['#LimitedSeats', '#ApplyNow', '#DeadlineAlert', '#EduExpressBD'],
+    university: ['#TopUniversity', '#WorldRanking', '#EduExpressBD', '#CampusLife'],
+    cost: ['#AffordableEducation', '#LowTuition', '#EduExpressBD', '#BudgetStudy'],
+    success_story: ['#SuccessStory', '#OurStudents', '#EduExpressBD', '#DreamComeTrue'],
+    trending: ['#Trending', '#Viral', '#StudyAbroad', '#EduExpressBD'],
+  };
+
+  const PAGE_HASHTAGS = {
+    china: ['#StudyInChina', '#ChinaEducation', '#ChineseUniversity', '#CSCScholarship'],
+    bd: ['#StudyAbroad', '#BangladeshStudents', '#EducationConsultancy', '#VisaSuccess'],
+    instagram: ['#Reels', '#InstaDaily', '#EduExpressBD', '#StudyAbroad'],
+    tiktok: ['#StudyTok', '#EduTok', '#EduExpressBD', '#ViralEdu'],
+  };
+
+  // ── Effects ──
   useEffect(() => {
-    // Load active research intel and best hooks on mount
     Promise.all([
       api.marketing.activeResearch().catch(() => []),
-      api.marketing.bestHooks(page, pillar, page === 'china' ? 'China' : '').catch(() => []),
+      api.marketing.bestHooks(page, pillar, page === 'china' ? 'China' : '', 50).catch(() => []),
     ]).then(([ri, bh]) => {
       setResearchIntel(ri);
       setBestHooks(bh);
@@ -595,56 +646,52 @@ function ContentFactoryTab() {
   }, []);
 
   useEffect(() => {
-    // Refresh hooks when page/pillar changes
-    api.marketing.bestHooks(page, pillar, page === 'china' ? 'China' : '').catch(() => [])
+    api.marketing.bestHooks(page, pillar, page === 'china' ? 'China' : '', 50).catch(() => [])
       .then(bh => setBestHooks(bh)).catch(() => {});
   }, [page, pillar]);
 
-  const searchKB = async () => {
-    if (!kbSearch.trim()) return;
-    try {
-      const [uni, schol] = await Promise.all([
-        api.marketing.searchUniversities(kbSearch, page === 'china' ? 'China' : ''),
-        api.marketing.searchScholarships(kbSearch, page === 'china' ? 'China' : ''),
-      ]);
-      setKbUniversities(uni);
-      setKbScholarships(schol);
-    } catch (e) { toast.error(e.message); }
-  };
+  // Real-time quality gate on every change
+  useEffect(() => {
+    const result = runQualityCheck(hook, body, hashtags);
+    setQualityScore(result.score);
+    setQualityChecks(result.checks);
+  }, [hook, body, hashtags, language, selectedScholarship, selectedUniversity]);
 
-  const runQualityCheck = (hook, body, hashtags) => {
-    const fullText = `${hook} ${body} ${hashtags}`.toLowerCase();
+  // Auto-build brief from selections
+  useEffect(() => {
+    const parts = [];
+    if (format) parts.push(`${format}${platform ? ` for ${platform}` : ''}`);
+    if (pillar) parts.push(pillar);
+    if (selectedUniversity) parts.push('Include university logo.');
+    if (selectedScholarship) parts.push('Include scholarship details.');
+    if (language === 'bangla') parts.push('Bangla copy.');
+    if (language === 'mixed') parts.push('Mixed Bangla+English copy.');
+    setBrief(parts.join(' '));
+  }, [format, platform, pillar, selectedUniversity, selectedScholarship, language]);
+
+  const runQualityCheck = (h, b, tags) => {
+    const fullText = `${h} ${b} ${tags}`.toLowerCase();
     const bannedFound = [];
     const severity = [];
 
     BANNED_CRITICAL.forEach(word => {
-      if (fullText.includes(word.toLowerCase())) {
-        bannedFound.push(word);
-        severity.push('critical');
-      }
+      if (fullText.includes(word.toLowerCase())) { bannedFound.push(word); severity.push('critical'); }
     });
     BANNED_HIGH.forEach(word => {
-      if (fullText.includes(word.toLowerCase())) {
-        bannedFound.push(word);
-        severity.push('high');
-      }
+      if (fullText.includes(word.toLowerCase())) { bannedFound.push(word); severity.push('high'); }
     });
 
-    // Check for fake figures (stipend claims without range)
-    const stipendMatch = body.match(/[৳$€¥]\s*\d+/g);
-    const hasRange = body.includes('10,000') || body.includes('60,000') || body.includes('range') || body.includes('depending');
+    const stipendMatch = b.match(/[৳$€¥]\s*\d+/g);
+    const hasRange = b.includes('10,000') || b.includes('60,000') || b.includes('range') || b.includes('depending') || b.includes('up to') || b.includes('-');
     let figureVerified = 'pending';
     if (stipendMatch && !hasRange) figureVerified = 'unverified';
     if (selectedScholarship) figureVerified = 'verified';
 
-    // Check for university name in KB
     let factCheck = true;
-    if (body.includes('University') && !selectedUniversity) {
-      factCheck = false; // Mentioned university but not selected from KB
-    }
+    if (b.includes('University') && !selectedUniversity) factCheck = false;
+    if (b.includes('university') && !selectedUniversity) factCheck = false;
 
-    // Check tone
-    const toneOk = language === 'bangla' ? !/[a-zA-Z]{20,}/.test(body) : true; // Bangla posts shouldn't have long English sentences
+    const toneOk = language === 'bangla' ? !/[a-zA-Z]{20,}/.test(b) : true;
 
     const score = 100
       - (severity.filter(s => s === 'critical').length * 50)
@@ -659,101 +706,363 @@ function ContentFactoryTab() {
     };
   };
 
-  const generate = async () => {
+  const searchKB = async () => {
+    if (!kbSearch.trim() && !kbCountry) return;
+    try {
+      const [uni, schol] = await Promise.all([
+        api.marketing.searchUniversities(kbSearch, kbCountry || (page === 'china' ? 'China' : ''), 50),
+        api.marketing.searchScholarships(kbSearch, kbCountry || (page === 'china' ? 'China' : ''), '', 50),
+      ]);
+      let filteredUni = uni;
+      if (kbProgramType) filteredUni = filteredUni.filter(u => (u.programs || '').toLowerCase().includes(kbProgramType.toLowerCase()));
+      if (kbPartnerStatus === 'partner') filteredUni = filteredUni.filter(u => u.partner === true || u.partner === 'true' || u.partner === 1);
+      if (kbPartnerStatus === 'non-partner') filteredUni = filteredUni.filter(u => !u.partner || u.partner === 'false' || u.partner === 0);
+      setKbUniversities(filteredUni);
+      setKbScholarships(schol);
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const injectKBIntoBody = () => {
+    let injection = '';
+    if (selectedUniversity) {
+      injection += `\n🏫 ${selectedUniversity.name} (${selectedUniversity.city}, ${selectedUniversity.country})`;
+      if (selectedUniversity.programs) injection += ` — Programs: ${selectedUniversity.programs}`;
+      if (selectedUniversity.tuition) injection += `\n💰 Tuition: ${selectedUniversity.tuition}`;
+      if (selectedUniversity.lang_req) injection += `\n📝 Language: ${selectedUniversity.lang_req}`;
+    }
+    if (selectedScholarship) {
+      injection += `\n🎓 ${selectedScholarship.name}`;
+      if (selectedScholarship.coverage) injection += `\n💵 Coverage: ${selectedScholarship.coverage}`;
+      if (selectedScholarship.deadline) injection += `\n⏰ Deadline: ${selectedScholarship.deadline}`;
+      if (selectedScholarship.eligibility) injection += `\n✅ Eligibility: ${selectedScholarship.eligibility}`;
+    }
+    if (injection) {
+      setBody(prev => prev + (prev ? '\n' : '') + injection.trim());
+      toast.success('KB data injected into body');
+    }
+  };
+
+  const addHashtag = (tag) => {
+    setHashtags(prev => {
+      const existing = prev.split(/\s+/).filter(Boolean);
+      if (existing.includes(tag)) return prev;
+      return [...existing, tag].join(' ');
+    });
+  };
+
+  const removeHashtag = (tag) => {
+    setHashtags(prev => prev.split(/\s+/).filter(t => t !== tag).join(' '));
+  };
+
+  const combinedContent = useMemo(() => {
+    const parts = [hook, body];
+    if (cta) parts.push(cta);
+    if (hashtags) parts.push(hashtags);
+    return parts.filter(Boolean).join('\n\n');
+  }, [hook, body, cta, hashtags]);
+
+  const platformWarnings = useMemo(() => {
+    const warnings = [];
+    if (platform === 'facebook' && language === 'bangla') warnings.push('Bangla-only text on Facebook may reduce reach by 30%. Consider Mixed or English.');
+    if (platform === 'tiktok' && format !== 'Reel' && format !== 'Video') warnings.push('TikTok performs best with Reel/Video format.');
+    if (platform === 'instagram' && format === 'Carousel' && body.length > 300) warnings.push('Instagram Carousel captions over 300 chars get truncated.');
+    if (!hook || hook.length < 10) warnings.push('Hook is too short. Aim for 20+ characters for better CTR.');
+    if (body.length < 50) warnings.push('Body is very short. Aim for 80+ words for engagement.');
+    if (hashtags.split(/\s+/).filter(Boolean).length > 10) warnings.push('More than 10 hashtags may look spammy on this platform.');
+    return warnings;
+  }, [platform, language, format, hook, body, hashtags]);
+
+  const filteredHooks = useMemo(() => {
+    return bestHooks.filter(h => {
+      if (hooksFilter.hook_type && h.hook_type !== hooksFilter.hook_type) return false;
+      if (hooksFilter.destination && h.destination !== hooksFilter.destination) return false;
+      if (hooksFilter.pillar && h.pillar !== hooksFilter.pillar) return false;
+      if (hooksFilter.status && h.status !== hooksFilter.status) return false;
+      return true;
+    });
+  }, [bestHooks, hooksFilter]);
+
+  const availableHashtags = useMemo(() => {
+    const pillarTags = HASHTAG_SUGGESTIONS[pillar] || [];
+    const pageTags = PAGE_HASHTAGS[page] || [];
+    return [...new Set([...pillarTags, ...pageTags])];
+  }, [pillar, page]);
+
+  // ── Pipeline Actions ──
+  const savePost = async (status) => {
+    try {
+      const payload = {
+        page, pillar, format, language, platform,
+        hook, body, hashtags, cta, brief,
+        status, quality_score: qualityScore,
+        quality_checks: JSON.stringify(qualityChecks),
+      };
+      const post = await api.marketing.createPost(payload);
+      toast.success(status === 'drafted' ? 'Saved to drafts' : 'Post created');
+      return post;
+    } catch (e) { toast.error(e.message); throw e; }
+  };
+
+  const handleSaveDraft = async () => {
+    setLoading(true);
+    try { await savePost('drafted'); } finally { setLoading(false); }
+  };
+
+  const handleApproveAndQueue = async () => {
     setLoading(true);
     try {
-      await new Promise(r => setTimeout(r, 1000));
-
-      // Build prompt context from real data
-      const intelContext = researchIntel.slice(0, 3).map(r => `${r.topic}: ${r.insight_summary}`).join('\n');
-      const hookSuggestion = bestHooks.length > 0 ? bestHooks[0].hook_text : '';
-      const uniContext = selectedUniversity ? `${selectedUniversity.name} (${selectedUniversity.city}, ${selectedUniversity.country}) — ${selectedUniversity.programs}` : '';
-      const scholContext = selectedScholarship ? `${selectedScholarship.name}: ${selectedScholarship.coverage}` : '';
-
-      // Generate content based on inputs + real data
-      const generatedHook = hookSuggestion || (language === 'bangla'
-        ? `CSCA ছাড়াই ${page === 'china' ? 'চীনে' : 'বিদেশে'} Bachelor! 🎓`
-        : `Study ${page === 'china' ? 'in China' : 'Abroad'} WITHOUT CSCA! 🎓`);
-
-      const generatedBody = language === 'bangla'
-        ? `আপনি কি জানেন?
-
-${page === 'china' ? 'চীনে' : 'বিদেশে'} Bachelor করতে CSCA পরীক্ষা দেওয়া বাধ্যতামূলক নয়!
-
-${uniContext ? `🏫 ${uniContext}\n` : ''}${scholContext ? `💰 ${scholContext}\n` : ''}✅ 100% টিউশন ফ্রি
-✅ মাসিক স্টাইপেন্ড ৳১০,০০০-৬০,০০০
-✅ হোস্টেল ফ্রি
-✅ English Medium Program
-
-${intelContext ? `📌 ${intelContext.split('\n')[0]}\n` : ''}📍 EduExpress International
-📞 +8801983333566
-📍 Dhanmondi, Dhaka
-${page === 'bd' ? '💬 Payment After Visa — শর্ত প্রযোজ্য' : ''}`
-        : `Did you know?
-
-You can study Bachelor's ${page === 'china' ? 'in China' : 'abroad'} WITHOUT the CSCA exam!
-
-${uniContext ? `🏫 ${uniContext}\n` : ''}${scholContext ? `💰 ${scholContext}\n` : ''}✅ 100% Tuition Free
-✅ Monthly Stipend ৳10,000-60,000
-✅ Free Hostel
-✅ English Medium Programs
-
-${intelContext ? `📌 ${intelContext.split('\n')[0]}\n` : ''}📍 EduExpress International
-📞 +8801983333566
-📍 Dhanmondi, Dhaka
-${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
-
-      const generatedHashtags = page === 'china'
-        ? '#StudyInChina #CSCScholarship #EduExpressBD #ChinaEducation #BangladeshStudents #Scholarship2026'
-        : '#StudyAbroad #EduExpressBD #BangladeshStudents #EducationConsultancy #VisaSuccess';
-
-      const quality = runQualityCheck(generatedHook, generatedBody, generatedHashtags);
-
-      setGenerated({
-        hook: generatedHook,
-        body: generatedBody,
-        hashtags: generatedHashtags,
-        quality_score: quality.score,
-        quality_checks: JSON.stringify(quality.checks),
-        brief: `${format === 'Carousel' ? 'Red carousel, 5 slides.' : format === 'Reel' ? 'Reel, 30-60s.' : format === 'Video' ? 'Video, 60-90s.' : 'Single image.'} ${pillar}. ${selectedUniversity ? 'Include university logo.' : ''} ${selectedScholarship ? 'Include scholarship details.' : ''}`,
-        utm_source: page === 'tiktok' ? 'tiktok' : page === 'instagram' ? 'instagram' : 'facebook',
-        utm_medium: 'social',
-        utm_campaign: `${pillar}_${page}_${new Date().toISOString().slice(0, 10)}`,
-      });
-    } catch (e) { toast.error(e.message); }
-    setLoading(false);
+      const post = await savePost('approved');
+      await api.marketing.publishPost(post.id, { platform, page });
+      toast.success('Approved & added to publishing queue');
+    } catch (e) { /* toast already shown */ } finally { setLoading(false); }
   };
 
-  const saveToDraft = async () => {
-    if (!generated) return;
+  const handleSendToDesigner = async () => {
+    setLoading(true);
     try {
-      await api.marketing.createPost({
-        page, pillar, format, hook: generated.hook, body: generated.body,
-        hashtags: generated.hashtags, brief: generated.brief, language,
-        status: 'drafted', quality_score: generated.quality_score, quality_checks: generated.quality_checks,
-      });
-      toast.success('Saved to drafts');
-      setGenerated(null);
-    } catch (e) { toast.error(e.message); }
-  };
-
-  const sendToDesigner = async () => {
-    if (!generated) return;
-    try {
-      const post = await api.marketing.createPost({
-        page, pillar, format, hook: generated.hook, body: generated.body,
-        hashtags: generated.hashtags, brief: generated.brief, language,
-        status: 'asset_pending', quality_score: generated.quality_score, quality_checks: generated.quality_checks,
-      });
+      const post = await savePost('asset_pending');
       await api.marketing.createDesignerQueue({
-        post_id: post.id, brief: generated.brief, priority: 'normal', status: 'assigned',
+        post_id: post.id, brief: brief || 'Design asset needed', priority: 'normal', status: 'assigned',
       });
       toast.success('Sent to designer queue');
-      setGenerated(null);
-    } catch (e) { toast.error(e.message); }
+    } catch (e) { /* toast already shown */ } finally { setLoading(false); }
   };
 
-  const qualityChecks = generated ? JSON.parse(generated.quality_checks || '{}') : {};
+  // ── Step Renderer ──
+  const steps = [
+    { id: 1, label: 'Hook', icon: Zap },
+    { id: 2, label: 'Body', icon: Pencil },
+    { id: 3, label: 'Hashtags', icon: Hash },
+    { id: 4, label: 'CTA', icon: Target },
+    { id: 5, label: 'Format', icon: Layout },
+    { id: 6, label: 'Review', icon: Check },
+  ];
+
+  const renderStepContent = () => {
+    switch (step) {
+      case 1:
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-500">Choose from proven hooks or write your own.</p>
+              {selectedHook && <button onClick={() => { setSelectedHook(null); setHook(''); }} className="text-xs text-blue-600 hover:underline">Clear selection</button>}
+            </div>
+            <Field label="Select from Hook Library">
+              <select className="inp" value={selectedHook?.id || ''} onChange={e => {
+                const h = bestHooks.find(x => String(x.id) === e.target.value);
+                if (h) { setSelectedHook(h); setHook(h.hook_text); }
+                else { setSelectedHook(null); }
+              }}>
+                <option value="">— Choose a tested hook —</option>
+                {bestHooks.map(h => (
+                  <option key={h.id} value={h.id}>{h.hook_text.slice(0, 60)}{h.hook_text.length > 60 ? '…' : ''} (Conv: {h.conversion_rate ? (h.conversion_rate * 100).toFixed(1) + '%' : '0%'})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Or write custom hook">
+              <textarea rows={3} className="inp" value={hook} onChange={e => setHook(e.target.value)} placeholder={language === 'bangla' ? 'e.g. CSCA ছাড়াই চীনে Bachelor! 🎓' : 'e.g. Study in China WITHOUT CSCA! 🎓'} />
+            </Field>
+            <div className="flex justify-between">
+              <div />
+              <button onClick={() => setStep(2)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium">Next →</button>
+            </div>
+          </div>
+        );
+      case 2:
+        return (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Build the body copy. Selected KB items can be injected automatically.</p>
+            {(selectedUniversity || selectedScholarship) && (
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedUniversity && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full border border-blue-200">🏫 {selectedUniversity.name}</span>}
+                {selectedScholarship && <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full border border-emerald-200">💰 {selectedScholarship.name}</span>}
+                <button onClick={injectKBIntoBody} className="text-xs px-2 py-1 rounded-lg bg-slate-800 text-white hover:bg-slate-700">Inject KB Data</button>
+              </div>
+            )}
+            <Field label="Body Copy">
+              <textarea rows={8} className="inp" value={body} onChange={e => setBody(e.target.value)} placeholder={
+                language === 'bangla'
+                  ? 'আপনি কি জানেন?\n\nচীনে Bachelor করতে CSCA পরীক্ষা দেওয়া বাধ্যতামূলক নয়!\n\n✅ 100% টিউশন ফ্রি\n✅ মাসিক স্টাইপেন্ড ৳১০,০০০-৬০,০০০'
+                  : language === 'mixed'
+                    ? 'আপনি কি জানেন?\n\nChina তে Bachelor করতে CSCA লাগে না!\n\n✅ 100% Tuition Free'
+                    : 'Did you know?\n\nYou can study Bachelor\'s in China WITHOUT the CSCA exam!\n\n✅ 100% Tuition Free\n✅ Monthly Stipend ৳10,000-60,000'
+              } />
+            </Field>
+            <div className="flex justify-between">
+              <button onClick={() => setStep(1)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm">← Back</button>
+              <button onClick={() => setStep(3)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium">Next →</button>
+            </div>
+          </div>
+        );
+      case 3:
+        return (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Click to add suggested hashtags. Edit or type your own.</p>
+            <div className="flex flex-wrap gap-1.5">
+              {availableHashtags.map(tag => (
+                <button key={tag} onClick={() => addHashtag(tag)} className={`text-xs px-2 py-1 rounded-full border transition ${hashtags.includes(tag) ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}>
+                  {tag}
+                </button>
+              ))}
+            </div>
+            <Field label="Hashtags">
+              <textarea rows={2} className="inp" value={hashtags} onChange={e => setHashtags(e.target.value)} placeholder="#StudyInChina #EduExpressBD #Scholarship2026" />
+            </Field>
+            {hashtags && (
+              <div className="flex flex-wrap gap-1">
+                {hashtags.split(/\s+/).filter(Boolean).map(tag => (
+                  <span key={tag} className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 px-2 py-1 rounded-full">
+                    {tag} <button onClick={() => removeHashtag(tag)} className="text-slate-400 hover:text-rose-500"><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-between">
+              <button onClick={() => setStep(2)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm">← Back</button>
+              <button onClick={() => setStep(4)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium">Next →</button>
+            </div>
+          </div>
+        );
+      case 4:
+        return (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Select a proven CTA or write your own.</p>
+            <Field label="Call to Action">
+              <select className="inp" value={cta} onChange={e => {
+                const opt = CTA_OPTIONS.find(c => c.value === e.target.value);
+                setCta(opt ? opt.value : e.target.value);
+              }}>
+                <option value="">— Select CTA —</option>
+                {CTA_OPTIONS.map((c, i) => <option key={i} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Or custom CTA">
+              <input className="inp" value={cta} onChange={e => setCta(e.target.value)} placeholder="Write your own call to action…" />
+            </Field>
+            <div className="flex justify-between">
+              <button onClick={() => setStep(3)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm">← Back</button>
+              <button onClick={() => setStep(5)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium">Next →</button>
+            </div>
+          </div>
+        );
+      case 5:
+        return (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Page">
+                <select className="inp" value={page} onChange={e => setPage(e.target.value)}>
+                  <option value="china">China</option>
+                  <option value="bd">Bangladesh</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="tiktok">TikTok</option>
+                </select>
+              </Field>
+              <Field label="Pillar">
+                <select className="inp" value={pillar} onChange={e => setPillar(e.target.value)}>
+                  <option value="scholarship">Scholarship</option>
+                  <option value="trust">Trust</option>
+                  <option value="career">Career</option>
+                  <option value="urgency">Urgency</option>
+                  <option value="university">University</option>
+                  <option value="cost">Cost</option>
+                  <option value="success_story">Success Story</option>
+                  <option value="trending">Trending</option>
+                </select>
+              </Field>
+              <Field label="Format">
+                <select className="inp" value={format} onChange={e => setFormat(e.target.value)}>
+                  <option>Carousel</option><option>Reel</option><option>Single image</option><option>Story</option><option>Video</option><option>Live</option><option>Text</option>
+                </select>
+              </Field>
+              <Field label="Platform">
+                <select className="inp" value={platform} onChange={e => { setPlatform(e.target.value); setPreviewTab(e.target.value); }}>
+                  <option value="facebook">Facebook</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="tiktok">TikTok</option>
+                </select>
+              </Field>
+              <Field label="Language">
+                <select className="inp" value={language} onChange={e => setLanguage(e.target.value)}>
+                  <option value="bangla">Bangla</option>
+                  <option value="english">English</option>
+                  <option value="mixed">Bangla + English (Mixed)</option>
+                </select>
+              </Field>
+              <Field label="Design Brief">
+                <input className="inp" value={brief} onChange={e => setBrief(e.target.value)} placeholder="Asset instructions…" />
+              </Field>
+            </div>
+            <div className="flex justify-between">
+              <button onClick={() => setStep(4)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm">← Back</button>
+              <button onClick={() => setStep(6)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium">Review →</button>
+            </div>
+          </div>
+        );
+      case 6:
+        return (
+          <div className="space-y-4">
+            <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+              <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Content Summary</h4>
+              <div className="text-xs text-slate-600 space-y-1">
+                <p><span className="font-medium text-slate-800">Hook:</span> {hook || <span className="text-rose-500">Missing</span>}</p>
+                <p><span className="font-medium text-slate-800">Body:</span> {body ? `${body.slice(0, 120)}…` : <span className="text-rose-500">Missing</span>}</p>
+                <p><span className="font-medium text-slate-800">CTA:</span> {cta || <span className="text-slate-400">None</span>}</p>
+                <p><span className="font-medium text-slate-800">Hashtags:</span> {hashtags || <span className="text-slate-400">None</span>}</p>
+                <p><span className="font-medium text-slate-800">Format:</span> {format} · {platform} · {language}</p>
+                <p><span className="font-medium text-slate-800">Page/Pillar:</span> {page} / {pillar}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-lg p-3">
+              <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Quality Gate</h4>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div className={`text-xs p-2 rounded-lg border ${qualityChecks.fact_check ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                  ✅ Fact Check: {qualityChecks.fact_check ? 'PASS' : 'FAIL'}
+                </div>
+                <div className={`text-xs p-2 rounded-lg border ${qualityChecks.tone_ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                  ✅ Tone: {qualityChecks.tone_ok ? 'OK' : 'FAIL'}
+                </div>
+                <div className={`text-xs p-2 rounded-lg border ${(!qualityChecks.banned_words || qualityChecks.banned_words.length === 0) ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                  ✅ Banned Words: {(!qualityChecks.banned_words || qualityChecks.banned_words.length === 0) ? 'CLEAN' : `${qualityChecks.banned_words.length} found`}
+                </div>
+                <div className={`text-xs p-2 rounded-lg border ${qualityChecks.figure_verified === 'verified' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                  ⚠️ Figures: {qualityChecks.figure_verified === 'verified' ? 'VERIFIED' : qualityChecks.figure_verified === 'unverified' ? 'UNVERIFIED' : 'PENDING'}
+                </div>
+              </div>
+              {qualityChecks.banned_words && qualityChecks.banned_words.length > 0 && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2">
+                  <p className="text-xs font-bold text-rose-700 mb-1">🚫 Banned words found:</p>
+                  {qualityChecks.banned_words.map((w, i) => (
+                    <span key={i} className="text-xs bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded mr-1">{w}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button onClick={handleSaveDraft} disabled={loading} className="flex-1 text-sm py-2.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium disabled:opacity-50">
+                  {loading ? <RefreshCw size={14} className="animate-spin inline mr-1" /> : null} Save to Draft
+                </button>
+                <button onClick={handleApproveAndQueue} disabled={loading} className="flex-1 text-sm py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-50">
+                  {loading ? <RefreshCw size={14} className="animate-spin inline mr-1" /> : <Check size={14} className="inline mr-1" />} Approve & Queue
+                </button>
+              </div>
+              <button onClick={handleSendToDesigner} disabled={loading} className="w-full text-sm py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium disabled:opacity-50">
+                {loading ? <RefreshCw size={14} className="animate-spin inline mr-1" /> : <Palette size={14} className="inline mr-1" />} Send to Designer
+              </button>
+            </div>
+
+            <div className="flex justify-between">
+              <button onClick={() => setStep(5)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm">← Back</button>
+              <div />
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -767,7 +1076,7 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
             { id: 'hooks', label: 'Hook Library', icon: Zap },
           ].map(t => (
             <button key={t.id} onClick={() => setActiveTab(t.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${activeTab === t.id ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === t.id ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
               <t.icon size={14} />{t.label}
             </button>
           ))}
@@ -776,81 +1085,52 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
         {/* Generator Panel */}
         {activeTab === 'generator' && (
           <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Wand2 size={15} />Content Generator</h3>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Page">
-                  <select className="inp" value={page} onChange={e => setPage(e.target.value)}>
-                    <option value="china">China</option>
-                    <option value="bd">Bangladesh</option>
-                    <option value="instagram">Instagram</option>
-                    <option value="tiktok">TikTok</option>
-                  </select>
-                </Field>
-                <Field label="Language">
-                  <select className="inp" value={language} onChange={e => setLanguage(e.target.value)}>
-                    <option value="bangla">Bangla</option>
-                    <option value="english">English</option>
-                  </select>
-                </Field>
-                <Field label="Pillar">
-                  <select className="inp" value={pillar} onChange={e => setPillar(e.target.value)}>
-                    <option value="scholarship">Scholarship</option>
-                    <option value="trust">Trust</option>
-                    <option value="career">Career</option>
-                    <option value="urgency">Urgency</option>
-                    <option value="university">University</option>
-                    <option value="cost">Cost</option>
-                    <option value="success_story">Success Story</option>
-                    <option value="trending">Trending</option>
-                  </select>
-                </Field>
-                <Field label="Format">
-                  <select className="inp" value={format} onChange={e => setFormat(e.target.value)}>
-                    <option>Carousel</option><option>Reel</option><option>Single image</option><option>Story</option><option>Video</option><option>Live</option><option>Text</option>
-                  </select>
-                </Field>
-                <Field label="Tone">
-                  <select className="inp" value={tone} onChange={e => setTone(e.target.value)}>
-                    <option value="expert_consultant">Expert Consultant</option>
-                    <option value="empathetic_brother">Empathetic Brother</option>
-                    <option value="success_story">Success Story</option>
-                    <option value="peer_friend">Peer Friend</option>
-                  </select>
-                </Field>
-                <Field label="Topic"><input className="inp" value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g. CSCA-free, Korea visa" /></Field>
-              </div>
+            <div className="flex items-center gap-2 mb-4">
+              <Wand2 size={15} className="text-blue-600" />
+              <h3 className="text-sm font-semibold text-slate-700">Content Builder</h3>
+              <div className="flex-1" />
+              <QualityBadge score={qualityScore} />
+            </div>
 
-              {/* Selected KB items */}
-              {(selectedUniversity || selectedScholarship) && (
-                <div className="bg-blue-50 rounded-lg p-2 text-xs space-y-1">
-                  {selectedUniversity && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-blue-700">🏫 {selectedUniversity.name}</span>
-                      <button onClick={() => setSelectedUniversity(null)} className="text-blue-400 hover:text-blue-600"><X size={12} /></button>
-                    </div>
-                  )}
-                  {selectedScholarship && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-blue-700">💰 {selectedScholarship.name}</span>
-                      <button onClick={() => setSelectedScholarship(null)} className="text-blue-400 hover:text-blue-600"><X size={12} /></button>
-                    </div>
-                  )}
-                </div>
+            {/* Stepper */}
+            <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
+              {steps.map((s, i) => (
+                <button key={s.id} onClick={() => setStep(s.id)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition ${step === s.id ? 'bg-blue-600 text-white' : step > s.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
+                  <s.icon size={12} />
+                  <span className="hidden sm:inline">{i + 1}. {s.label}</span>
+                  <span className="sm:hidden">{i + 1}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Step Content */}
+            <div className="min-h-[200px]">{renderStepContent()}</div>
+
+            {/* Selected items chips */}
+            <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+              {selectedHook && (
+                <span className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 px-2 py-1 rounded-full border border-violet-200">
+                  <Zap size={10} /> Hook: {selectedHook.hook_text.slice(0, 30)}… <button onClick={() => { setSelectedHook(null); setHook(''); }} className="text-violet-400 hover:text-violet-600"><X size={10} /></button>
+                </span>
               )}
-
-              <button onClick={generate} disabled={loading} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm disabled:opacity-50">
-                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                {loading ? 'Generating...' : 'Generate Post'}
-              </button>
+              {selectedUniversity && (
+                <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full border border-blue-200">
+                  🏫 {selectedUniversity.name} <button onClick={() => setSelectedUniversity(null)} className="text-blue-400 hover:text-blue-600"><X size={10} /></button>
+                </span>
+              )}
+              {selectedScholarship && (
+                <span className="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full border border-emerald-200">
+                  💰 {selectedScholarship.name} <button onClick={() => setSelectedScholarship(null)} className="text-emerald-400 hover:text-emerald-600"><X size={10} /></button>
+                </span>
+              )}
             </div>
 
             {/* Research Intel Feed */}
-            <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="mt-4 pt-3 border-t border-slate-100">
               <h4 className="text-xs font-semibold text-slate-500 mb-2">Active Intelligence ({researchIntel.length})</h4>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {researchIntel.length === 0 ? (
-                  <p className="text-xs text-slate-400">No active intelligence. Add research findings to fuel content generation.</p>
+                  <p className="text-xs text-slate-400">No active intelligence. Add research findings to fuel content.</p>
                 ) : researchIntel.slice(0, 5).map(r => (
                   <div key={r.id} className={`p-2 rounded-lg border text-xs ${r.urgency === 'critical' ? 'bg-rose-50 border-rose-100' : r.urgency === 'high' ? 'bg-amber-50 border-amber-100' : 'bg-blue-50 border-blue-100'}`}>
                     <span className={`font-semibold ${r.urgency === 'critical' ? 'text-rose-700' : r.urgency === 'high' ? 'text-amber-700' : 'text-blue-700'}`}>
@@ -866,58 +1146,117 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
 
         {/* KB Panel */}
         {activeTab === 'kb' && (
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><BookOpen size={15} />Knowledge Base</h3>
-            <div className="flex gap-2 mb-3">
-              <input className="inp flex-1" value={kbSearch} onChange={e => setKbSearch(e.target.value)} placeholder="Search universities or scholarships..." />
-              <button onClick={searchKB} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm"><Search size={14} /></button>
+          <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
+            <div className="flex items-center gap-2 mb-1">
+              <BookOpen size={15} className="text-blue-600" />
+              <h3 className="text-sm font-semibold text-slate-700">Knowledge Base</h3>
             </div>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {kbUniversities.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 mb-1">Universities ({kbUniversities.length})</p>
-                  {kbUniversities.slice(0, 5).map(u => (
-                    <div key={u.id} onClick={() => setSelectedUniversity(u)} className={`p-2 rounded-lg border cursor-pointer text-xs ${selectedUniversity?.id === u.id ? 'border-blue-400 bg-blue-50' : 'border-slate-100 hover:bg-slate-50'}`}>
-                      <p className="font-semibold text-slate-700">{u.name} <span className="text-slate-400">({u.city}, {u.country})</span></p>
-                      <p className="text-slate-500">{u.programs} · {u.tuition}</p>
+
+            {/* Search & Filters */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <input className="inp col-span-2 md:col-span-1" value={kbSearch} onChange={e => setKbSearch(e.target.value)} placeholder="Search…" />
+              <input className="inp" value={kbCountry} onChange={e => setKbCountry(e.target.value)} placeholder="Country filter" />
+              <input className="inp" value={kbProgramType} onChange={e => setKbProgramType(e.target.value)} placeholder="Program type" />
+              <select className="inp" value={kbPartnerStatus} onChange={e => setKbPartnerStatus(e.target.value)}>
+                <option value="">All partners</option>
+                <option value="partner">Partner only</option>
+                <option value="non-partner">Non-partner</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={searchKB} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium flex items-center gap-1"><Search size={14} /> Search</button>
+              <button onClick={() => { setKbSearch(''); setKbCountry(''); setKbProgramType(''); setKbPartnerStatus(''); setKbUniversities([]); setKbScholarships([]); }} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm">Reset</button>
+            </div>
+
+            {/* Universities Grid */}
+            {kbUniversities.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-2">Universities ({kbUniversities.length})</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+                  {kbUniversities.map(u => (
+                    <div key={u.id} onClick={() => { setSelectedUniversity(u); setActiveTab('generator'); toast.success(`Selected ${u.name}`); }} className={`p-3 rounded-lg border cursor-pointer transition ${selectedUniversity?.id === u.id ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-100' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}>
+                      <div className="flex items-start justify-between mb-1">
+                        <p className="font-semibold text-slate-800 text-sm">{u.name}</p>
+                        <div className="flex gap-1">
+                          {(u.csca_free || u.csca_free === 'true') && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">CSCA-free</span>}
+                          {(u.partner || u.partner === 'true' || u.partner === 1) && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Partner</span>}
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">{u.city}, {u.country} · {u.programs}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{u.tuition}</p>
+                      {u.intakes && <p className="text-[10px] text-slate-400 mt-1">Intakes: {u.intakes}</p>}
                     </div>
                   ))}
                 </div>
-              )}
-              {kbScholarships.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 mb-1">Scholarships ({kbScholarships.length})</p>
-                  {kbScholarships.slice(0, 5).map(s => (
-                    <div key={s.id} onClick={() => setSelectedScholarship(s)} className={`p-2 rounded-lg border cursor-pointer text-xs ${selectedScholarship?.id === s.id ? 'border-blue-400 bg-blue-50' : 'border-slate-100 hover:bg-slate-50'}`}>
-                      <p className="font-semibold text-slate-700">{s.name}</p>
-                      <p className="text-slate-500">{s.coverage?.slice(0, 80)} · {s.deadline}</p>
+              </div>
+            )}
+
+            {/* Scholarships Grid */}
+            {kbScholarships.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-2">Scholarships ({kbScholarships.length})</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+                  {kbScholarships.map(s => (
+                    <div key={s.id} onClick={() => { setSelectedScholarship(s); setActiveTab('generator'); toast.success(`Selected ${s.name}`); }} className={`p-3 rounded-lg border cursor-pointer transition ${selectedScholarship?.id === s.id ? 'border-emerald-400 bg-emerald-50 ring-1 ring-emerald-100' : 'border-slate-200 hover:border-emerald-300 hover:bg-slate-50'}`}>
+                      <p className="font-semibold text-slate-800 text-sm">{s.name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{s.coverage?.slice(0, 100)}{s.coverage?.length > 100 ? '…' : ''}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        {s.deadline && <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-100">⏰ {s.deadline}</span>}
+                        {s.eligibility && <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-100">✅ {s.eligibility.slice(0, 40)}{s.eligibility.length > 40 ? '…' : ''}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
-              )}
-              {kbUniversities.length === 0 && kbScholarships.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-4">Search to find universities and scholarships from your Data Center.</p>
-              )}
-            </div>
+              </div>
+            )}
+
+            {kbUniversities.length === 0 && kbScholarships.length === 0 && (
+              <p className="text-xs text-slate-400 text-center py-6">Search with filters to find universities and scholarships from your Data Center.</p>
+            )}
           </div>
         )}
 
         {/* Hooks Panel */}
         {activeTab === 'hooks' && (
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Zap size={15} />Best Hooks for {page === 'china' ? 'China' : 'BD'}</h3>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {bestHooks.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">No hooks yet. Add tested hooks with performance data.</p>
-              ) : bestHooks.map(h => (
-                <div key={h.id} onClick={() => setTopic(h.hook_text)} className="p-2 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer text-xs">
-                  <p className="font-semibold text-slate-800">{h.hook_text}</p>
-                  <div className="flex items-center gap-2 mt-1 text-slate-400">
-                    <span>{h.hook_type}</span>
+          <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Zap size={15} className="text-blue-600" />
+              <h3 className="text-sm font-semibold text-slate-700">Hook Library</h3>
+              <span className="text-xs text-slate-400 ml-auto">{filteredHooks.length} hooks</span>
+            </div>
+
+            {/* Filters */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <input className="inp" placeholder="Hook type" value={hooksFilter.hook_type} onChange={e => setHooksFilter(f => ({ ...f, hook_type: e.target.value }))} />
+              <input className="inp" placeholder="Destination" value={hooksFilter.destination} onChange={e => setHooksFilter(f => ({ ...f, destination: e.target.value }))} />
+              <input className="inp" placeholder="Pillar" value={hooksFilter.pillar} onChange={e => setHooksFilter(f => ({ ...f, pillar: e.target.value }))} />
+              <select className="inp" value={hooksFilter.status} onChange={e => setHooksFilter(f => ({ ...f, status: e.target.value }))}>
+                <option value="">All statuses</option>
+                <option value="winner">🏆 Winner</option>
+                <option value="tested">🧪 Tested</option>
+                <option value="loser">❌ Loser</option>
+              </select>
+            </div>
+
+            {/* Hooks Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-96 overflow-y-auto">
+              {filteredHooks.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6 col-span-2">No hooks match your filters. Add tested hooks with performance data.</p>
+              ) : filteredHooks.map(h => (
+                <div key={h.id} onClick={() => { setSelectedHook(h); setHook(h.hook_text); setActiveTab('generator'); setStep(1); toast.success('Hook selected'); }} className={`p-3 rounded-lg border cursor-pointer transition ${selectedHook?.id === h.id ? 'border-violet-400 bg-violet-50 ring-1 ring-violet-100' : 'border-slate-200 hover:border-violet-300 hover:bg-slate-50'}`}>
+                  <div className="flex items-start justify-between mb-1">
+                    <p className="font-semibold text-slate-800 text-sm leading-snug">{h.hook_text}</p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${h.status === 'winner' ? 'bg-emerald-100 text-emerald-700' : h.status === 'tested' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>{h.status || 'tested'}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 mt-1">
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded">{h.hook_type || '—'}</span>
+                    <span>{h.destination || '—'}</span>
                     <span>·</span>
-                    <span>Conv: {h.conversion_rate ? (h.conversion_rate * 100).toFixed(1) + '%' : '0%'}</span>
+                    <span>Conv: <b className="text-slate-700">{h.conversion_rate ? (h.conversion_rate * 100).toFixed(1) + '%' : '0%'}</b></span>
                     <span>·</span>
-                    <span>{h.usage_count} uses</span>
+                    <span>Reach: <b className="text-slate-700">{h.avg_reach?.toLocaleString() || '—'}</b></span>
+                    <span>·</span>
+                    <span>{h.usage_count || 0} uses</span>
                   </div>
                 </div>
               ))}
@@ -926,19 +1265,18 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
         )}
       </div>
 
-      {/* Right Panel — Output */}
-      {generated ? (
+      {/* Right Panel — Always Live Preview */}
+      <div className="space-y-4">
+        {/* Quality Score Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">Generated Content</h3>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold px-2 py-1 rounded ${generated.quality_score >= 80 ? 'bg-emerald-100 text-emerald-700' : generated.quality_score >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
-                Quality: {generated.quality_score}/100
-              </span>
-            </div>
+            <h3 className="text-sm font-semibold text-slate-700">Live Preview & Quality Gate</h3>
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${qualityScore >= 80 ? 'bg-emerald-100 text-emerald-700' : qualityScore >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+              Quality: {qualityScore}/100
+            </span>
           </div>
 
-          {/* Quality Checks */}
+          {/* Quality checks mini */}
           <div className="grid grid-cols-2 gap-2 mb-3">
             <div className={`text-xs p-2 rounded-lg border ${qualityChecks.fact_check ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
               ✅ Fact Check: {qualityChecks.fact_check ? 'PASS' : 'FAIL'}
@@ -947,7 +1285,7 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
               ✅ Tone: {qualityChecks.tone_ok ? 'OK' : 'FAIL'}
             </div>
             <div className={`text-xs p-2 rounded-lg border ${(!qualityChecks.banned_words || qualityChecks.banned_words.length === 0) ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
-              ✅ Banned Words: {(!qualityChecks.banned_words || qualityChecks.banned_words.length === 0) ? 'CLEAN' : `${qualityChecks.banned_words.length} found`}
+              ✅ Banned: {(!qualityChecks.banned_words || qualityChecks.banned_words.length === 0) ? 'CLEAN' : `${qualityChecks.banned_words.length} found`}
             </div>
             <div className={`text-xs p-2 rounded-lg border ${qualityChecks.figure_verified === 'verified' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
               ⚠️ Figures: {qualityChecks.figure_verified === 'verified' ? 'VERIFIED' : qualityChecks.figure_verified === 'unverified' ? 'UNVERIFIED' : 'PENDING'}
@@ -963,68 +1301,132 @@ ${page === 'bd' ? '💬 Payment After Visa — subject to conditions' : ''}`;
             </div>
           )}
 
-          {/* Content */}
-          <div className="bg-slate-50 rounded-lg p-3 mb-3">
-            <p className="text-sm font-bold text-slate-800 mb-1">{generated.hook}</p>
-            <p className="text-xs text-slate-600 whitespace-pre-line">{generated.body}</p>
-            <p className="text-xs text-blue-500 mt-2">{generated.hashtags}</p>
+          {/* Platform Warnings */}
+          {platformWarnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3">
+              <p className="text-xs font-bold text-amber-700 mb-1">⚠️ Platform Warnings:</p>
+              <ul className="space-y-0.5">
+                {platformWarnings.map((w, i) => (
+                  <li key={i} className="text-xs text-amber-700">• {w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Selected chips */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {selectedHook && <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">Hook selected</span>}
+            {selectedUniversity && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">🏫 {selectedUniversity.name}</span>}
+            {selectedScholarship && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">💰 {selectedScholarship.name}</span>}
           </div>
 
-          {/* Platform Preview */}
+          {/* Platform Preview Tabs */}
           <div className="flex gap-1 mb-2">
             {[{ id: 'facebook', label: 'Facebook' }, { id: 'instagram', label: 'Instagram' }, { id: 'tiktok', label: 'TikTok' }].map(t => (
-              <button key={t.id} onClick={() => setPreviewTab(t.id)} className={`text-xs px-2.5 py-1 rounded-lg ${previewTab === t.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{t.label}</button>
+              <button key={t.id} onClick={() => setPreviewTab(t.id)} className={`text-xs px-2.5 py-1 rounded-lg font-medium ${previewTab === t.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
-          <div className="border border-slate-200 rounded-lg p-3 mb-3 bg-slate-50">
+
+          <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
             {previewTab === 'facebook' && (
-              <div className="bg-white rounded-lg p-3">
+              <div className="bg-white p-3">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">E</div>
-                  <div><p className="text-xs font-semibold">EduExpress International</p><p className="text-[10px] text-slate-400">Sponsored</p></div>
+                  <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">E</div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-800">EduExpress International</p>
+                    <p className="text-[10px] text-slate-400">Sponsored · Just now</p>
+                  </div>
                 </div>
-                <p className="text-sm font-bold mb-1">{generated.hook}</p>
-                <p className="text-xs text-slate-600">{generated.body.slice(0, 200)}...</p>
-                <div className="mt-2 bg-slate-100 rounded-lg h-32 flex items-center justify-center text-xs text-slate-400">[Asset]</div>
+                <p className="text-sm font-bold text-slate-800 mb-1">{hook || <span className="text-slate-300 font-normal">Your hook will appear here…</span>}</p>
+                <p className="text-xs text-slate-600 whitespace-pre-line">{body || <span className="text-slate-300">Your body copy will appear here…</span>}</p>
+                {cta && <p className="text-xs font-semibold text-blue-600 mt-2">{cta}</p>}
+                {hashtags && <p className="text-xs text-blue-500 mt-1">{hashtags}</p>}
+                <div className="mt-3 bg-slate-100 rounded-lg h-40 flex items-center justify-center text-xs text-slate-400 border border-slate-200">
+                  <div className="text-center">
+                    <Layout size={20} className="mx-auto mb-1 text-slate-300" />
+                    <span>[{format} Asset]</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                  <span className="flex items-center gap-1"><Heart size={12} /> Like</span>
+                  <span className="flex items-center gap-1"><MessageCircle size={12} /> Comment</span>
+                  <span className="flex items-center gap-1"><Share2 size={12} /> Share</span>
+                </div>
               </div>
             )}
             {previewTab === 'instagram' && (
-              <div className="bg-white rounded-lg p-3">
+              <div className="bg-white p-3">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-6 h-6 rounded-full bg-pink-500 flex items-center justify-center text-white text-[10px] font-bold">E</div>
-                  <p className="text-xs font-semibold">eduexpressint</p>
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-bold">E</div>
+                  <p className="text-xs font-semibold text-slate-800">eduexpressint</p>
+                  <span className="text-[10px] text-slate-400 ml-auto">{format}</span>
                 </div>
-                <div className="bg-slate-100 rounded-lg h-48 flex items-center justify-center text-xs text-slate-400">[Reel 9:16]</div>
-                <p className="text-xs font-bold mt-2">{generated.hook}</p>
-                <p className="text-xs text-slate-600">{generated.body.slice(0, 100)}...</p>
+                <div className="bg-slate-100 rounded-lg h-56 flex items-center justify-center text-xs text-slate-400 border border-slate-200">
+                  <div className="text-center">
+                    <Layout size={20} className="mx-auto mb-1 text-slate-300" />
+                    <span>[{format} 9:16]</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-xs text-slate-600">
+                  <Heart size={14} />
+                  <MessageCircle size={14} />
+                  <Send size={14} />
+                  <span className="ml-auto text-[10px] text-slate-400">1/5</span>
+                </div>
+                <p className="text-xs font-bold text-slate-800 mt-2">{hook || <span className="text-slate-300 font-normal">Your hook…</span>}</p>
+                <p className="text-xs text-slate-600 whitespace-pre-line mt-0.5">{body || <span className="text-slate-300">Your body copy…</span>}</p>
+                {cta && <p className="text-xs font-semibold text-blue-600 mt-1">{cta}</p>}
+                {hashtags && <p className="text-xs text-blue-500 mt-1">{hashtags}</p>}
               </div>
             )}
             {previewTab === 'tiktok' && (
-              <div className="bg-black rounded-lg p-3 text-white">
-                <div className="bg-slate-700 rounded-lg h-56 flex items-center justify-center text-xs text-slate-400 mb-2">[TikTok 9:16]</div>
-                <p className="text-sm font-bold">{generated.hook}</p>
-                <p className="text-xs text-slate-300">{generated.body.slice(0, 80)}...</p>
+              <div className="bg-black p-3 text-white">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-7 h-7 rounded-full bg-white text-black flex items-center justify-center text-[10px] font-bold">E</div>
+                  <p className="text-xs font-semibold">eduexpressint</p>
+                  <span className="text-[10px] text-slate-400 ml-auto">{format}</span>
+                </div>
+                <div className="bg-slate-800 rounded-lg h-64 flex items-center justify-center text-xs text-slate-400 border border-slate-700">
+                  <div className="text-center">
+                    <Layout size={20} className="mx-auto mb-1 text-slate-500" />
+                    <span>[TikTok 9:16]</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-xs text-slate-300">
+                  <Heart size={14} />
+                  <MessageCircle size={14} />
+                  <Send size={14} />
+                </div>
+                <p className="text-sm font-bold mt-2">{hook || <span className="text-slate-500 font-normal">Your hook…</span>}</p>
+                <p className="text-xs text-slate-300 whitespace-pre-line mt-0.5">{body || <span className="text-slate-500">Your body copy…</span>}</p>
+                {cta && <p className="text-xs font-semibold text-emerald-400 mt-1">{cta}</p>}
+                {hashtags && <p className="text-xs text-blue-400 mt-1">{hashtags}</p>}
               </div>
             )}
           </div>
 
           {/* UTM */}
-          <div className="text-xs text-slate-500 mb-3">
-            <p>🔗 Short Link: <span className="text-blue-600 font-mono">eduexpress.link/{generated.utm_campaign}</span></p>
+          <div className="text-xs text-slate-500 mt-2">
+            <p>🔗 Campaign: <span className="text-blue-600 font-mono">{pillar}_{page}_{new Date().toISOString().slice(0, 10)}</span></p>
           </div>
+        </div>
 
-          <div className="flex gap-2">
-            <button onClick={saveToDraft} className="flex-1 text-sm py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-medium">Save to Draft</button>
-            <button onClick={sendToDesigner} className="flex-1 text-sm py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium">🎨 Send to Designer</button>
+        {/* Pipeline Legend */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <h4 className="text-xs font-semibold text-slate-700 mb-2">Pipeline Legend</h4>
+          <div className="flex flex-wrap gap-1.5">
+            {STATUS_PIPELINE.map((s, i) => (
+              <div key={s} className="flex items-center gap-1">
+                <Pill value={s} />
+                {i < STATUS_PIPELINE.length - 1 && <span className="text-slate-300 text-xs">→</span>}
+              </div>
+            ))}
           </div>
+          <p className="text-[10px] text-slate-400 mt-2">
+            Save = Drafted → Review → Approve & Queue = Approved + Publishing → Send to Designer = Asset Pending → Asset Ready → Scheduled → Published
+          </p>
         </div>
-      ) : (
-        <div className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-8 flex flex-col items-center justify-center text-center">
-          <Sparkles size={32} className="text-slate-300 mb-2" />
-          <p className="text-sm font-semibold text-slate-500">Generate a Post</p>
-          <p className="text-xs text-slate-400 mt-1">Select page, pillar, format, and click Generate. Or search KB to include real university data.</p>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

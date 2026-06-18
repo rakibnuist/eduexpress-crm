@@ -6210,9 +6210,11 @@ app.get('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
 
 // n8n pulls what to publish: approved/asset_ready posts due today or earlier.
 app.get('/api/marketing/posts/due', (req, res) => requireMarketing(req, res, () => {
-  res.json(db.prepare(
-    `SELECT * FROM content_posts WHERE status IN ('approved','asset_ready') AND (post_date IS NULL OR date(post_date) <= date('now')) ORDER BY post_date, slot_time`
-  ).all());
+  const limit = parseInt(req.query.limit) || 20;
+  const rows = db.prepare(
+    `SELECT * FROM content_posts WHERE status IN ('approved','asset_ready') ORDER BY created_at DESC LIMIT ?`
+  ).all(limit);
+  res.json(rows);
 }));
 
 app.post('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
