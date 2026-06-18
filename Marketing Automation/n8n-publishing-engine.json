@@ -1,0 +1,387 @@
+{
+  "name": "EduExpress — Publishing Engine v2",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "eduexpress-publish",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [260, 340],
+      "webhookId": "eduexpress-publish"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body || $input.first().json;\n\n// Validate required fields\nconst required = ['postId', 'page', 'platform', 'body'];\nconst missing = required.filter(k => !input[k]);\nif (missing.length > 0) {\n  return [{\n    json: {\n      success: false,\n      error: `Missing required fields: ${missing.join(', ')}`,\n      postId: input.postId\n    }\n  }];\n}\n\n// Page ID mapping (configured via env or credentials)\nconst pageMap = {\n  'china': $env.FB_PAGE_CHINA_ID || '',\n  'bd': $env.FB_PAGE_BD_ID || '',\n  'BD': $env.FB_PAGE_BD_ID || '',\n  'main': $env.FB_PAGE_BD_ID || ''\n};\n\nconst pageId = pageMap[input.page];\nif (!pageId && input.platform === 'facebook') {\n  return [{\n    json: {\n      success: false,\n      error: `Unknown page: ${input.page}. Configure FB_PAGE_CHINA_ID or FB_PAGE_BD_ID env vars.`,\n      postId: input.postId\n    }\n  }];\n}\n\n// Build the publish payload\nconst payload = {\n  postId: input.postId,\n  pageId: pageId,\n  page: input.page,\n  platform: input.platform,\n  body: input.body,\n  assetUrl: input.assetUrl || null,\n  hashtags: input.hashtags || '',\n  cta: input.cta || '',\n  crmBase: input.crmBase || $env.CRM_BASE || 'https://crm.eduexpressint.com',\n  crmKey: input.crmKey || $env.CRM_KEY || 'eduexpress-n8n-2024',\n  scheduledAt: input.scheduledAt || new Date().toISOString()\n};\n\nreturn [{ json: payload }];"
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-error",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-error",
+      "name": "Has Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "platform-facebook",
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "facebook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "platform-facebook",
+      "name": "Facebook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v19.0/' + $json.pageId + '/feed' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $json.body + '\\n\\n' + $json.hashtags + '\\n\\n' + ($json.cta ? $json.cta : '') }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $credentials.facebookPageAccessToken || $env.FB_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "fb-text-post",
+      "name": "FB Text Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v19.0/' + $json.pageId + '/photos' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.assetUrl }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.body + '\\n\\n' + $json.hashtags + '\\n\\n' + ($json.cta ? $json.cta : '') }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $credentials.facebookPageAccessToken || $env.FB_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "fb-photo-post",
+      "name": "FB Photo Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 540]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-asset",
+              "leftValue": "={{ $json.assetUrl }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-asset",
+      "name": "Has Asset?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [860, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n// Build publish result from FB response\nconst fbResponse = $input.first().json;\nconst postId = fbResponse.id || fbResponse.post_id;\nconst success = !!postId;\nreturn [{\n  json: {\n    success: success,\n    postId: $json.postId,\n    platformPostId: postId,\n    publishUrl: postId ? `https://facebook.com/${postId}` : null,\n    platform: $json.platform,\n    page: $json.page,\n    error: success ? null : (fbResponse.error?.message || 'Unknown error'),\n    rawResponse: fbResponse\n  }\n}];"
+      },
+      "id": "build-result",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.crmBase + '/api/marketing/publish/webhook' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.crmKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "postId",
+              "value": "={{ $json.postId }}"
+            },
+            {
+              "name": "success",
+              "value": "={{ $json.success }}"
+            },
+            {
+              "name": "platformPostId",
+              "value": "={{ $json.platformPostId }}"
+            },
+            {
+              "name": "publishUrl",
+              "value": "={{ $json.publishUrl }}"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.error }}"
+            },
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "page",
+              "value": "={{ $json.page }}"
+            }
+          ]
+        }
+      },
+      "id": "callback-crm",
+      "name": "Callback CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1260, 340]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": $json.success,\n  \"postId\": $json.postId,\n  \"platformPostId\": $json.platformPostId,\n  \"publishUrl\": $json.publishUrl,\n  \"error\": $json.error\n}",
+        "options": {
+          "statusCode": 200
+        }
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1460, 340]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"postId\": $json.postId,\n  \"error\": $json.error || 'Validation failed'\n}",
+        "options": {
+          "statusCode": 400
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 140]
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Dhaka",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["eduexpress", "publishing", "meta"],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Has Error?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Facebook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Error?": {
+      "main": [
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Facebook?": {
+      "main": [
+        [
+          {
+            "node": "Has Asset?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Has Asset?": {
+      "main": [
+        [
+          {
+            "node": "FB Photo Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FB Text Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Text Post": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Photo Post": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Callback CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback CRM": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

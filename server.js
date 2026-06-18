@@ -1495,6 +1495,232 @@ function setupSchema() { db.exec(`
     cooldown_until TEXT, notes TEXT
   );
 
+  -- ── SOCIAL MEDIA ENGINE v2.0 ────────────────────────────
+  CREATE TABLE IF NOT EXISTS research_intelligence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL,
+    category TEXT CHECK(category IN ('competitor_move','market_gap','viral_signal','policy_change','psych_insight','offer_alert','trending_topic')),
+    urgency TEXT CHECK(urgency IN ('critical','high','normal','low')),
+    competitor TEXT,
+    source_url TEXT,
+    source_type TEXT CHECK(source_type IN ('meta_ad_library','fb_scrape','competitor_page','news','gov_notice','trend_platform','internal')),
+    insight_summary TEXT,
+    recommended_angle TEXT,
+    evidence TEXT,
+    status TEXT CHECK(status IN ('new','reviewed','used','archived')) DEFAULT 'new',
+    used_in_post_id INTEGER,
+    research_date TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_research_urgency ON research_intelligence(urgency, status);
+  CREATE INDEX IF NOT EXISTS idx_research_competitor ON research_intelligence(competitor, research_date);
+
+  CREATE TABLE IF NOT EXISTS viral_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL,
+    platform TEXT CHECK(platform IN ('facebook','instagram','tiktok','youtube','twitter')),
+    hashtag TEXT,
+    relevance_score INTEGER CHECK(relevance_score BETWEEN 0 AND 100),
+    engagement_velocity REAL,
+    reach_estimate INTEGER,
+    sentiment TEXT CHECK(sentiment IN ('positive','neutral','negative','mixed')),
+    why_viral TEXT,
+    recommended_hook TEXT,
+    recommended_cta TEXT,
+    recommended_pillar TEXT,
+    status TEXT CHECK(status IN ('new','approved','used','declined')) DEFAULT 'new',
+    used_in_post_id INTEGER,
+    discovered_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_viral_relevance ON viral_topics(relevance_score, status);
+
+  CREATE TABLE IF NOT EXISTS psychology_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    segment TEXT NOT NULL,
+    pain_points TEXT,
+    aspirations TEXT,
+    fears TEXT,
+    trusted_sources TEXT,
+    decision_factors TEXT,
+    content_preferences TEXT,
+    peak_hours TEXT,
+    language_preference TEXT CHECK(language_preference IN ('bangla','english','banglish')),
+    voice_tone TEXT CHECK(voice_tone IN ('empathetic_brother','expert_consultant','success_story','peer_friend')),
+    primary_platform TEXT,
+    secondary_platform TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS content_scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    script_name TEXT NOT NULL,
+    category TEXT CHECK(category IN ('hook','video_script','carousel_copy','story','ad_copy','dm_script','reel_script','tiktok_script')),
+    destination TEXT,
+    pillar TEXT,
+    format TEXT CHECK(format IN ('Reel','Carousel','Single image','Story','TikTok','Live')),
+    hook TEXT,
+    body TEXT,
+    cta TEXT,
+    duration_seconds INTEGER,
+    shot_list TEXT,
+    on_screen_text TEXT,
+    psychology_target TEXT,
+    avg_score REAL,
+    usage_count INTEGER DEFAULT 0,
+    status TEXT CHECK(status IN ('draft','approved','archived','winner')) DEFAULT 'draft',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_scripts_status ON content_scripts(status, category);
+
+  CREATE TABLE IF NOT EXISTS content_hooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hook_text TEXT NOT NULL,
+    hook_type TEXT CHECK(hook_type IN ('pain_point','curiosity','number','myth_bust','urgency','story','challenge','social_proof','fomo','trust')),
+    destination TEXT,
+    pillar TEXT,
+    format TEXT,
+    psychology_target TEXT,
+    usage_count INTEGER DEFAULT 0,
+    avg_reach INTEGER,
+    avg_engagement INTEGER,
+    conversion_rate REAL,
+    status TEXT CHECK(status IN ('new','winner','tested','declined')) DEFAULT 'new',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_hooks_status ON content_hooks(status, hook_type);
+
+  CREATE TABLE IF NOT EXISTS ab_tests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_name TEXT NOT NULL,
+    variable TEXT CHECK(variable IN ('hook','body','cta','image','time_slot','hashtag_set','platform')),
+    variant_a TEXT,
+    variant_b TEXT,
+    variant_c TEXT,
+    page TEXT CHECK(page IN ('china','bd','instagram','tiktok')),
+    start_date TEXT,
+    end_date TEXT,
+    status TEXT CHECK(status IN ('planned','running','completed','cancelled')) DEFAULT 'planned',
+    a_reach INTEGER, a_engagement INTEGER, a_leads INTEGER,
+    b_reach INTEGER, b_engagement INTEGER, b_leads INTEGER,
+    c_reach INTEGER, c_engagement INTEGER, c_leads INTEGER,
+    winner TEXT CHECK(winner IN ('a','b','c','inconclusive')),
+    winner_confidence INTEGER,
+    insights TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS scale_up_recommendations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recommendation_type TEXT CHECK(recommendation_type IN ('content_pillar','platform','hook_style','time_slot','campaign','budget','destination','format','audience_segment')),
+    title TEXT NOT NULL,
+    description TEXT,
+    expected_impact TEXT CHECK(expected_impact IN ('high','medium','low')),
+    expected_lead_lift REAL,
+    confidence_score INTEGER,
+    based_on_data TEXT,
+    action_items TEXT,
+    status TEXT CHECK(status IN ('pending','approved','implemented','rejected','testing')) DEFAULT 'pending',
+    approved_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS publishing_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    page TEXT,
+    platform TEXT,
+    scheduled_at TEXT,
+    published_at TEXT,
+    status TEXT CHECK(status IN ('queued','published','failed','retry')) DEFAULT 'queued',
+    error_message TEXT,
+    platform_post_id TEXT,
+    platform_post_url TEXT,
+    reach INTEGER,
+    engagement INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_publishing_status ON publishing_queue(status, scheduled_at);
+
+  CREATE TABLE IF NOT EXISTS creative_guidelines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guideline_name TEXT NOT NULL,
+    category TEXT CHECK(category IN ('color','typography','imagery','tone','format_spec','brand_voice','asset_size','video_spec')),
+    platform TEXT CHECK(platform IN ('facebook','instagram','tiktok','all')),
+    specification TEXT,
+    examples TEXT,
+    do_s TEXT,
+    dont_s TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS lead_attribution (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER,
+    first_touch_at TEXT DEFAULT (datetime('now')),
+    first_touch_source TEXT,
+    first_touch_campaign TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    utm_content TEXT,
+    utm_term TEXT,
+    meta_campaign_id TEXT,
+    meta_adset_id TEXT,
+    meta_ad_id TEXT,
+    meta_form_id TEXT,
+    meta_is_organic INTEGER DEFAULT 0,
+    content_post_id INTEGER,
+    enrollment_value REAL,
+    enrolled_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_attr_lead ON lead_attribution(lead_id);
+  CREATE INDEX IF NOT EXISTS idx_attr_post ON lead_attribution(content_post_id);
+
+  CREATE TABLE IF NOT EXISTS campaign_spend (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id TEXT,
+    campaign_name TEXT,
+    date TEXT,
+    spend REAL,
+    channel TEXT,
+    platform TEXT,
+    destination TEXT,
+    impressions INTEGER,
+    clicks INTEGER,
+    leads INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_campaign_spend_date ON campaign_spend(date, campaign_id);
+
+  CREATE TABLE IF NOT EXISTS designer_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    designer_id TEXT,
+    brief TEXT,
+    priority TEXT CHECK(priority IN ('urgent','normal','low')) DEFAULT 'normal',
+    deadline TEXT,
+    status TEXT CHECK(status IN ('assigned','in_progress','review','completed','rejected')) DEFAULT 'assigned',
+    draft_asset_url TEXT,
+    final_asset_url TEXT,
+    feedback TEXT,
+    assigned_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_designer_status ON designer_queue(status, designer_id);
+
+  CREATE TABLE IF NOT EXISTS offer_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT,
+    source_type TEXT CHECK(source_type IN ('government','university','competitor','internal','news','drive')),
+    description TEXT,
+    drive_folder_url TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+
   -- ── AUTOMATION HUB ──────────────────────────────────────
   CREATE TABLE IF NOT EXISTS automation_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1641,6 +1867,36 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN assigned_employee_id INTEGER`,
     `ALTER TABLE income ADD COLUMN employee_id INTEGER`,
     `ALTER TABLE expenses ADD COLUMN employee_id INTEGER`,
+    // ── Social Media Engine v2.0 migrations ──
+    `ALTER TABLE content_posts ADD COLUMN quality_score INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN quality_checks TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN asset_type TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN asset_uploaded_by TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN asset_uploaded_at TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN utm_source TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN utm_medium TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN utm_campaign TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN utm_content TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN short_link TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN redraft_count INTEGER DEFAULT 0`,
+    `ALTER TABLE content_posts ADD COLUMN research_intel_id INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN shares INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN comments INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN saves INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN video_views INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN leads INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN published_at TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN published_by TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN language TEXT DEFAULT 'bangla'`,
+    // ── Publishing Queue migrations ──
+    `ALTER TABLE publishing_queue ADD COLUMN page TEXT`,
+    `ALTER TABLE publishing_queue ADD COLUMN platform_post_id TEXT`,
+    `ALTER TABLE publishing_queue ADD COLUMN platform_post_url TEXT`,
+    `ALTER TABLE publishing_queue ADD COLUMN error_message TEXT`,
+    `ALTER TABLE publishing_queue ADD COLUMN reach INTEGER`,
+    `ALTER TABLE publishing_queue ADD COLUMN engagement INTEGER`,
+    `ALTER TABLE publishing_queue ADD COLUMN created_at TEXT`,
+    `UPDATE publishing_queue SET created_at = datetime('now') WHERE created_at IS NULL`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -5955,7 +6211,7 @@ app.get('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
 // n8n pulls what to publish: approved/asset_ready posts due today or earlier.
 app.get('/api/marketing/posts/due', (req, res) => requireMarketing(req, res, () => {
   res.json(db.prepare(
-    `SELECT * FROM content_posts WHERE status IN ('approved','asset_ready') AND date(post_date) <= date('now') ORDER BY post_date, slot_time`
+    `SELECT * FROM content_posts WHERE status IN ('approved','asset_ready') AND (post_date IS NULL OR date(post_date) <= date('now')) ORDER BY post_date, slot_time`
   ).all());
 }));
 
@@ -6063,6 +6319,446 @@ app.put('/api/marketing/brain/:id', (req, res) => requireMarketing(req, res, () 
 app.delete('/api/marketing/brain/:id', (req, res) => requireMarketing(req, res, () => {
   db.prepare(`DELETE FROM brain_api_pool WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
+}));
+
+// ── Social Media Engine v2.0 — New Tables ──
+marketingCrud('research', 'research_intelligence', ['topic','category','urgency','competitor','source_url','source_type','insight_summary','recommended_angle','evidence','status','used_in_post_id','research_date']);
+marketingCrud('viral-topics', 'viral_topics', ['topic','platform','hashtag','relevance_score','engagement_velocity','reach_estimate','sentiment','why_viral','recommended_hook','recommended_cta','recommended_pillar','status','used_in_post_id']);
+marketingCrud('psychology', 'psychology_profiles', ['segment','pain_points','aspirations','fears','trusted_sources','decision_factors','content_preferences','peak_hours','language_preference','voice_tone','primary_platform','secondary_platform']);
+marketingCrud('scripts', 'content_scripts', ['script_name','category','destination','pillar','format','hook','body','cta','duration_seconds','shot_list','on_screen_text','psychology_target','avg_score','usage_count','status']);
+marketingCrud('hooks', 'content_hooks', ['hook_text','hook_type','destination','pillar','format','psychology_target','usage_count','avg_reach','avg_engagement','conversion_rate','status']);
+marketingCrud('ab-tests', 'ab_tests', ['test_name','variable','variant_a','variant_b','variant_c','page','start_date','end_date','status','a_reach','a_engagement','a_leads','b_reach','b_engagement','b_leads','c_reach','c_engagement','c_leads','winner','winner_confidence','insights']);
+marketingCrud('scale-up', 'scale_up_recommendations', ['recommendation_type','title','description','expected_impact','expected_lead_lift','confidence_score','based_on_data','action_items','status','approved_by']);
+marketingCrud('publishing-queue', 'publishing_queue', ['post_id','page','platform','scheduled_at','published_at','status','error_message','platform_post_id','platform_post_url','reach','engagement']);
+marketingCrud('creative-guidelines', 'creative_guidelines', ['guideline_name','category','platform','specification','examples','do_s','dont_s']);
+marketingCrud('offer-sources', 'offer_sources', ['name','url','source_type','description','drive_folder_url','is_active']);
+
+// ── Designer Queue ──
+app.get('/api/marketing/designer-queue', (req, res) => requireMarketing(req, res, () => {
+  const { status, designer_id } = req.query;
+  const where = [], params = [];
+  if (status) { where.push('status=?'); params.push(status); }
+  if (designer_id) { where.push('designer_id=?'); params.push(designer_id); }
+  const sql = `SELECT * FROM designer_queue ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
+  res.json(db.prepare(sql).all(...params));
+}));
+app.post('/api/marketing/designer-queue', (req, res) => requireMarketing(req, res, () => {
+  const cols = ['post_id','designer_id','brief','priority','deadline','status','draft_asset_url','final_asset_url','feedback'];
+  const data = pickFields(req.body, cols);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  const info = db.prepare(`INSERT INTO designer_queue (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map(k => data[k]));
+  res.json(db.prepare(`SELECT * FROM designer_queue WHERE id=?`).get(info.lastInsertRowid));
+}));
+app.put('/api/marketing/designer-queue/:id', (req, res) => requireMarketing(req, res, () => {
+  const cols = ['post_id','designer_id','brief','priority','deadline','status','draft_asset_url','final_asset_url','feedback'];
+  const data = pickFields(req.body, cols);
+  const keys = Object.keys(data);
+  if (!keys.length) return res.status(400).json({ error: 'no valid fields' });
+  db.prepare(`UPDATE designer_queue SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`).run(...keys.map(k => data[k]), req.params.id);
+  res.json(db.prepare(`SELECT * FROM designer_queue WHERE id=?`).get(req.params.id));
+}));
+app.delete('/api/marketing/designer-queue/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM designer_queue WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+}));
+
+// ── Quality Score ──
+app.get('/api/marketing/posts/:id/quality', (req, res) => requireMarketing(req, res, () => {
+  const post = db.prepare(`SELECT id, quality_score, quality_checks FROM content_posts WHERE id=?`).get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'not found' });
+  res.json(post);
+}));
+app.put('/api/marketing/posts/:id/quality', (req, res) => requireMarketing(req, res, () => {
+  const { quality_score, quality_checks } = req.body || {};
+  db.prepare(`UPDATE content_posts SET quality_score=?, quality_checks=?, updated_at=datetime('now') WHERE id=?`)
+    .run(quality_score ?? null, quality_checks ?? null, req.params.id);
+  res.json(db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(req.params.id));
+}));
+
+// ── Analytics ──
+app.get('/api/marketing/analytics/overview', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const total = db.prepare(`SELECT COUNT(*) as c FROM content_posts`).get().c;
+  const published = db.prepare(`SELECT COUNT(*) as c FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days')`).get().c;
+  const drafted = db.prepare(`SELECT COUNT(*) as c FROM content_posts WHERE status='drafted'`).get().c;
+  const avgReach = db.prepare(`SELECT AVG(reach) as avg FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days')`).get().avg || 0;
+  const totalLeads = db.prepare(`SELECT SUM(leads) as s FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days')`).get().s || 0;
+  res.json({ total, published, drafted, avgReach: Math.round(avgReach), totalLeads });
+}));
+
+app.get('/api/marketing/analytics/funnel', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const reach = db.prepare(`SELECT SUM(reach) as s FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days')`).get().s || 0;
+  const leads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE created_at >= date('now', '-${days} days')`).get().c || 0;
+  const files = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE application_stage IS NOT NULL AND created_at >= date('now', '-${days} days')`).get().c || 0;
+  const enrolled = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE lead_status='enrolled' AND created_at >= date('now', '-${days} days')`).get().c || 0;
+  res.json({ reach, leads, files, enrolled, conversion_leads: reach ? (leads/reach*100).toFixed(1) : 0, conversion_files: leads ? (files/leads*100).toFixed(1) : 0, conversion_enrolled: files ? (enrolled/files*100).toFixed(1) : 0 });
+}));
+
+app.get('/api/marketing/analytics/pillars', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`SELECT pillar, COUNT(*) as posts, AVG(reach) as avg_reach, AVG(engagement) as avg_engagement, SUM(leads) as total_leads FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days') GROUP BY pillar`).all();
+  res.json(rows);
+}));
+
+app.get('/api/marketing/analytics/pages', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`SELECT page, COUNT(*) as posts, AVG(reach) as avg_reach, AVG(engagement) as avg_engagement, SUM(leads) as total_leads FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days') GROUP BY page`).all();
+  res.json(rows);
+}));
+
+app.get('/api/marketing/analytics/consistency', (req, res) => requireMarketing(req, res, () => {
+  // Count published posts per week vs target (7 per page = 28/week total, adjusted for IG=BD, TikTok=3)
+  // Target: China 7, BD 7, TikTok 3 = 17 distinct posts/week (Instagram mirrors BD)
+  const targetPerWeek = 17;
+  const weeks = db.prepare(`SELECT week, COUNT(*) as c FROM content_posts WHERE status='published' GROUP BY week ORDER BY week DESC LIMIT 12`).all();
+  const scores = weeks.map(w => ({ week: w.week, published: w.c, target: targetPerWeek, score: Math.round((w.c / targetPerWeek) * 100) }));
+  res.json(scores);
+}));
+
+app.get('/api/marketing/analytics/attribution', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`
+    SELECT cp.page, cp.pillar, cp.hook, cp.id as post_id, COUNT(la.lead_id) as lead_count, SUM(la.enrollment_value) as revenue
+    FROM content_posts cp
+    LEFT JOIN lead_attribution la ON cp.id = la.content_post_id
+    WHERE cp.status='published' AND cp.created_at >= date('now', '-${days} days')
+    GROUP BY cp.id
+    ORDER BY lead_count DESC
+    LIMIT 50
+  `).all();
+  res.json(rows);
+}));
+
+app.get('/api/marketing/analytics/hook-performance', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`
+    SELECT hook, COUNT(*) as uses, AVG(reach) as avg_reach, AVG(engagement) as avg_engagement, SUM(leads) as total_leads
+    FROM content_posts
+    WHERE status='published' AND hook IS NOT NULL AND created_at >= date('now', '-${days} days')
+    GROUP BY hook
+    ORDER BY total_leads DESC
+    LIMIT 20
+  `).all();
+  res.json(rows);
+}));
+
+app.get('/api/marketing/analytics/scale-up-signals', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const pillars = db.prepare(`SELECT pillar, AVG(engagement) as avg_engagement FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days') GROUP BY pillar ORDER BY avg_engagement DESC`).all();
+  const pages = db.prepare(`SELECT page, AVG(engagement) as avg_engagement FROM content_posts WHERE status='published' AND created_at >= date('now', '-${days} days') GROUP BY page ORDER BY avg_engagement DESC`).all();
+  const topHooks = db.prepare(`SELECT hook, AVG(reach) as avg_reach FROM content_posts WHERE status='published' AND hook IS NOT NULL AND created_at >= date('now', '-${days} days') GROUP BY hook ORDER BY avg_reach DESC LIMIT 10`).all();
+  res.json({ pillars, pages, topHooks });
+}));
+
+// ── Research Engine Analytics ──
+app.get('/api/marketing/research/competitor-summary', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`
+    SELECT competitor, COUNT(*) as findings, 
+      SUM(CASE WHEN urgency='critical' THEN 1 ELSE 0 END) as critical_count,
+      SUM(CASE WHEN urgency='high' THEN 1 ELSE 0 END) as high_count,
+      MAX(research_date) as last_seen
+    FROM research_intelligence
+    WHERE research_date >= date('now', '-${days} days')
+    GROUP BY competitor
+    ORDER BY findings DESC
+  `).all();
+  res.json(rows);
+}));
+
+app.get('/api/marketing/research/feed', (req, res) => requireMarketing(req, res, () => {
+  const limit = parseInt(req.query.limit) || 50;
+  const rows = db.prepare(`
+    SELECT * FROM research_intelligence
+    ORDER BY 
+      CASE urgency
+        WHEN 'critical' THEN 1
+        WHEN 'high' THEN 2
+        WHEN 'normal' THEN 3
+        WHEN 'low' THEN 4
+      END,
+      research_date DESC
+    LIMIT ?
+  `).all(limit);
+  res.json(rows);
+}));
+
+app.get('/api/marketing/research/gap-analysis', (req, res) => requireMarketing(req, res, () => {
+  // What competitors post about that we don't
+  const competitorTopics = db.prepare(`
+    SELECT DISTINCT topic, competitor, category, recommended_angle
+    FROM research_intelligence
+    WHERE category = 'competitor_move' AND status != 'archived'
+    ORDER BY research_date DESC
+    LIMIT 100
+  `).all();
+  const ourPillars = db.prepare(`SELECT DISTINCT pillar FROM content_posts WHERE status IN ('published','scheduled','approved')`).all().map(r => r.pillar);
+  const gaps = competitorTopics.filter(ct => !ourPillars.includes(ct.recommended_angle));
+  res.json({ competitorTopics, ourPillars, gaps });
+}));
+
+// ── Content Factory Data Sources ──
+app.get('/api/marketing/kb/universities/search', (req, res) => requireMarketing(req, res, () => {
+  const { q, country, limit } = req.query;
+  let sql = 'SELECT * FROM kb_universities WHERE 1=1';
+  const params = [];
+  if (q) { sql += ' AND (name LIKE ? OR city LIKE ? OR programs LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  if (country) { sql += ' AND country = ?'; params.push(country); }
+  sql += ' ORDER BY partner DESC, name LIMIT ?';
+  params.push(parseInt(limit) || 20);
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.get('/api/marketing/kb/scholarships/search', (req, res) => requireMarketing(req, res, () => {
+  const { q, country, status, limit } = req.query;
+  let sql = 'SELECT * FROM kb_scholarships WHERE 1=1';
+  const params = [];
+  if (q) { sql += ' AND (name LIKE ? OR coverage LIKE ? OR eligibility LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  if (country) { sql += ' AND country = ?'; params.push(country); }
+  if (status) { sql += ' AND status = ?'; params.push(status); }
+  sql += ' ORDER BY deadline LIMIT ?';
+  params.push(parseInt(limit) || 20);
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.get('/api/marketing/hooks/best', (req, res) => requireMarketing(req, res, () => {
+  const { page, pillar, destination, limit } = req.query;
+  let sql = 'SELECT * FROM content_hooks WHERE 1=1';
+  const params = [];
+  if (page) { sql += ' AND (page = ? OR page IS NULL)'; params.push(page); }
+  if (pillar) { sql += ' AND (pillar = ? OR pillar IS NULL)'; params.push(pillar); }
+  if (destination) { sql += ' AND (destination = ? OR destination IS NULL)'; params.push(destination); }
+  sql += ' ORDER BY conversion_rate DESC, usage_count DESC LIMIT ?';
+  params.push(parseInt(limit) || 10);
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.get('/api/marketing/research/active', (req, res) => requireMarketing(req, res, () => {
+  const rows = db.prepare(`
+    SELECT * FROM research_intelligence
+    WHERE status IN ('new','reviewed') AND (urgency IN ('critical','high') OR category IN ('viral_signal','offer_alert','trending_topic'))
+    ORDER BY urgency_sort, research_date DESC
+    LIMIT 20
+  `).all();
+  res.json(rows);
+}));
+
+// ── Lead Attribution ──
+app.get('/api/marketing/attribution/summary', (req, res) => requireMarketing(req, res, () => {
+  const days = parseInt(req.query.days) || 30;
+  const rows = db.prepare(`
+    SELECT utm_source, utm_campaign, COUNT(*) as leads, SUM(enrollment_value) as revenue
+    FROM lead_attribution
+    WHERE first_touch_at >= date('now', '-${days} days')
+    GROUP BY utm_source, utm_campaign
+    ORDER BY leads DESC
+  `).all();
+  res.json(rows);
+}));
+
+// ── Publishing Queue / Due (for n8n) ──
+app.get('/api/marketing/publishing-queue/due', (req, res) => requireMarketing(req, res, () => {
+  res.json(db.prepare(`SELECT * FROM publishing_queue WHERE status='queued' AND scheduled_at <= datetime('now') ORDER BY scheduled_at`).all());
+}));
+
+// ── Publishing Engine v2.0 ────────────────────────────────────────
+// Manual publish trigger — queues post and sends to n8n webhook
+app.post('/api/marketing/publish/:postId', (req, res) => requireMarketing(req, res, () => {
+  const postId = parseInt(req.params.postId);
+  const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(postId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  if (post.status !== 'approved') return res.status(400).json({ error: 'Post must be approved before publishing' });
+
+  const platform = req.body.platform || post.platform || 'facebook';
+  const page = req.body.page || post.page || 'bd';
+  const scheduledAt = req.body.scheduled_at || new Date().toISOString();
+  const assetUrl = req.body.asset_url || post.asset_url || null;
+
+  // Check for existing queued/published entry for this post on this platform
+  const existing = db.prepare(`SELECT * FROM publishing_queue WHERE post_id=? AND platform=? AND status IN ('queued','published')`).get(postId, platform);
+  if (existing) return res.status(400).json({ error: `Already ${existing.status} on ${platform}`, queue: existing });
+
+  // Create queue entry
+  const qInfo = db.prepare(`INSERT INTO publishing_queue (post_id, page, platform, scheduled_at, status) VALUES (?, ?, ?, ?, 'queued')`).run(postId, page, platform, scheduledAt);
+  const queue = db.prepare(`SELECT * FROM publishing_queue WHERE id=?`).get(qInfo.lastInsertRowid);
+
+  // Update post status to scheduled
+  db.prepare(`UPDATE content_posts SET status='scheduled', updated_at=datetime('now') WHERE id=?`).run(postId);
+
+  // Send to n8n webhook (fire-and-forget, n8n will callback)
+  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || 'https://vibeacademy.cloud/webhook/eduexpress-publish';
+  const payload = {
+    postId: postId,
+    page: page,
+    platform: platform,
+    body: post.body || '',
+    hashtags: post.hashtags || '',
+    cta: post.cta || '',
+    assetUrl: assetUrl,
+    queueId: queue.id,
+    crmBase: `${req.protocol}://${req.get('host')}`,
+    crmKey: INTERNAL_API_KEY
+  };
+
+  fetch(n8nWebhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json().catch(() => ({}))).then(n8nRes => {
+    console.log(`[publish] n8n response for post ${postId}:`, n8nRes.success ? 'OK' : n8nRes.error);
+    if (!n8nRes.success) {
+      // If n8n rejected immediately, update queue
+      db.prepare(`UPDATE publishing_queue SET status='failed', error_message=? WHERE id=?`).run(n8nRes.error || 'n8n rejected', queue.id);
+      db.prepare(`UPDATE content_posts SET status='approved', updated_at=datetime('now') WHERE id=?`).run(postId);
+    }
+  }).catch(e => {
+    console.error(`[publish] n8n webhook failed for post ${postId}:`, e.message);
+    db.prepare(`UPDATE publishing_queue SET status='failed', error_message=? WHERE id=?`).run(`n8n unreachable: ${e.message}`, queue.id);
+    db.prepare(`UPDATE content_posts SET status='approved', updated_at=datetime('now') WHERE id=?`).run(postId);
+  });
+
+  res.json({ success: true, queued: queue, post: db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(postId) });
+}));
+
+// n8n callback webhook — reports publish success/failure
+// This is called by n8n with x-api-key header (handled by global middleware)
+app.post('/api/marketing/publish/webhook', (req, res) => {
+  // Auth check: must be n8n or logged-in user
+  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
+  const isUser = req.user && req.user.id;
+  if (!isInternal && !isUser) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { postId, success, platformPostId, publishUrl, error, platform, page } = req.body || {};
+  if (!postId) return res.status(400).json({ error: 'postId required' });
+
+  const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(postId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  // Find the most recent queue entry for this post
+  const queue = db.prepare(`SELECT * FROM publishing_queue WHERE post_id=? ORDER BY created_at DESC LIMIT 1`).get(postId);
+
+  if (success) {
+    // Update queue to published
+    db.prepare(`UPDATE publishing_queue SET status='published', published_at=datetime('now'), platform_post_id=?, platform_post_url=?, error_message=NULL WHERE id=?`)
+      .run(platformPostId || null, publishUrl || null, queue?.id || 0);
+    // Update post to published
+    db.prepare(`UPDATE content_posts SET status='published', published_at=datetime('now'), updated_at=datetime('now') WHERE id=?`).run(postId);
+    console.log(`[publish] ✅ Post ${postId} published to ${platform} (${page})`);
+    res.json({ success: true, postId, status: 'published' });
+  } else {
+    // Update queue to failed
+    const errMsg = error || 'Unknown publishing error';
+    db.prepare(`UPDATE publishing_queue SET status='failed', error_message=? WHERE id=?`).run(errMsg, queue?.id || 0);
+    // Revert post to approved (so user can retry)
+    db.prepare(`UPDATE content_posts SET status='approved', updated_at=datetime('now') WHERE id=?`).run(postId);
+    console.log(`[publish] ❌ Post ${postId} failed on ${platform}: ${errMsg}`);
+    res.json({ success: false, postId, error: errMsg, status: 'failed' });
+  }
+});
+
+// Retry a failed publish
+app.post('/api/marketing/publish/retry/:queueId', (req, res) => requireMarketing(req, res, () => {
+  const queueId = parseInt(req.params.queueId);
+  const queue = db.prepare(`SELECT * FROM publishing_queue WHERE id=?`).get(queueId);
+  if (!queue) return res.status(404).json({ error: 'Queue entry not found' });
+  if (queue.status !== 'failed') return res.status(400).json({ error: `Cannot retry — status is ${queue.status}` });
+
+  const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(queue.post_id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  // Reset queue to queued
+  db.prepare(`UPDATE publishing_queue SET status='queued', error_message=NULL, scheduled_at=datetime('now') WHERE id=?`).run(queueId);
+  db.prepare(`UPDATE content_posts SET status='scheduled', updated_at=datetime('now') WHERE id=?`).run(queue.post_id);
+
+  // Re-send to n8n
+  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || 'https://vibeacademy.cloud/webhook/eduexpress-publish';
+  const payload = {
+    postId: queue.post_id,
+    page: queue.page,
+    platform: queue.platform,
+    body: post.body || '',
+    hashtags: post.hashtags || '',
+    cta: post.cta || '',
+    assetUrl: post.asset_url || null,
+    queueId: queueId,
+    crmBase: `${req.protocol}://${req.get('host')}`,
+    crmKey: INTERNAL_API_KEY
+  };
+
+  fetch(n8nWebhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json().catch(() => ({}))).then(n8nRes => {
+    console.log(`[publish-retry] n8n response for post ${queue.post_id}:`, n8nRes.success ? 'OK' : n8nRes.error);
+  }).catch(e => {
+    console.error(`[publish-retry] n8n webhook failed:`, e.message);
+  });
+
+  res.json({ success: true, queue: db.prepare(`SELECT * FROM publishing_queue WHERE id=?`).get(queueId), message: 'Retry triggered' });
+}));
+
+// Full publishing queue with post details
+app.get('/api/marketing/publishing-queue/full', (req, res) => requireMarketing(req, res, () => {
+  const { status, page, platform, limit } = req.query;
+  let sql = `
+    SELECT pq.*, cp.hook as post_title, cp.body as post_body, cp.hook as post_hook, cp.pillar, cp.page as post_page, cp.quality_score, cp.asset_url
+    FROM publishing_queue pq
+    LEFT JOIN content_posts cp ON pq.post_id = cp.id
+    WHERE 1=1
+  `;
+  const params = [];
+  if (status) { sql += ' AND pq.status = ?'; params.push(status); }
+  if (page) { sql += ' AND pq.page = ?'; params.push(page); }
+  if (platform) { sql += ' AND pq.platform = ?'; params.push(platform); }
+  sql += ' ORDER BY pq.created_at DESC LIMIT ?';
+  params.push(parseInt(limit) || 100);
+  res.json(db.prepare(sql).all(...params));
+}));
+
+// ── n8n Config — raw tokens for publishing engine (n8n-only, x-api-key required) ──
+app.get('/api/marketing/publish/n8n-config', (req, res) => {
+  // Only allow internal n8n service or super_admin
+  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
+  const isSuperAdmin = req.user && (req.user.role === 'super_admin' || req.user.roles?.includes('founder_ceo'));
+  if (!isInternal && !isSuperAdmin) return res.status(401).json({ error: 'Unauthorized' });
+
+  // Get page IDs from Facebook/Messenger channels
+  const channels = db.prepare("SELECT name, page_id, access_token FROM channels WHERE type IN ('facebook', 'messenger') AND active = 1 AND page_id IS NOT NULL").all();
+  const pageIds = {};
+  for (const ch of channels) {
+    if (ch.name.toLowerCase().includes('china')) pageIds.china = ch.page_id;
+    else if (ch.name.toLowerCase().includes('bd') || ch.name.toLowerCase().includes('bangladesh')) pageIds.bd = ch.page_id;
+  }
+
+  // Get global page_access_token from meta_config
+  const token = db.prepare("SELECT value FROM meta_config WHERE key='page_access_token'").get()?.value || '';
+
+  res.json({
+    facebook: {
+      page_access_token: token,
+      page_ids: pageIds
+    },
+    instagram: false,
+    tiktok: false,
+    crm_base: `${req.protocol}://${req.get('host')}`
+  });
+});
+
+// Get publishing configuration (page tokens, platforms)
+app.get('/api/marketing/publish/config', (req, res) => requireMarketing(req, res, () => {
+  const fbChina = !!(process.env.FB_PAGE_CHINA_ID && process.env.FB_PAGE_ACCESS_TOKEN);
+  const fbBD = !!(process.env.FB_PAGE_BD_ID && process.env.FB_PAGE_ACCESS_TOKEN);
+  const n8nConfigured = !!process.env.N8N_PUBLISH_WEBHOOK;
+  res.json({
+    facebook: { china: fbChina, bd: fbBD },
+    instagram: false, // v2 feature
+    tiktok: false, // v2 feature
+    n8n: n8nConfigured,
+    n8nWebhook: process.env.N8N_PUBLISH_WEBHOOK || null
+  });
 }));
 
 // Catch-all: serve React app for any non-API route (production)

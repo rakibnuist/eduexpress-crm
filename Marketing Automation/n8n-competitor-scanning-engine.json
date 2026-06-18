@@ -1,0 +1,228 @@
+{
+  "name": "EduExpress — Competitor Scanning Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hours": 6
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Competitor list — update as needed\nconst competitors = [\n  { name: 'MalishaEdu', page_id: 'MalishaEduBD', priority: 'high' },\n  { name: 'DreamEdu', page_id: 'dreamabroad2017', priority: 'high' },\n  { name: 'Sangen Edu', page_id: 'sangen.edu', priority: 'high' },\n  { name: 'AR Education', page_id: 'AREducationbd', priority: 'medium' },\n  { name: 'Megamind Plus', page_id: 'MegamindPlusChina', priority: 'medium' },\n  { name: 'Digi Edu Pro', page_id: 'DigiEduPro', priority: 'medium' },\n  { name: 'CSHBD', page_id: 'cshbd.cn', priority: 'medium' },\n  { name: 'Doedu', page_id: 'doeduchina', priority: 'medium' },\n  { name: 'Dream Abroad', page_id: 'dreamabroad2017', priority: 'medium' },\n  { name: 'Wider World', page_id: 'widerworldconsultancy', priority: 'medium' },\n  { name: 'Study World', page_id: 'Studyworldt', priority: 'medium' },\n  { name: 'EduMatric', page_id: 'edumatricofficial', priority: 'low' },\n  { name: 'Atlas Study', page_id: 'AtlasStudyConsultant', priority: 'low' },\n  { name: 'MHREducation', page_id: 'mhreducation', priority: 'low' },\n  { name: 'ChinaScholarshipBD', page_id: 'chinesescholarshipforbangladeshistudents', priority: 'medium' }\n];\n\n// Return one item per competitor for parallel processing\nreturn competitors.map(c => ({ json: c }));"
+      },
+      "id": "competitor-list",
+      "name": "Competitor List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v18.0/{{ $json.page_id }}/posts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $env.META_ACCESS_TOKEN }}" },
+            { "name": "limit", "value": "5" },
+            { "name": "fields", "value": "message,created_time,full_picture,permalink_url,shares,likes.summary(true),comments.summary(true)" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fb-fetch",
+      "name": "Fetch FB Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {},
+        "messages": {
+          "message": [
+            {
+              "role": "system",
+              "content": "You are a competitive intelligence analyst for EduExpress International, an education consultancy in Bangladesh. Analyze competitor Facebook posts and extract actionable insights."
+            },
+            {
+              "role": "user",
+              "content": "=Analyze these recent posts from competitor {{ $json.name }}:\n\n{{ JSON.stringify($json.posts?.data || [], null, 2) }}\n\nFor each post, identify:\n1. What they posted about (topic, pillar)\n2. Engagement level (high/medium/low)\n3. What offer/scholarship they mentioned\n4. What angle/hook they used\n5. Any misleading claims or banned phrases\n\nThen provide a JSON response with this structure:\n{\n  \"findings\": [\n    {\n      \"topic\": \"...\",\n      \"category\": \"competitor_move|offer_alert|viral_signal\",\n      \"urgency\": \"critical|high|normal|low\",\n      \"insight_summary\": \"...\",\n      \"recommended_angle\": \"...\"\n    }\n  ],\n  \"competitor_summary\": {\n    \"posts_count\": N,\n    \"avg_engagement\": \"...\",\n    \"top_pillar\": \"...\"\n  }\n}"
+            }
+          ]
+        }
+      },
+      "id": "llm-analyze",
+      "name": "LLM Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM output and format for CRM\nconst input = $input.first().json;\nlet findings = [];\ntry {\n  const parsed = JSON.parse(input.content || '{}');\n  findings = parsed.findings || [];\n} catch(e) {\n  findings = [{\n    topic: 'Competitor activity detected',\n    category: 'competitor_move',\n    urgency: 'normal',\n    insight_summary: input.content?.slice(0, 200) || 'Analysis completed',\n    recommended_angle: 'Monitor and respond'\n  }];\n}\n\nreturn findings.map(f => ({\n  json: {\n    ...f,\n    competitor: $input.first().json.competitor_name,\n    source_type: 'competitor_page',\n    status: 'new',\n    research_date: new Date().toISOString()\n  }\n}));"
+      },
+      "id": "format-output",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://your-crm-url.com/api/marketing/research",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "topic": "={{ $json.topic }}",
+          "category": "={{ $json.category }}",
+          "urgency": "={{ $json.urgency }}",
+          "competitor": "={{ $json.competitor }}",
+          "insight_summary": "={{ $json.insight_summary }}",
+          "recommended_angle": "={{ $json.recommended_angle }}",
+          "source_type": "={{ $json.source_type }}",
+          "status": "={{ $json.status }}",
+          "research_date": "={{ $json.research_date }}"
+        }
+      },
+      "id": "write-crm",
+      "name": "Write to CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-critical",
+      "name": "Filter Critical",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 500]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🚨 CRITICAL COMPETITOR ALERT\n\nCompetitor: {{ $json.competitor }}\nTopic: {{ $json.topic }}\n\n{{ $json.insight_summary }}\n\n💡 Recommended angle: {{ $json.recommended_angle }}\n\nView in CRM: https://your-crm-url.com/marketing"
+      },
+      "id": "telegram-alert",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1250, 500]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Competitor List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitor List": {
+      "main": [
+        [
+          {
+            "node": "Fetch FB Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch FB Posts": {
+      "main": [
+        [
+          {
+            "node": "LLM Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Analysis": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Write to CRM",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Critical": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["eduexpress", "competitor", "research"]
+}
