@@ -22,23 +22,6 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "https://crm.eduexpressint.com/api/marketing/publish/n8n-config",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "x-api-key", "value": "eduexpress-n8n-2024" }
-          ]
-        }
-      },
-      "id": "get-config",
-      "name": "Get CRM Config",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [440, 300]
-    },
-    {
-      "parameters": {
-        "method": "GET",
         "url": "https://crm.eduexpressint.com/api/marketing/posts/due",
         "sendHeaders": true,
         "headerParameters": {
@@ -51,17 +34,17 @@
       "name": "Get Due Posts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [640, 300]
+      "position": [440, 300]
     },
     {
       "parameters": {
-        "jsCode": "const config = $input.all()[0].json;\nconst posts = $input.all()[1].json;\nif (!Array.isArray(posts) || posts.length === 0) {\n  return [{ json: { hasPosts: false, message: 'No posts due for publishing' } }];\n}\nreturn [{ json: { hasPosts: true, config, posts } }];"
+        "jsCode": "const posts = $input.first().json;\nif (!Array.isArray(posts) || posts.length === 0) {\n  return [{ json: { hasPosts: false, message: 'No posts due for publishing' } }];\n}\nreturn [{ json: { hasPosts: true, posts } }];"
       },
-      "id": "merge",
-      "name": "Merge Config + Posts",
+      "id": "check-posts",
+      "name": "Check Posts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 300]
+      "position": [640, 300]
     },
     {
       "parameters": {
@@ -85,21 +68,21 @@
           "combinator": "and"
         }
       },
-      "id": "check-posts",
+      "id": "has-posts-if",
       "name": "Has Posts?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1040, 300]
+      "position": [840, 300]
     },
     {
       "parameters": {
-        "jsCode": "const payload = $input.first().json;\nconst posts = payload.posts;\nconst config = payload.config;\nconst pageIds = config?.facebook?.page_ids || {};\nconst token = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';\n\nconst items = posts.map(p => ({\n  json: {\n    postId: p.id,\n    page: p.page || 'bd',\n    pageId: pageIds[p.page || 'bd'] || '',\n    token: token,\n    body: p.body || '',\n    hashtags: p.hashtags || '',\n    cta: p.cta || '',\n    assetUrl: p.asset_url || null,\n    hasAsset: !!(p.asset_url),\n    hook: p.hook || '',\n    crmBase: 'https://crm.eduexpressint.com',\n    crmKey: 'eduexpress-n8n-2024'\n  }\n}));\nreturn items;"
+        "jsCode": "const posts = $input.first().json.posts;\n// Hardcoded page IDs and token\nconst pageIds = { china: '110781585233245', bd: '693839983823261' };\nconst token = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';\n\nconst items = posts.map(p => ({\n  json: {\n    postId: p.id,\n    page: p.page || 'bd',\n    pageId: pageIds[p.page || 'bd'] || '',\n    token: token,\n    body: p.body || '',\n    hashtags: p.hashtags || '',\n    cta: p.cta || '',\n    assetUrl: p.asset_url || null,\n    hasAsset: !!(p.asset_url),\n    hook: p.hook || '',\n    crmBase: 'https://crm.eduexpressint.com',\n    crmKey: 'eduexpress-n8n-2024'\n  }\n}));\nreturn items;"
       },
       "id": "prep-items",
       "name": "Prepare Items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1240, 300]
+      "position": [1040, 300]
     },
     {
       "parameters": {
@@ -110,7 +93,7 @@
       "name": "Loop Posts",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1440, 300]
+      "position": [1240, 300]
     },
     {
       "parameters": {
@@ -138,7 +121,7 @@
       "name": "Has Asset?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1640, 200]
+      "position": [1440, 200]
     },
     {
       "parameters": {
@@ -158,7 +141,7 @@
       "name": "FB Photo Post",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1840, 140]
+      "position": [1640, 140]
     },
     {
       "parameters": {
@@ -177,7 +160,7 @@
       "name": "FB Text Post",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1840, 340]
+      "position": [1640, 340]
     },
     {
       "parameters": {
@@ -187,7 +170,7 @@
       "name": "Build Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2040, 300]
+      "position": [1840, 300]
     },
     {
       "parameters": {
@@ -217,7 +200,7 @@
       "name": "Callback CRM",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2240, 300]
+      "position": [2040, 300]
     },
     {
       "parameters": {
@@ -228,7 +211,7 @@
       "name": "Wait 1s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [2240, 500]
+      "position": [2040, 500]
     },
     {
       "parameters": {
@@ -238,7 +221,7 @@
       "name": "No Posts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1240, 500]
+      "position": [1040, 500]
     }
   ],
   "settings": {
@@ -251,15 +234,12 @@
   "tags": ["eduexpress", "publishing", "meta"],
   "connections": {
     "Schedule Trigger": {
-      "main": [[{ "node": "Get CRM Config", "type": "main", "index": 0 }]]
-    },
-    "Get CRM Config": {
       "main": [[{ "node": "Get Due Posts", "type": "main", "index": 0 }]]
     },
     "Get Due Posts": {
-      "main": [[{ "node": "Merge Config + Posts", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Check Posts", "type": "main", "index": 0 }]]
     },
-    "Merge Config + Posts": {
+    "Check Posts": {
       "main": [[{ "node": "Has Posts?", "type": "main", "index": 0 }]]
     },
     "Has Posts?": {
