@@ -6749,15 +6749,18 @@ app.get('/api/marketing/publish/n8n-config', (req, res) => {
 
 // Get publishing configuration (page tokens, platforms)
 app.get('/api/marketing/publish/config', (req, res) => requireMarketing(req, res, () => {
-  const fbChina = !!(process.env.FB_PAGE_CHINA_ID && process.env.FB_PAGE_ACCESS_TOKEN);
-  const fbBD = !!(process.env.FB_PAGE_BD_ID && process.env.FB_PAGE_ACCESS_TOKEN);
-  const n8nConfigured = !!process.env.N8N_PUBLISH_WEBHOOK;
+  const token = db.prepare("SELECT value FROM meta_config WHERE key='page_access_token'").get()?.value || '';
+  const channels = db.prepare("SELECT name, page_id FROM channels WHERE type IN ('facebook', 'messenger') AND active = 1 AND page_id IS NOT NULL").all();
+  const fbChina = channels.some(c => c.name.toLowerCase().includes('china') && c.page_id);
+  const fbBD = channels.some(c => (c.name.toLowerCase().includes('bd') || c.name.toLowerCase().includes('bangladesh')) && c.page_id);
+  const n8nConfigured = true; // n8n workflow is hardcoded and active
   res.json({
-    facebook: { china: fbChina, bd: fbBD },
+    facebook: { china: fbChina, bd: fbBD, token_exists: !!token },
     instagram: false, // v2 feature
     tiktok: false, // v2 feature
     n8n: n8nConfigured,
-    n8nWebhook: process.env.N8N_PUBLISH_WEBHOOK || null
+    n8nWebhook: 'https://vibeacademy.cloud/webhook/eduexpress-publish',
+    crm_base: `${req.protocol}://${req.get('host')}`
   });
 }));
 
