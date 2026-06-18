@@ -570,7 +570,7 @@ const scaleUpRecs = [
     confidence_score: 78,
     based_on_data: 'CRM analytics: 23% Korea inquiry increase, competitor gap analysis',
     action_items: 'Create Korea E-Visa content series, run Meta ads targeting Europe-rejected segment, add Korea to BD page rotation',
-    status: 'proposed',
+    status: 'pending',
     approved_by: ''
   },
   {
@@ -582,7 +582,7 @@ const scaleUpRecs = [
     confidence_score: 85,
     based_on_data: 'Consultation notes: parents asking "Is Payment After Visa real?" 8x/week',
     action_items: 'Record 4 parent testimonials, create Trust Tuesday branding, schedule weekly for 8 weeks',
-    status: 'proposed',
+    status: 'pending',
     approved_by: ''
   },
   {
@@ -594,7 +594,7 @@ const scaleUpRecs = [
     confidence_score: 72,
     based_on_data: 'Google Trends: Hungary/Malta search +40% in BD. Competitor analysis: minimal EU content.',
     action_items: 'Create 1 carousel per country, add to BD page content mix, run Meta ads for EU segment',
-    status: 'proposed',
+    status: 'pending',
     approved_by: ''
   }
 ];
