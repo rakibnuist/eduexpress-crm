@@ -283,6 +283,8 @@ export const api = {
     researchFeed:        (limit) => req('/marketing/research/feed?limit=' + limit),
     researchCompetitorSummary: (days) => req('/marketing/research/competitor-summary?days=' + days),
     researchGapAnalysis: () => req('/marketing/research/gap-analysis'),
+    llmConfig:      () => req('/marketing/llm-config'),
+    saveLlmConfig:  (d) => req('/marketing/llm-config', { method: 'POST', body: JSON.stringify(d) }),
     // Offer Sources
     offerSources:      () => req('/marketing/offer-sources'),
     createOfferSource: (d) => req('/marketing/offer-sources', { method: 'POST', body: JSON.stringify(d) }),

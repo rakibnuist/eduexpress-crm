@@ -6565,7 +6565,137 @@ app.get('/api/marketing/publishing-queue/due', (req, res) => requireMarketing(re
   res.json(db.prepare(`SELECT * FROM publishing_queue WHERE status='queued' AND scheduled_at <= datetime('now') ORDER BY scheduled_at`).all());
 }));
 
-// ── Publishing Engine v2.0 ────────────────────────────────────────
+// ── LLM Settings ────────────────────────────────────────
+app.get('/api/marketing/llm-config', (req, res) => {
+  try {
+    const provider = db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || 'openai';
+    const model = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || 'gpt-4o-mini';
+    const hasKey = !!(process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value);
+    res.json({ provider, model, hasKey });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/marketing/llm-config', (req, res) => {
+  try {
+    const { provider, model, apiKey } = req.body || {};
+    if (provider) db.prepare("INSERT OR REPLACE INTO meta_config (key, value, updated_at) VALUES ('llm_provider', ?, datetime('now'))").run(provider);
+    if (model) db.prepare("INSERT OR REPLACE INTO meta_config (key, value, updated_at) VALUES ('llm_model', ?, datetime('now'))").run(model);
+    if (apiKey) db.prepare("INSERT OR REPLACE INTO meta_config (key, value, updated_at) VALUES ('llm_api_key', ?, datetime('now'))").run(apiKey);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── AI Content Generator ────────────────────────────────────────
+// Calls LLM API to generate real content based on user inputs
+app.post('/api/marketing/generate', async (req, res) => {
+  try {
+    const { page, pillar, format, language, tone, topic, hook, selectedUniversity, selectedScholarship, researchIntel } = req.body || {};
+
+    // Get LLM API config from meta_config or env
+    const llmApiKey = process.env.OPENAI_API_KEY || db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value || '';
+    const llmProvider = process.env.LLM_PROVIDER || db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || 'openai';
+    const llmModel = process.env.LLM_MODEL || db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || 'gpt-4o-mini';
+
+    if (!llmApiKey) {
+      return res.status(400).json({
+        error: 'No LLM API key configured. Add OPENAI_API_KEY env var or set llm_api_key in meta_config.',
+        fallback: true
+      });
+    }
+
+    // Build the system prompt with brand voice rules
+    const systemPrompt = `You are the senior content strategist for EduExpress International, an education consultancy in Dhaka, Bangladesh that helps students study abroad (China, Malaysia, Korea, Hungary, Malta, etc.).
+
+STRICT RULES (violating any = content rejected):
+1. NEVER use these banned phrases: "guaranteed visa", "100% visa success", "100% admission", "guaranteed admission", "visa confirmed", "no rejection", "zero rejection", "government registered", "licensed by government", "official representative", "authorized agent", "best consultancy", "no. 1 consultancy", "100% scholarship guaranteed", "free education", "no cost at all"
+2. NEVER use: "CSC scholarship" (use "Chinese Government Scholarship" or "CSC"), "GKS scholarship" (use "Korean Government Scholarship"), "Stipendium Hungaricum" (use "Hungary Government Scholarship"), "no IELTS" (use "MOI Certificate" instead)
+3. NEVER use fake numbers: "5000+ students", "99% visa success", "$5M revenue"
+4. Use REAL numbers: 98% visa success rate (with disclaimer), 2,000+ students placed, 8+ years experience, 150+ partner universities
+5. Stipend range: ৳10,000-60,000/month (NOT a fixed number)
+6. Language: ${language === 'bangla' ? 'Write 50% Bangla + 50% English naturally. Technical terms (university names, CSC, MOI) stay in English. Each sentence should be one language, not mixed within a sentence.' : language === 'mixed' ? 'Write primarily in Bangla with key English terms naturally woven in. English for technical terms and CTAs.' : 'Write in English with occasional Bangla words for cultural resonance.'}
+7. Tone: ${tone || 'expert_consultant'} — ${tone === 'expert_consultant' ? 'Professional, factual, reassuring. Use "আমরা" (we), not "তুমি" (you). Address parents as guardians.' : tone === 'empathetic_brother' ? 'Warm, conversational, understanding pain points. Use "ভাই" (brother) energy. Short sentences.' : tone === 'success_story' ? 'Inspirational, aspirational, specific details. Show transformation from doubt to achievement.' : 'Friendly, peer-to-peer, relatable. Use conversational Bangla. Share personal-feeling insights.'}
+8. Hook: MUST be under 15 words, emotional or curiosity-driven, not clickbait
+9. Body: 3-5 short paragraphs, each with a clear point
+10. CTA: Must be clear and actionable
+
+OUTPUT FORMAT — Return ONLY this JSON (no markdown, no explanations):
+{"hook": "...", "body": "...", "hashtags": "...", "cta": "...", "brief": "design brief for designer..."}`;
+
+    const userPrompt = `Write a ${format || 'Carousel'} post for the ${page === 'china' ? 'China Study Abroad' : page === 'bd' ? 'Bangladesh Study Abroad' : page} Facebook page.
+
+PILLAR: ${pillar || 'scholarship'}
+TOPIC: ${topic || 'Study abroad opportunity'}
+${selectedUniversity ? `UNIVERSITY CONTEXT: ${selectedUniversity.name} in ${selectedUniversity.city}, ${selectedUniversity.country}. Programs: ${selectedUniversity.programs}. Tuition: ${selectedUniversity.tuition}. ${selectedUniversity.csca_free ? 'CSCA-free admission.' : ''}` : ''}
+${selectedScholarship ? `SCHOLARSHIP CONTEXT: ${selectedScholarship.name}. Coverage: ${selectedScholarship.coverage}. Eligibility: ${selectedScholarship.eligibility}` : ''}
+${researchIntel ? `MARKET INTELLIGENCE: ${researchIntel.topic} — ${researchIntel.insight_summary}` : ''}
+${hook ? `SUGGESTED HOOK ANGLE: ${hook}` : ''}
+
+Write the complete post now. Return ONLY JSON.`;
+
+    let generatedContent;
+
+    // Call LLM API based on provider
+    if (llmProvider === 'openai') {
+      const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: llmModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 1500,
+          response_format: { type: 'json_object' }
+        })
+      });
+      const openaiData = await openaiRes.json();
+      if (openaiData.error) throw new Error(openaiData.error.message);
+      const content = openaiData.choices?.[0]?.message?.content;
+      generatedContent = JSON.parse(content);
+    } else if (llmProvider === 'gemini') {
+      // Gemini API
+      const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${llmModel}:generateContent?key=${llmApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1500 }
+        })
+      });
+      const geminiData = await geminiRes.json();
+      if (geminiData.error) throw new Error(geminiData.error.message);
+      const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      // Try to parse JSON from response
+      try {
+        generatedContent = JSON.parse(text);
+      } catch (e) {
+        // Extract JSON from markdown code block if present
+        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) generatedContent = JSON.parse(jsonMatch[1]);
+        else throw new Error('Could not parse LLM response as JSON');
+      }
+    } else {
+      return res.status(400).json({ error: `Unsupported LLM provider: ${llmProvider}. Use 'openai' or 'gemini'.` });
+    }
+
+    res.json({
+      success: true,
+      hook: generatedContent.hook || '',
+      body: generatedContent.body || '',
+      hashtags: generatedContent.hashtags || '',
+      cta: generatedContent.cta || '',
+      brief: generatedContent.brief || `${format} design for ${pillar} post.`,
+      provider: llmProvider,
+      model: llmModel
+    });
+
+  } catch (e) {
+    console.error('[generate] AI generation failed:', e.message);
+    res.status(500).json({ error: e.message, fallback: true });
+  }
+});
 // Manual publish trigger — queues post and sends to n8n webhook
 app.post('/api/marketing/publish/:postId', (req, res) => requireMarketing(req, res, () => {
   const postId = parseInt(req.params.postId);

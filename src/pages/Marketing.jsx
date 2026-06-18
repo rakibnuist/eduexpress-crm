@@ -581,7 +581,8 @@ function ContentFactoryTab() {
   const [selectedUniversity, setSelectedUniversity] = useState(null);
   const [selectedScholarship, setSelectedScholarship] = useState(null);
 
-  // ── UI ──
+  // ── AI Generation ──
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState('generator'); // generator | kb | hooks
   const [previewTab, setPreviewTab] = useState('facebook');
   const [loading, setLoading] = useState(false);
@@ -826,6 +827,43 @@ function ContentFactoryTab() {
       });
       toast.success('Sent to designer queue');
     } catch (e) { /* toast already shown */ } finally { setLoading(false); }
+  };
+
+  const generateWithAI = async () => {
+    if (!page || !pillar) {
+      toast.error('Select Page and Pillar first');
+      return;
+    }
+    setAiGenerating(true);
+    try {
+      const res = await fetch('/api/marketing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page, pillar, format, language, platform,
+          tone: 'expert_consultant',
+          topic: researchIntel[0]?.topic || 'Study abroad opportunity',
+          hook: selectedHook?.hook_text || '',
+          selectedUniversity: selectedUniversity || undefined,
+          selectedScholarship: selectedScholarship || undefined,
+          researchIntel: researchIntel[0] || undefined,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI generation failed');
+      if (data.fallback) throw new Error(data.error || 'No LLM API key configured');
+      setHook(data.hook || '');
+      setBody(data.body || '');
+      setHashtags(data.hashtags || '');
+      setCta(data.cta || '');
+      setBrief(data.brief || brief);
+      setStep(6); // Jump to review
+      toast.success(`AI generated content (${data.provider} · ${data.model})`);
+    } catch (e) {
+      toast.error(e.message || 'AI generation failed');
+    } finally {
+      setAiGenerating(false);
+    }
   };
 
   // ── Step Renderer ──
@@ -1089,6 +1127,10 @@ function ContentFactoryTab() {
               <Wand2 size={15} className="text-blue-600" />
               <h3 className="text-sm font-semibold text-slate-700">Content Builder</h3>
               <div className="flex-1" />
+              <button onClick={generateWithAI} disabled={aiGenerating || !page || !pillar} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium disabled:opacity-50 transition">
+                {aiGenerating ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                {aiGenerating ? 'Generating…' : 'Generate with AI'}
+              </button>
               <QualityBadge score={qualityScore} />
             </div>
 
@@ -1924,16 +1966,22 @@ function PublishingQueueTab() {
   const [platformFilter, setPlatformFilter] = useState('all');
   const [publishingId, setPublishingId] = useState(null); // postId being published
 
+  const [llmConfig, setLlmConfig] = useState(null);
+  const [llmEditing, setLlmEditing] = useState(false);
+  const [llmForm, setLlmForm] = useState({ provider: 'openai', model: 'gpt-4o-mini', apiKey: '' });
+
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       api.marketing.publishConfig(),
       api.marketing.postsDue(50),
-      api.marketing.publishingQueueFull({ limit: 100 })
-    ]).then(([cfg, posts, q]) => {
+      api.marketing.publishingQueueFull({ limit: 100 }),
+      api.marketing.llmConfig().catch(() => null)
+    ]).then(([cfg, posts, q, llm]) => {
       setConfig(cfg);
       setDuePosts(posts);
       setQueue(q);
+      if (llm) { setLlmConfig(llm); setLlmForm({ provider: llm.provider, model: llm.model, apiKey: '' }); }
       setLoading(false);
     }).catch(e => {
       toast.error(e.message);
@@ -1942,6 +1990,15 @@ function PublishingQueueTab() {
   }, [toast]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleSaveLlmConfig = async () => {
+    try {
+      await api.marketing.saveLlmConfig(llmForm);
+      toast.success('LLM config saved');
+      setLlmEditing(false);
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
 
   const filteredQueue = useMemo(() => {
     let rows = queue;
@@ -2018,6 +2075,50 @@ function PublishingQueueTab() {
             Facebook BD: {config?.facebook?.bd ? 'Ready' : 'Missing Token'}
           </div>
         </div>
+      </div>
+
+      {/* LLM Config Status Bar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <h2 className="text-sm font-bold text-slate-700">AI Content Generator Config</h2>
+          <div className="flex-1" />
+          <button onClick={() => setLlmEditing(!llmEditing)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 font-medium">
+            {llmEditing ? 'Cancel' : 'Configure'}
+          </button>
+        </div>
+        <div className="flex gap-3 flex-wrap">
+          <div className={`px-3 py-1.5 rounded-lg text-xs font-medium ${llmConfig?.hasKey ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+            API Key: {llmConfig?.hasKey ? 'Configured' : 'Missing'}
+          </div>
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-700">
+            Provider: {llmConfig?.provider || '—'}
+          </div>
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 text-slate-600">
+            Model: {llmConfig?.model || '—'}
+          </div>
+        </div>
+        {llmEditing && (
+          <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Provider</label>
+              <select className="inp w-full" value={llmForm.provider} onChange={e => setLlmForm({ ...llmForm, provider: e.target.value })}>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Model</label>
+              <input className="inp w-full" value={llmForm.model} onChange={e => setLlmForm({ ...llmForm, model: e.target.value })} placeholder="gpt-4o-mini or gemini-1.5-pro-latest" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">API Key</label>
+              <input className="inp w-full" type="password" value={llmForm.apiKey} onChange={e => setLlmForm({ ...llmForm, apiKey: e.target.value })} placeholder="sk-... or AIza..." />
+            </div>
+            <div className="md:col-span-3 flex justify-end">
+              <button onClick={handleSaveLlmConfig} className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">Save LLM Config</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Approved Posts — Ready to Publish */}
