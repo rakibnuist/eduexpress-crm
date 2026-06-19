@@ -1653,6 +1653,102 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- ═══════════════════════════════════════════════════════════
+  --  PROFESSIONAL SMM PIPELINE v3.0 — Campaigns, Assets, Comments, Performance
+  -- ═══════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    status TEXT CHECK(status IN ('draft','active','paused','completed','archived')) DEFAULT 'draft',
+    page TEXT CHECK(page IN ('china','bd','instagram','tiktok','all')) DEFAULT 'china',
+    pillar TEXT CHECK(pillar IN ('scholarship','trust','career','urgency','university','cost','success_story','trending','brand','festival')),
+    start_date TEXT,
+    end_date TEXT,
+    budget TEXT,
+    target_audience TEXT,
+    goals TEXT,
+    color TEXT DEFAULT '#3B82F6',
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status, start_date);
+
+  CREATE TABLE IF NOT EXISTS post_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL,
+    user_name TEXT,
+    user_role TEXT,
+    comment TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_post_comments_post ON post_comments(post_id);
+
+  CREATE TABLE IF NOT EXISTS post_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL,
+    platform TEXT,
+    impressions INTEGER DEFAULT 0,
+    reach INTEGER DEFAULT 0,
+    engagement INTEGER DEFAULT 0,
+    likes INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0,
+    shares INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    cta_clicks INTEGER DEFAULT 0,
+    video_views INTEGER DEFAULT 0,
+    saves INTEGER DEFAULT 0,
+    cost_per_result TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_post_perf_post ON post_performance(post_id);
+
+  CREATE TABLE IF NOT EXISTS content_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    campaign_id INTEGER,
+    asset_type TEXT CHECK(asset_type IN ('image','video','carousel','reel','story','thumbnail','raw')),
+    asset_url TEXT,
+    thumbnail_url TEXT,
+    file_name TEXT,
+    file_size TEXT,
+    status TEXT CHECK(status IN ('pending','in_progress','review','approved','rejected','archived')) DEFAULT 'pending',
+    uploaded_by TEXT,
+    feedback TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_assets_post ON content_assets(post_id);
+
+  CREATE TABLE IF NOT EXISTS content_briefs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT,
+    target_platforms TEXT,
+    target_audience TEXT,
+    key_messages TEXT,
+    tone TEXT,
+    reference_links TEXT,
+    due_date TEXT,
+    status TEXT CHECK(status IN ('pending','approved','in_progress','completed','cancelled')) DEFAULT 'pending',
+    assigned_to TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pipeline_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    from_status TEXT,
+    to_status TEXT,
+    actor TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pipeline_logs_post ON pipeline_logs(post_id);
+
   CREATE TABLE IF NOT EXISTS lead_attribution (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id INTEGER,
@@ -1897,6 +1993,16 @@ function runMigrations() {
     `ALTER TABLE publishing_queue ADD COLUMN engagement INTEGER`,
     `ALTER TABLE publishing_queue ADD COLUMN created_at TEXT`,
     `UPDATE publishing_queue SET created_at = datetime('now') WHERE created_at IS NULL`,
+    // ── Professional SMM Pipeline v3.0 migrations ──
+    `ALTER TABLE content_posts ADD COLUMN campaign_id INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN assigned_to TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN reviewed_by TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN reviewed_at TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN rejection_reason TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN due_date TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN priority TEXT CHECK(priority IN ('low','normal','high','urgent')) DEFAULT 'normal'`,
+    `ALTER TABLE content_posts ADD COLUMN notes TEXT`,
+    `ALTER TABLE content_posts ADD COLUMN tags TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -7070,6 +7176,177 @@ app.get('/api/marketing/publish/config', (req, res) => requireMarketing(req, res
     n8nWebhook: 'https://vibeacademy.cloud/webhook/eduexpress-publish',
     crm_base: `${req.protocol}://${req.get('host')}`
   });
+}));
+
+// ═══════════════════════════════════════════════════════════
+//  PROFESSIONAL SMM PIPELINE v3.0 — Campaigns, Pipeline Board, Assets, Comments, Performance
+// ═══════════════════════════════════════════════════════════
+
+// ── Campaigns CRUD ────────────────────────────────────────
+app.get('/api/marketing/campaigns', (req, res) => requireMarketing(req, res, () => {
+  const { status, page, pillar } = req.query;
+  let sql = `SELECT c.*, COUNT(cp.id) as post_count FROM campaigns c LEFT JOIN content_posts cp ON c.id = cp.campaign_id WHERE 1=1`;
+  const params = [];
+  if (status) { sql += ' AND c.status = ?'; params.push(status); }
+  if (page) { sql += ' AND c.page = ?'; params.push(page); }
+  if (pillar) { sql += ' AND c.pillar = ?'; params.push(pillar); }
+  sql += ` GROUP BY c.id ORDER BY c.created_at DESC`;
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.get('/api/marketing/campaigns/:id', (req, res) => requireMarketing(req, res, () => {
+  const campaign = db.prepare(`SELECT * FROM campaigns WHERE id=?`).get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  const posts = db.prepare(`SELECT * FROM content_posts WHERE campaign_id=? ORDER BY created_at DESC`).all(req.params.id);
+  res.json({ ...campaign, posts });
+}));
+
+app.post('/api/marketing/campaigns', (req, res) => requireMarketing(req, res, () => {
+  const { name, description, page, pillar, start_date, end_date, budget, target_audience, goals, color } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const info = db.prepare(`INSERT INTO campaigns (name, description, page, pillar, start_date, end_date, budget, target_audience, goals, color, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(name, description || '', page || 'china', pillar || 'scholarship', start_date || null, end_date || null, budget || '', target_audience || '', goals || '', color || '#3B82F6', req.user?.name || '');
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+app.put('/api/marketing/campaigns/:id', (req, res) => requireMarketing(req, res, () => {
+  const { name, description, status, page, pillar, start_date, end_date, budget, target_audience, goals, color } = req.body || {};
+  const existing = db.prepare(`SELECT * FROM campaigns WHERE id=?`).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Campaign not found' });
+  db.prepare(`UPDATE campaigns SET name=?, description=?, status=?, page=?, pillar=?, start_date=?, end_date=?, budget=?, target_audience=?, goals=?, color=?, updated_at=datetime('now') WHERE id=?`)
+    .run(name || existing.name, description !== undefined ? description : existing.description, status || existing.status, page || existing.page, pillar || existing.pillar, start_date !== undefined ? start_date : existing.start_date, end_date !== undefined ? end_date : existing.end_date, budget !== undefined ? budget : existing.budget, target_audience !== undefined ? target_audience : existing.target_audience, goals !== undefined ? goals : existing.goals, color !== undefined ? color : existing.color, req.params.id);
+  res.json({ success: true });
+}));
+
+app.delete('/api/marketing/campaigns/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM campaigns WHERE id=?`).run(req.params.id);
+  db.prepare(`UPDATE content_posts SET campaign_id=NULL WHERE campaign_id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+// ── Pipeline Board — Kanban data grouped by status ─────────
+app.get('/api/marketing/pipeline', (req, res) => requireMarketing(req, res, () => {
+  const { campaign_id, page, pillar } = req.query;
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (campaign_id) { where += ' AND campaign_id=?'; params.push(campaign_id); }
+  if (page) { where += ' AND page=?'; params.push(page); }
+  if (pillar) { where += ' AND pillar=?'; params.push(pillar); }
+  
+  const posts = db.prepare(`SELECT cp.*, c.name as campaign_name, c.color as campaign_color FROM content_posts cp LEFT JOIN campaigns c ON cp.campaign_id = c.id ${where} ORDER BY cp.updated_at DESC`).all(...params);
+  
+  // Group by status
+  const stages = ['ideation','brief_ready','writing','quality_review','design','design_review','approved','scheduled','published','archived'];
+  const pipeline = {};
+  for (const s of stages) pipeline[s] = [];
+  for (const p of posts) {
+    const status = p.status || 'ideation';
+    if (!pipeline[status]) pipeline[status] = [];
+    pipeline[status].push(p);
+  }
+  
+  res.json({ stages: pipeline, counts: Object.fromEntries(Object.entries(pipeline).map(([k, v]) => [k, v.length])) });
+}));
+
+// ── Move post between pipeline stages ─────────────────────
+app.post('/api/marketing/posts/:id/move', (req, res) => requireMarketing(req, res, () => {
+  const postId = parseInt(req.params.id);
+  const { to_status, note } = req.body || {};
+  const validStatuses = ['ideation','brief_ready','writing','quality_review','design','design_review','approved','scheduled','published','archived'];
+  if (!validStatuses.includes(to_status)) return res.status(400).json({ error: 'Invalid status' });
+  
+  const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(postId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  
+  const fromStatus = post.status || 'ideation';
+  db.prepare(`UPDATE content_posts SET status=?, updated_at=datetime('now') WHERE id=?`).run(to_status, postId);
+  db.prepare(`INSERT INTO pipeline_logs (post_id, from_status, to_status, actor, note) VALUES (?, ?, ?, ?, ?)`)
+    .run(postId, fromStatus, to_status, req.user?.name || 'system', note || '');
+  
+  res.json({ success: true, postId, from: fromStatus, to: to_status });
+}));
+
+// ── Post Comments ─────────────────────────────────────────
+app.get('/api/marketing/posts/:id/comments', (req, res) => requireMarketing(req, res, () => {
+  const comments = db.prepare(`SELECT * FROM post_comments WHERE post_id=? ORDER BY created_at DESC`).all(req.params.id);
+  res.json(comments);
+}));
+
+app.post('/api/marketing/posts/:id/comments', (req, res) => requireMarketing(req, res, () => {
+  const { comment } = req.body || {};
+  if (!comment) return res.status(400).json({ error: 'comment required' });
+  const info = db.prepare(`INSERT INTO post_comments (post_id, user_name, user_role, comment) VALUES (?, ?, ?, ?)`)
+    .run(req.params.id, req.user?.name || 'User', req.user?.role || 'consultant', comment);
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+app.delete('/api/marketing/posts/comments/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM post_comments WHERE id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+// ── Post Performance (manual entry or webhook sync) ───────
+app.get('/api/marketing/posts/:id/performance', (req, res) => requireMarketing(req, res, () => {
+  const perf = db.prepare(`SELECT * FROM post_performance WHERE post_id=? ORDER BY recorded_at DESC`).all(req.params.id);
+  res.json(perf);
+}));
+
+app.post('/api/marketing/posts/:id/performance', (req, res) => requireMarketing(req, res, () => {
+  const { platform, impressions, reach, engagement, likes, comments, shares, clicks, cta_clicks, video_views, saves } = req.body || {};
+  const info = db.prepare(`INSERT INTO post_performance (post_id, platform, impressions, reach, engagement, likes, comments, shares, clicks, cta_clicks, video_views, saves) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(req.params.id, platform || 'facebook', impressions || 0, reach || 0, engagement || 0, likes || 0, comments || 0, shares || 0, clicks || 0, cta_clicks || 0, video_views || 0, saves || 0);
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+// ── Content Assets ────────────────────────────────────────
+app.get('/api/marketing/assets', (req, res) => requireMarketing(req, res, () => {
+  const { post_id, campaign_id, status } = req.query;
+  let sql = `SELECT a.*, cp.hook as post_title FROM content_assets a LEFT JOIN content_posts cp ON a.post_id = cp.id WHERE 1=1`;
+  const params = [];
+  if (post_id) { sql += ' AND a.post_id = ?'; params.push(post_id); }
+  if (campaign_id) { sql += ' AND a.campaign_id = ?'; params.push(campaign_id); }
+  if (status) { sql += ' AND a.status = ?'; params.push(status); }
+  sql += ' ORDER BY a.created_at DESC';
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.post('/api/marketing/assets', (req, res) => requireMarketing(req, res, () => {
+  const { post_id, campaign_id, asset_type, asset_url, thumbnail_url, file_name, file_size } = req.body || {};
+  const info = db.prepare(`INSERT INTO content_assets (post_id, campaign_id, asset_type, asset_url, thumbnail_url, file_name, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(post_id || null, campaign_id || null, asset_type || 'image', asset_url || '', thumbnail_url || '', file_name || '', file_size || '', req.user?.name || '');
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+app.put('/api/marketing/assets/:id', (req, res) => requireMarketing(req, res, () => {
+  const { status, feedback, asset_url, thumbnail_url } = req.body || {};
+  const existing = db.prepare(`SELECT * FROM content_assets WHERE id=?`).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Asset not found' });
+  db.prepare(`UPDATE content_assets SET status=?, feedback=?, asset_url=?, thumbnail_url=?, updated_at=datetime('now') WHERE id=?`)
+    .run(status !== undefined ? status : existing.status, feedback !== undefined ? feedback : existing.feedback, asset_url !== undefined ? asset_url : existing.asset_url, thumbnail_url !== undefined ? thumbnail_url : existing.thumbnail_url, req.params.id);
+  res.json({ success: true });
+}));
+
+app.delete('/api/marketing/assets/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM content_assets WHERE id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+// ── Pipeline Logs (audit trail) ──────────────────────────
+app.get('/api/marketing/posts/:id/logs', (req, res) => requireMarketing(req, res, () => {
+  const logs = db.prepare(`SELECT * FROM pipeline_logs WHERE post_id=? ORDER BY created_at DESC`).all(req.params.id);
+  res.json(logs);
+}));
+
+// ── Dashboard Stats ───────────────────────────────────────
+app.get('/api/marketing/dashboard', (req, res) => requireMarketing(req, res, () => {
+  const totalPosts = db.prepare(`SELECT COUNT(*) as count FROM content_posts`).get().count;
+  const byStatus = db.prepare(`SELECT status, COUNT(*) as count FROM content_posts GROUP BY status`).all();
+  const publishedThisMonth = db.prepare(`SELECT COUNT(*) as count FROM content_posts WHERE status='published' AND strftime('%Y-%m', published_at) = strftime('%Y-%m', 'now')`).get().count;
+  const activeCampaigns = db.prepare(`SELECT COUNT(*) as count FROM campaigns WHERE status='active'`).get().count;
+  const pendingAssets = db.prepare(`SELECT COUNT(*) as count FROM content_assets WHERE status IN ('pending','in_progress')`).get().count;
+  const queuedPosts = db.prepare(`SELECT COUNT(*) as count FROM publishing_queue WHERE status='queued'`).get().count;
+  
+  res.json({ totalPosts, byStatus, publishedThisMonth, activeCampaigns, pendingAssets, queuedPosts });
 }));
 
 // Catch-all: serve React app for any non-API route (production)
