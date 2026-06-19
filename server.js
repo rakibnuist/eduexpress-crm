@@ -1675,6 +1675,71 @@ function setupSchema() { db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status, start_date);
 
+  CREATE TABLE IF NOT EXISTS content_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    pillar TEXT CHECK(pillar IN ('scholarship','trust','career','urgency','university','cost','success_story','trending','brand','festival')),
+    page TEXT CHECK(page IN ('china','bd','instagram','tiktok','all')) DEFAULT 'china',
+    format TEXT CHECK(format IN ('Carousel','Reel','Single image','Story','Video','Live','Text')) DEFAULT 'Carousel',
+    language TEXT CHECK(language IN ('bangla','english','mixed')) DEFAULT 'bangla',
+    platform TEXT CHECK(platform IN ('facebook','instagram','tiktok')) DEFAULT 'facebook',
+    tone TEXT CHECK(tone IN ('expert_consultant','empathetic_brother','success_story','peer_friend')) DEFAULT 'expert_consultant',
+    hook_template TEXT,
+    body_template TEXT,
+    hashtags_template TEXT,
+    cta_template TEXT,
+    brief_template TEXT,
+    variables TEXT, -- JSON: { "university_name": "string", "stipend_range": "string" }
+    is_active INTEGER DEFAULT 1,
+    usage_count INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS content_calendar_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slot_date TEXT NOT NULL, -- YYYY-MM-DD
+    slot_time TEXT, -- HH:MM
+    page TEXT,
+    pillar TEXT,
+    post_id INTEGER,
+    status TEXT CHECK(status IN ('empty','planned','writing','review','approved','scheduled','published','skipped')) DEFAULT 'empty',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_slots_date ON content_calendar_slots(slot_date, page, status);
+  CREATE INDEX IF NOT EXISTS idx_calendar_slots_post ON content_calendar_slots(post_id);
+
+  CREATE TABLE IF NOT EXISTS publishing_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL,
+    page TEXT,
+    platform TEXT,
+    scheduled_date TEXT,
+    scheduled_time TEXT,
+    timezone TEXT DEFAULT 'Asia/Dhaka',
+    status TEXT CHECK(status IN ('pending','queued','published','failed','cancelled')) DEFAULT 'pending',
+    published_at TEXT,
+    platform_post_id TEXT,
+    platform_post_url TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_publish_schedule ON publishing_schedule(status, scheduled_date, scheduled_time);
+
+  CREATE TABLE IF NOT EXISTS best_time_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page TEXT,
+    platform TEXT,
+    day_of_week INTEGER, -- 0=Sunday, 6=Saturday
+    time_slot TEXT, -- HH:MM
+    engagement_score REAL DEFAULT 0,
+    based_on_posts INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(page, platform, day_of_week, time_slot)
+  );
+
   CREATE TABLE IF NOT EXISTS post_comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     post_id INTEGER NOT NULL,
@@ -2209,6 +2274,128 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
   }
+
+    // Seed best time slots for Bangladesh market (EDT optimized)
+    try {
+      const bestTimeCheck = db.prepare("SELECT COUNT(*) as c FROM best_time_slots").get();
+      if (bestTimeCheck.c === 0) {
+        const defaultTimes = [
+          // China page - Facebook - best engagement times (BD time)
+          { page: 'china', platform: 'facebook', day: 0, time: '19:00', score: 85 },
+          { page: 'china', platform: 'facebook', day: 0, time: '21:00', score: 78 },
+          { page: 'china', platform: 'facebook', day: 1, time: '19:30', score: 82 },
+          { page: 'china', platform: 'facebook', day: 1, time: '21:00', score: 75 },
+          { page: 'china', platform: 'facebook', day: 2, time: '19:00', score: 88 },
+          { page: 'china', platform: 'facebook', day: 2, time: '20:30', score: 80 },
+          { page: 'china', platform: 'facebook', day: 3, time: '19:00', score: 86 },
+          { page: 'china', platform: 'facebook', day: 3, time: '21:00', score: 79 },
+          { page: 'china', platform: 'facebook', day: 4, time: '19:00', score: 90 },
+          { page: 'china', platform: 'facebook', day: 4, time: '20:00', score: 84 },
+          { page: 'china', platform: 'facebook', day: 5, time: '18:00', score: 92 },
+          { page: 'china', platform: 'facebook', day: 5, time: '20:00', score: 88 },
+          { page: 'china', platform: 'facebook', day: 6, time: '18:00', score: 89 },
+          { page: 'china', platform: 'facebook', day: 6, time: '20:00', score: 85 },
+          // BD page - Facebook
+          { page: 'bd', platform: 'facebook', day: 0, time: '19:00', score: 87 },
+          { page: 'bd', platform: 'facebook', day: 0, time: '21:00', score: 80 },
+          { page: 'bd', platform: 'facebook', day: 1, time: '19:00', score: 85 },
+          { page: 'bd', platform: 'facebook', day: 1, time: '20:30', score: 78 },
+          { page: 'bd', platform: 'facebook', day: 2, time: '19:00', score: 89 },
+          { page: 'bd', platform: 'facebook', day: 2, time: '21:00', score: 82 },
+          { page: 'bd', platform: 'facebook', day: 3, time: '19:00', score: 86 },
+          { page: 'bd', platform: 'facebook', day: 3, time: '20:30', score: 80 },
+          { page: 'bd', platform: 'facebook', day: 4, time: '19:00', score: 91 },
+          { page: 'bd', platform: 'facebook', day: 4, time: '20:00', score: 86 },
+          { page: 'bd', platform: 'facebook', day: 5, time: '18:00', score: 93 },
+          { page: 'bd', platform: 'facebook', day: 5, time: '20:00', score: 89 },
+          { page: 'bd', platform: 'facebook', day: 6, time: '18:00', score: 90 },
+          { page: 'bd', platform: 'facebook', day: 6, time: '20:00', score: 87 },
+        ];
+        const insertBestTime = db.prepare(`INSERT INTO best_time_slots (page, platform, day_of_week, time_slot, engagement_score) VALUES (?, ?, ?, ?, ?)`);
+        for (const t of defaultTimes) {
+          insertBestTime.run(t.page, t.platform, t.day, t.time, t.score);
+        }
+        console.log(`[migration] Seeded ${defaultTimes.length} best time slots for auto-scheduling.`);
+      }
+    } catch (e) {
+      console.error('[migration] Best time seeding failed:', e.message);
+    }
+
+    // Seed default content templates
+    try {
+      const templateCheck = db.prepare("SELECT COUNT(*) as c FROM content_templates").get();
+      if (templateCheck.c === 0) {
+        const defaultTemplates = [
+          {
+            name: 'Scholarship Alert — China CSC',
+            pillar: 'scholarship',
+            page: 'china',
+            format: 'Carousel',
+            language: 'bangla',
+            hook: 'CSC Scholarship 2026 — Full Ride! 🎓',
+            body: 'Did you know? Chinese Government Scholarship (CSC) covers everything for Bangladesh students.\n\n✅ 100% Tuition Free\n✅ Monthly Stipend: ৳10,000-60,000\n✅ Free Accommodation\n✅ No IELTS (MOI Certificate)\n\nDeadline: {{deadline}}. Apply through EduExpress.',
+            hashtags: '#CSCScholarship #StudyInChina #FullScholarship #EduExpressBD',
+            cta: 'DM us for free consultation 📩',
+            brief: 'Carousel with scholarship timeline, eligibility checklist, and EduExpress contact'
+          },
+          {
+            name: 'Success Story — Visa Approved',
+            pillar: 'success_story',
+            page: 'china',
+            format: 'Single image',
+            language: 'mixed',
+            hook: 'From Dhanmondi to Beijing! 🎓🇨🇳',
+            body: 'Our student {{student_name}} just got their visa approved for {{university}}!\n\n✅ CSC Scholarship Winner\n✅ No CSCA Required\n✅ Started with zero preparation\n\n"I never thought I could study abroad. EduExpress made it possible."\n\nReady to be our next success story?',
+            hashtags: '#SuccessStory #VisaApproved #EduExpressBD #StudyAbroad',
+            cta: 'Apply Now — Limited Seats 🏃',
+            brief: 'Single image with student photo (with permission), visa screenshot, university logo'
+          },
+          {
+            name: 'Trust Builder — 8 Years of Excellence',
+            pillar: 'trust',
+            page: 'bd',
+            format: 'Carousel',
+            language: 'bangla',
+            hook: '8 Years. 2,000+ Students. 98% Visa Success.',
+            body: 'EduExpress International — Bangladesh\'s most trusted study abroad consultancy.\n\n📍 Dhanmondi, Dhaka\n✅ Payment After Visa Policy\n✅ 150+ Partner Universities\n✅ Dedicated Consultant Per Student\n\nWhy students choose us:\n→ Transparent process\n→ Real success stories\n→ Lifetime support\n\nYour dream university is one DM away.',
+            hashtags: '#TrustedConsultancy #EduExpressBD #StudyAbroad #VisaSuccess',
+            cta: 'Visit our Dhanmondi office 📍',
+            brief: 'Carousel with team photos, office interior, student testimonials, partner university logos'
+          },
+          {
+            name: 'Urgency — Intake Deadline Alert',
+            pillar: 'urgency',
+            page: 'china',
+            format: 'Reel',
+            language: 'bangla',
+            hook: '⏰ Last 7 Days! September Intake Deadline',
+            body: 'September 2026 intake applications closing soon!\n\n❌ Don\'t wait until last minute\n✅ Seats filling fast for top universities\n✅ Scholarship spots limited\n\nUniversities still accepting:\n→ {{university_1}}\n→ {{university_2}}\n→ {{university_3}}\n\nApply now or wait until 2027!',
+            hashtags: '#DeadlineAlert #ApplyNow #SeptemberIntake #EduExpressBD',
+            cta: 'WhatsApp: +8801983333566 📞',
+            brief: 'Reel with countdown animation, university campus footage, deadline calendar'
+          },
+          {
+            name: 'University Spotlight — Top Ranking',
+            pillar: 'university',
+            page: 'china',
+            format: 'Carousel',
+            language: 'english',
+            hook: 'Top 500 Worldwide — {{university_name}} 🏫',
+            body: 'Why choose {{university_name}}?\n\n🏆 QS Ranking: {{qs_rank}}\n📍 Location: {{city}}, China\n💰 Tuition: {{tuition}}\n🎓 Programs: {{programs}}\n📝 Entry: CSCA-Free for Bachelor\n\nCSC Scholarship available!\nMonthly stipend: ৳10,000-60,000\n\nApply through EduExpress for priority processing.',
+            hashtags: '#TopUniversity #StudyInChina #EduExpressBD #Scholarship',
+            cta: 'Click link in bio 🔗',
+            brief: 'Carousel with university campus photos, ranking badge, program list, fee structure'
+          }
+        ];
+        const insertTmpl = db.prepare(`INSERT INTO content_templates (name, description, pillar, page, format, language, platform, tone, hook_template, body_template, hashtags_template, cta_template, brief_template, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        for (const t of defaultTemplates) {
+          insertTmpl.run(t.name, '', t.pillar, t.page, t.format, t.language, 'facebook', 'expert_consultant', t.hook, t.body, t.hashtags, t.cta, t.brief, 'System');
+        }
+        console.log(`[migration] Seeded ${defaultTemplates.length} default content templates.`);
+      }
+    } catch (e) {
+      console.error('[migration] Template seeding failed:', e.message);
+    }
 
   // Seed pre-built data from external module (keeps server.js small)
   try {
@@ -7406,6 +7593,202 @@ app.put('/api/marketing/assets/:id', (req, res) => requireMarketing(req, res, ()
 
 app.delete('/api/marketing/assets/:id', (req, res) => requireMarketing(req, res, () => {
   db.prepare(`DELETE FROM content_assets WHERE id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+app.get('/api/marketing/templates', (req, res) => requireMarketing(req, res, () => {
+  const { pillar, page, active } = req.query;
+  let sql = `SELECT * FROM content_templates WHERE 1=1`;
+  const params = [];
+  if (pillar) { sql += ' AND pillar = ?'; params.push(pillar); }
+  if (page) { sql += ' AND (page = ? OR page = "all")'; params.push(page); }
+  if (active === '1') { sql += ' AND is_active = 1'; }
+  sql += ' ORDER BY usage_count DESC, created_at DESC';
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.get('/api/marketing/templates/:id', (req, res) => requireMarketing(req, res, () => {
+  const t = db.prepare(`SELECT * FROM content_templates WHERE id=?`).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Template not found' });
+  res.json(t);
+}));
+
+app.post('/api/marketing/templates', (req, res) => requireMarketing(req, res, () => {
+  const { name, description, pillar, page, format, language, platform, tone, hook_template, body_template, hashtags_template, cta_template, brief_template, variables } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const info = db.prepare(`INSERT INTO content_templates (name, description, pillar, page, format, language, platform, tone, hook_template, body_template, hashtags_template, cta_template, brief_template, variables, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(name, description || '', pillar || 'scholarship', page || 'china', format || 'Carousel', language || 'bangla', platform || 'facebook', tone || 'expert_consultant', hook_template || '', body_template || '', hashtags_template || '', cta_template || '', brief_template || '', variables || '', req.user?.name || '');
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+app.put('/api/marketing/templates/:id', (req, res) => requireMarketing(req, res, () => {
+  const { name, description, pillar, page, format, language, platform, tone, hook_template, body_template, hashtags_template, cta_template, brief_template, variables, is_active } = req.body || {};
+  const existing = db.prepare(`SELECT * FROM content_templates WHERE id=?`).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Template not found' });
+  db.prepare(`UPDATE content_templates SET name=?, description=?, pillar=?, page=?, format=?, language=?, platform=?, tone=?, hook_template=?, body_template=?, hashtags_template=?, cta_template=?, brief_template=?, variables=?, is_active=? WHERE id=?`)
+    .run(name || existing.name, description !== undefined ? description : existing.description, pillar || existing.pillar, page || existing.page, format || existing.format, language || existing.language, platform || existing.platform, tone || existing.tone, hook_template !== undefined ? hook_template : existing.hook_template, body_template !== undefined ? body_template : existing.body_template, hashtags_template !== undefined ? hashtags_template : existing.hashtags_template, cta_template !== undefined ? cta_template : existing.cta_template, brief_template !== undefined ? brief_template : existing.brief_template, variables !== undefined ? variables : existing.variables, is_active !== undefined ? is_active : existing.is_active, req.params.id);
+  res.json({ success: true });
+}));
+
+app.delete('/api/marketing/templates/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM content_templates WHERE id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+app.post('/api/marketing/templates/:id/use', (req, res) => requireMarketing(req, res, () => {
+  const template = db.prepare(`SELECT * FROM content_templates WHERE id=?`).get(req.params.id);
+  if (!template) return res.status(404).json({ error: 'Template not found' });
+  const vars = req.body?.variables || {};
+  // Simple string replacement for variables
+  let hook = template.hook_template || '';
+  let body = template.body_template || '';
+  let hashtags = template.hashtags_template || '';
+  let cta = template.cta_template || '';
+  let brief = template.brief_template || '';
+  for (const [key, val] of Object.entries(vars)) {
+    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+    hook = hook.replace(regex, val);
+    body = body.replace(regex, val);
+    hashtags = hashtags.replace(regex, val);
+    cta = cta.replace(regex, val);
+    brief = brief.replace(regex, val);
+  }
+  db.prepare(`UPDATE content_templates SET usage_count = usage_count + 1 WHERE id=?`).run(req.params.id);
+  res.json({ success: true, hook, body, hashtags, cta, brief, template });
+}));
+
+// ── Content Calendar Slots ────────────────────────────────────────
+app.get('/api/marketing/calendar', (req, res) => requireMarketing(req, res, () => {
+  const { month, page, status } = req.query; // month = YYYY-MM
+  if (!month) return res.status(400).json({ error: 'month (YYYY-MM) required' });
+  let sql = `SELECT s.*, cp.hook, cp.body, cp.status as post_status, cp.pillar, cp.format, cp.platform, cp.quality_score, cp.asset_url FROM content_calendar_slots s LEFT JOIN content_posts cp ON s.post_id = cp.id WHERE s.slot_date LIKE ?`;
+  const params = [month + '%'];
+  if (page) { sql += ' AND s.page = ?'; params.push(page); }
+  if (status) { sql += ' AND s.status = ?'; params.push(status); }
+  sql += ' ORDER BY s.slot_date, s.slot_time';
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.post('/api/marketing/calendar', (req, res) => requireMarketing(req, res, () => {
+  const { slot_date, slot_time, page, pillar, notes } = req.body || {};
+  if (!slot_date) return res.status(400).json({ error: 'slot_date required' });
+  const info = db.prepare(`INSERT INTO content_calendar_slots (slot_date, slot_time, page, pillar, status, notes) VALUES (?, ?, ?, ?, 'empty', ?)`)
+    .run(slot_date, slot_time || null, page || 'china', pillar || null, notes || '');
+  res.json({ success: true, id: info.lastInsertRowid });
+}));
+
+app.put('/api/marketing/calendar/:id', (req, res) => requireMarketing(req, res, () => {
+  const { slot_date, slot_time, post_id, status, notes } = req.body || {};
+  const existing = db.prepare(`SELECT * FROM content_calendar_slots WHERE id=?`).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Slot not found' });
+  db.prepare(`UPDATE content_calendar_slots SET slot_date=?, slot_time=?, post_id=?, status=?, notes=? WHERE id=?`)
+    .run(slot_date !== undefined ? slot_date : existing.slot_date, slot_time !== undefined ? slot_time : existing.slot_time, post_id !== undefined ? post_id : existing.post_id, status !== undefined ? status : existing.status, notes !== undefined ? notes : existing.notes, req.params.id);
+  res.json({ success: true });
+}));
+
+app.delete('/api/marketing/calendar/:id', (req, res) => requireMarketing(req, res, () => {
+  db.prepare(`DELETE FROM content_calendar_slots WHERE id=?`).run(req.params.id);
+  res.json({ success: true });
+}));
+
+// Auto-assign a post to a calendar slot
+app.post('/api/marketing/calendar/:id/assign', (req, res) => requireMarketing(req, res, () => {
+  const slotId = parseInt(req.params.id);
+  const { post_id } = req.body || {};
+  if (!post_id) return res.status(400).json({ error: 'post_id required' });
+  db.prepare(`UPDATE content_calendar_slots SET post_id=?, status='planned' WHERE id=?`).run(post_id, slotId);
+  res.json({ success: true });
+}));
+
+// ── Auto-Scheduling Engine ────────────────────────────────────────
+app.post('/api/marketing/auto-schedule', (req, res) => requireMarketing(req, res, () => {
+  const { post_id, page, platform, preferred_date, preferred_time } = req.body || {};
+  if (!post_id) return res.status(400).json({ error: 'post_id required' });
+  
+  const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(post_id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  
+  // Determine best time
+  let date = preferred_date;
+  let time = preferred_time;
+  
+  if (!date) {
+    // Default to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    date = tomorrow.toISOString().slice(0, 10);
+  }
+  
+  if (!time) {
+    // Get best time for this page/platform/day
+    const dayOfWeek = new Date(date).getDay();
+    const bestTime = db.prepare(`SELECT time_slot, engagement_score FROM best_time_slots WHERE page=? AND platform=? AND day_of_week=? ORDER BY engagement_score DESC LIMIT 1`).get(page || post.page, platform || post.platform || 'facebook', dayOfWeek);
+    time = bestTime?.time_slot || '19:00';
+  }
+  
+  // Create calendar slot if not exists
+  const existingSlot = db.prepare(`SELECT * FROM content_calendar_slots WHERE slot_date=? AND slot_time=? AND page=?`).get(date, time, page || post.page);
+  let slotId;
+  if (!existingSlot) {
+    const slot = db.prepare(`INSERT INTO content_calendar_slots (slot_date, slot_time, page, pillar, post_id, status, notes) VALUES (?, ?, ?, ?, ?, 'scheduled', ?)`)
+      .run(date, time, page || post.page, post.pillar, post_id, `Auto-scheduled for ${time}`);
+    slotId = slot.lastInsertRowid;
+  } else {
+    db.prepare(`UPDATE content_calendar_slots SET post_id=?, status='scheduled' WHERE id=?`).run(post_id, existingSlot.id);
+    slotId = existingSlot.id;
+  }
+  
+  // Create publishing schedule entry
+  const sched = db.prepare(`INSERT INTO publishing_schedule (post_id, page, platform, scheduled_date, scheduled_time, status) VALUES (?, ?, ?, ?, ?, 'pending')`)
+    .run(post_id, page || post.page, platform || post.platform || 'facebook', date, time);
+  
+  // Update post status
+  db.prepare(`UPDATE content_posts SET status='scheduled', post_date=?, post_time=? WHERE id=?`).run(date, time, post_id);
+  
+  res.json({ success: true, slot_id: slotId, schedule_id: sched.lastInsertRowid, date, time });
+}));
+
+// ── Best Time Analytics ────────────────────────────────────────
+app.get('/api/marketing/best-times', (req, res) => requireMarketing(req, res, () => {
+  const { page, platform } = req.query;
+  let sql = `SELECT * FROM best_time_slots WHERE 1=1`;
+  const params = [];
+  if (page) { sql += ' AND page = ?'; params.push(page); }
+  if (platform) { sql += ' AND platform = ?'; params.push(platform); }
+  sql += ' ORDER BY engagement_score DESC';
+  res.json(db.prepare(sql).all(...params));
+}));
+
+app.post('/api/marketing/best-times', (req, res) => requireMarketing(req, res, () => {
+  const { page, platform, day_of_week, time_slot, engagement_score } = req.body || {};
+  if (!page || time_slot === undefined || day_of_week === undefined) return res.status(400).json({ error: 'page, day_of_week, time_slot required' });
+  const info = db.prepare(`INSERT OR REPLACE INTO best_time_slots (page, platform, day_of_week, time_slot, engagement_score) VALUES (?, ?, ?, ?, ?)`)
+    .run(page, platform || 'facebook', day_of_week, time_slot, engagement_score || 0);
+  res.json({ success: true });
+}));
+
+// ── Publishing Schedule (auto-polling endpoint) ────────────────────
+app.get('/api/marketing/publishing-schedule/due', (req, res) => {
+  // This is called by n8n to get posts that are due to publish
+  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
+  if (!isInternal) return res.status(401).json({ error: 'Unauthorized' });
+  
+  const now = new Date().toISOString();
+  const due = db.prepare(`SELECT ps.*, cp.hook, cp.body, cp.hashtags, cp.cta, cp.asset_url, cp.brief FROM publishing_schedule ps LEFT JOIN content_posts cp ON ps.post_id = cp.id WHERE ps.status = 'pending' AND (ps.scheduled_date || 'T' || ps.scheduled_time) <= ? ORDER BY ps.scheduled_date, ps.scheduled_time LIMIT 10`).get(now);
+  res.json(due || []);
+});
+
+app.post('/api/marketing/publishing-schedule/:id/publish', (req, res) => requireMarketing(req, res, () => {
+  const scheduleId = parseInt(req.params.id);
+  const { platform_post_id, platform_post_url } = req.body || {};
+  db.prepare(`UPDATE publishing_schedule SET status='published', published_at=datetime('now'), platform_post_id=?, platform_post_url=? WHERE id=?`).run(platform_post_id || null, platform_post_url || null, scheduleId);
+  res.json({ success: true });
+}));
+
+app.post('/api/marketing/publishing-schedule/:id/fail', (req, res) => requireMarketing(req, res, () => {
+  const scheduleId = parseInt(req.params.id);
+  const { error } = req.body || {};
+  db.prepare(`UPDATE publishing_schedule SET status='failed', error_message=? WHERE id=?`).run(error || 'Unknown', scheduleId);
   res.json({ success: true });
 }));
 
