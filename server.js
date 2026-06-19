@@ -6623,7 +6623,7 @@ app.post('/api/marketing/llm-test', async (req, res) => {
     
     try {
       if (llmProvider === 'opencode-go') {
-        const resp = await fetch('https://api.opencode-go.com/v1/chat/completions', {
+        const resp = await fetch('https://api.opencode.ai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -6794,10 +6794,11 @@ Write the complete post now. Return ONLY JSON.`;
         else throw new Error('Could not parse LLM response as JSON');
       }
     } else if (llmProvider === 'opencode-go') {
-      // OpenCode GO — GLM models (OpenAI-compatible)
+      // OpenCode AI — GLM models (OpenAI-compatible)
+      // Correct endpoint: https://api.opencode.ai/v1/chat/completions
       let openCodeRes;
       try {
-        openCodeRes = await fetch('https://api.opencode-go.com/v1/chat/completions', {
+        openCodeRes = await fetch('https://api.opencode.ai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${llmApiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -6808,12 +6809,11 @@ Write the complete post now. Return ONLY JSON.`;
             ],
             temperature: 0.7,
             max_tokens: 1500
-            // Note: response_format may not be supported by all providers
           })
         });
       } catch (netErr) {
-        console.error('[generate] Network error calling opencode-go:', netErr.message);
-        throw new Error(`Network error calling OpenCode GO: ${netErr.message}. Check if the API endpoint is reachable.`);
+        console.error('[generate] Network error calling opencode.ai:', netErr.message);
+        throw new Error(`Network error calling opencode.ai: ${netErr.message}. Check if the API endpoint is reachable.`);
       }
       
       let openCodeData;
