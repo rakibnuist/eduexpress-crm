@@ -2250,7 +2250,85 @@ function runMigrations() {
     }
   } catch (e) {
     console.error('[migration] Seed data failed:', e.message);
+  }  // ── Professional SMM Pipeline v3.0: Recreate content_posts with new status pipeline ──
+  try {
+    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='content_posts'").get()?.sql || "";
+    // If the table still has the old CHECK constraint (with 'drafted' but not 'ideation'), recreate it
+    if (sql.includes("drafted") && !sql.includes("ideation")) {
+      console.log("[migration] Recreating content_posts table with new v3.0 pipeline statuses...");
+      db.exec(`
+        CREATE TABLE content_posts_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          week TEXT,
+          page TEXT CHECK(page IN ('china','bd','instagram','tiktok')),
+          pillar TEXT,
+          format TEXT,
+          hook TEXT,
+          body TEXT,
+          hashtags TEXT,
+          cta TEXT,
+          brief TEXT,
+          post_date TEXT,
+          post_time TEXT,
+          asset_url TEXT,
+          asset_type TEXT,
+          asset_uploaded_by TEXT,
+          asset_uploaded_at TEXT,
+          status TEXT DEFAULT 'ideation',
+          quality_score INTEGER,
+          quality_checks TEXT,
+          utm_source TEXT,
+          utm_medium TEXT,
+          utm_campaign TEXT,
+          utm_content TEXT,
+          short_link TEXT,
+          redraft_count INTEGER DEFAULT 0,
+          research_intel_id INTEGER,
+          shares INTEGER,
+          comments INTEGER,
+          saves INTEGER,
+          video_views INTEGER,
+          leads INTEGER,
+          published_at TEXT,
+          published_by TEXT,
+          language TEXT DEFAULT 'bangla',
+          campaign_id INTEGER,
+          assigned_to TEXT,
+          reviewed_by TEXT,
+          reviewed_at TEXT,
+          rejection_reason TEXT,
+          due_date TEXT,
+          priority TEXT CHECK(priority IN ('low','normal','high','urgent')) DEFAULT 'normal',
+          notes TEXT,
+          tags TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        INSERT INTO content_posts_new SELECT * FROM content_posts;
+        DROP TABLE content_posts;
+        ALTER TABLE content_posts_new RENAME TO content_posts;
+        CREATE INDEX IF NOT EXISTS idx_posts_status ON content_posts(status);
+        CREATE INDEX IF NOT EXISTS idx_posts_page ON content_posts(page);
+        CREATE INDEX IF NOT EXISTS idx_posts_campaign ON content_posts(campaign_id);
+      `);
+      // Map old statuses to new pipeline stages
+      db.exec(`
+        UPDATE content_posts SET status = CASE
+          WHEN status = 'drafted' THEN 'writing'
+          WHEN status = 'approved' THEN 'approved'
+          WHEN status = 'scheduled' THEN 'scheduled'
+          WHEN status = 'published' THEN 'published'
+          WHEN status = 'asset_pending' THEN 'design'
+          WHEN status = 'asset_ready' THEN 'design_review'
+          ELSE 'ideation'
+        END
+      `);
+      console.log("[migration] content_posts recreated with new pipeline stages.");
+    }
+  } catch (e) {
+    console.error('[migration] content_posts recreation failed:', e.message);
   }
+
 }
 
 
