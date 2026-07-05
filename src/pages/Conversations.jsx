@@ -945,9 +945,9 @@ export default function Conversations({ user }) {
                           const timeStr = toDate(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
                           return (
                             <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
-                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
-                                ${m.is_internal_note ? 'bg-amber-50 text-amber-900 rounded-tl-xs border-amber-200/70 border-dashed' :
-                                  isIn ? 'bg-white text-slate-800 rounded-tl-xs border-slate-100' : 'bg-blue-600 text-white rounded-tr-xs border-transparent'}`}>
+                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
+                                ${m.is_internal_note ? 'bg-amber-50/70 text-amber-900 rounded-2xl rounded-tl-none border-amber-200/80 border-dashed shadow-xs' :
+                                  isIn ? 'bg-white text-slate-800 rounded-2xl rounded-tl-none border-slate-100 shadow-xs' : 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none border-transparent shadow-xs'}`}>
                                 {!isIn && m.sent_by && !m.is_internal_note && (
                                   <p className="text-[9px] text-blue-200/90 font-extrabold tracking-wider uppercase mb-0.5">{m.sent_by}</p>
                                 )}
@@ -1263,30 +1263,30 @@ export default function Conversations({ user }) {
             </>
           ) : (
             /* Empty State */
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/40">
               <div className="max-w-sm w-full flex flex-col items-center">
-                <div className="grid grid-cols-3 gap-3 w-full mb-8">
+                <div className="grid grid-cols-3 gap-3.5 w-full mb-8">
                   {[
-                    { icon: CheckCircle, label: 'Webhooks', sub: 'Connected', iconColor: 'text-emerald-500', bg: 'bg-emerald-50', pulse: true },
+                    { icon: CheckCircle, label: 'Webhooks', sub: 'Connected', iconColor: 'text-emerald-500', bg: 'bg-emerald-50' },
                     { icon: MessageSquare, label: 'Channels', sub: `${channels.length || 3} Active`, iconColor: 'text-blue-500', bg: 'bg-blue-50' },
-                    { icon: Bell, label: 'Real-time', sub: 'SSE + Polling', iconColor: 'text-indigo-500', bg: 'bg-indigo-50' },
-                  ].map(({ icon: Icon, label, sub, iconColor, bg, pulse }) => (
-                    <div key={label} className="bg-white rounded-2xl border border-slate-200/60 p-4 flex flex-col items-center gap-2 shadow-sm">
+                    { icon: Bell, label: 'Real-time', sub: 'Active', iconColor: 'text-indigo-500', bg: 'bg-indigo-50' },
+                  ].map(({ icon: Icon, label, sub, iconColor, bg }) => (
+                    <div key={label} className="bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200/50 p-4 flex flex-col items-center gap-2 shadow-xs transition-all hover:shadow-md hover:-translate-y-0.5 duration-300">
                       <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
                         <Icon size={18} className={iconColor} />
                       </div>
                       <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">{label}</p>
                       <p className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                        {pulse && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}{sub}
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />{sub}
                       </p>
                     </div>
                   ))}
                 </div>
-                <div className="w-12 h-12 rounded-2xl bg-blue-600/10 flex items-center justify-center mb-4">
-                  <Inbox size={22} className="text-blue-600" />
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center mb-4 shadow-lg shadow-blue-500/15">
+                  <Inbox size={24} className="text-white" />
                 </div>
                 <h2 className="text-base font-bold text-slate-800">Unified Inbox</h2>
-                <p className="text-slate-400 text-xs mt-2 leading-relaxed">Select a conversation to start chatting. All channels in one place.</p>
+                <p className="text-slate-400 text-xs mt-2 leading-relaxed max-w-[280px]">Select a conversation to start chatting. Manage WhatsApp, Messenger, and Instagram in one place.</p>
                 <div className="mt-6 text-slate-400 text-[10px] font-semibold bg-white/80 px-4 py-1.5 rounded-full border border-slate-200/50 shadow-sm">
                   EduExpress CRM · Unified Inbox v4.0
                 </div>
