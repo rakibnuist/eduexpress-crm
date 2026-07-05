@@ -2356,20 +2356,18 @@ function runMigrations() {
 
   // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token if empty
   try {
-    const newToken = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';
-    const info = db.prepare("UPDATE channels SET access_token = ? WHERE access_token IS NULL OR access_token = ''").run(newToken);
+    const newToken = 'EAAVoF1AFCwoBR1ZAIqUN6mXMlFpaXhpzMgFlCP1KplZBNSY0FPagOD6iJBKeamBTvaCZAPo6YEw9YO1IZCT63BqzrtqBzZBSDGZCG4mtlPZAKQF4ZBmXGlowYXoSIzgZCB1j102Klcx4gMbOjeJwAUtroyJ9D95CnQ3C7j5tZA6OfItn22siqZAyzVXL1gI4KI7NoPstAZDZD';
+    const oldToken = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';
     
-    // Only insert default configurations if not already set
-    const hasPageToken = db.prepare("SELECT value FROM meta_config WHERE key = 'page_access_token'").get();
-    if (!hasPageToken || !hasPageToken.value) {
-      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
-    }
-    const hasCapiToken = db.prepare("SELECT value FROM meta_config WHERE key = 'capi_token'").get();
-    if (!hasCapiToken || !hasCapiToken.value) {
-      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
-    }
+    // Update channels still using old or empty tokens
+    const info = db.prepare("UPDATE channels SET access_token = ? WHERE access_token IS NULL OR access_token = '' OR access_token = ?").run(newToken, oldToken);
+    
+    // Always force update the global configs to the active token
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
+    
     if (info.changes > 0) {
-      console.log(`[migration] Self-healed ${info.changes} channels with Global Access Token.`);
+      console.log(`[migration] Self-healed ${info.changes} channels with updated Global Access Token.`);
     }
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
