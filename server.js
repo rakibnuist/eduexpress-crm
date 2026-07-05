@@ -3349,23 +3349,29 @@ async function sendBroadcast(campaignId) {
     const segmentConfig = campaign.segment_config ? JSON.parse(campaign.segment_config) : {};
     if (campaign.segment_type === 'all' || !campaign.segment_type) {
       contacts = db.prepare("SELECT * FROM contacts WHERE wa_id IS NOT NULL OR messenger_id IS NOT NULL OR instagram_id IS NOT NULL").all();
-    } else if (campaign.segment_type === 'tag') {
+    } else if (campaign.segment_type === 'tag' || campaign.segment_type === 'by_tag') {
       const tagIds = segmentConfig.tag_ids || [];
       if (tagIds.length) {
         const placeholders = tagIds.map(() => '?').join(',');
         contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN contact_tag_assignments ON contact_tag_assignments.contact_id = contacts.id WHERE contact_tag_assignments.tag_id IN (${placeholders}) GROUP BY contacts.id`).all(...tagIds);
       }
-    } else if (campaign.segment_type === 'status') {
+    } else if (campaign.segment_type === 'status' || campaign.segment_type === 'by_status') {
       const statuses = segmentConfig.lead_statuses || [];
       if (statuses.length) {
         const placeholders = statuses.map(() => '?').join(',');
         contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN leads ON leads.id = contacts.lead_id WHERE leads.lead_status IN (${placeholders}) GROUP BY contacts.id`).all(...statuses);
       }
-    } else if (campaign.segment_type === 'channel') {
+    } else if (campaign.segment_type === 'channel' || campaign.segment_type === 'by_channel') {
       const channelTypes = segmentConfig.channel_types || [];
       if (channelTypes.length) {
         const placeholders = channelTypes.map(() => '?').join(',');
-        contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN conversations ON conversations.contact_id = contacts.id WHERE conversations.channel_type IN (${placeholders}) GROUP BY contacts.id`).all(...channelTypes);
+        const isNumeric = channelTypes.every(v => !isNaN(parseInt(v)));
+        if (isNumeric) {
+          const channelIds = channelTypes.map(v => parseInt(v));
+          contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN conversations ON conversations.contact_id = contacts.id WHERE conversations.channel_id IN (${placeholders}) GROUP BY contacts.id`).all(...channelIds);
+        } else {
+          contacts = db.prepare(`SELECT contacts.* FROM contacts JOIN conversations ON conversations.contact_id = contacts.id WHERE conversations.channel_type IN (${placeholders}) GROUP BY contacts.id`).all(...channelTypes);
+        }
       }
     }
 
@@ -6580,15 +6586,27 @@ app.get('/api/meta/stats', (req, res) => {
 // Automation Rules
 app.get('/api/automation/rules', (req, res) => requireManagerOrAdmin(req, res, () => {
   const rows = db.prepare("SELECT * FROM automation_rules ORDER BY priority DESC, id DESC").all();
-  res.json(rows);
+  res.json(rows.map(r => ({
+    ...r,
+    is_active: r.active === 1,
+    trigger_config: r.trigger_config ? JSON.parse(r.trigger_config) : {},
+    action_config: r.action_config ? JSON.parse(r.action_config) : {}
+  })));
 }));
 
 app.post('/api/automation/rules', (req, res) => requireAdmin(req, res, () => {
-  const { name, trigger_type, trigger_config, action_type, action_config, priority, active } = req.body || {};
+  const { name, trigger_type, trigger_config, action_type, action_config, priority, active, is_active } = req.body || {};
   if (!name || !trigger_type || !action_type) return res.status(400).json({ error: 'name, trigger_type, and action_type are required' });
+  const effectiveActive = is_active !== undefined ? (is_active ? 1 : 0) : (active !== undefined ? (active ? 1 : 0) : 1);
   const info = db.prepare(`INSERT INTO automation_rules (name, trigger_type, trigger_config, action_type, action_config, priority, active)
-    VALUES (?,?,?,?,?,?,?)`).run(name, trigger_type, trigger_config ? JSON.stringify(trigger_config) : null, action_type, action_config ? JSON.stringify(action_config) : null, priority ?? 0, active ?? 1);
-  res.json(db.prepare("SELECT * FROM automation_rules WHERE id=?").get(info.lastInsertRowid));
+    VALUES (?,?,?,?,?,?,?)`).run(name, trigger_type, trigger_config ? JSON.stringify(trigger_config) : null, action_type, action_config ? JSON.stringify(action_config) : null, priority ?? 0, effectiveActive);
+  const r = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(info.lastInsertRowid);
+  res.json({
+    ...r,
+    is_active: r.active === 1,
+    trigger_config: r.trigger_config ? JSON.parse(r.trigger_config) : {},
+    action_config: r.action_config ? JSON.parse(r.action_config) : {}
+  });
 }));
 
 app.put('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
@@ -6598,7 +6616,13 @@ app.put('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => 
   const effectiveActive = is_active !== undefined ? (is_active ? 1 : 0) : (active !== undefined ? (active ? 1 : 0) : null);
   db.prepare(`UPDATE automation_rules SET name=COALESCE(?,name), trigger_type=COALESCE(?,trigger_type), trigger_config=COALESCE(?,trigger_config), action_type=COALESCE(?,action_type), action_config=COALESCE(?,action_config), priority=COALESCE(?,priority), active=COALESCE(?,active) WHERE id=?`)
     .run(name ?? null, trigger_type ?? null, trigger_config ? JSON.stringify(trigger_config) : null, action_type ?? null, action_config ? JSON.stringify(action_config) : null, priority ?? null, effectiveActive, req.params.id);
-  res.json(db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id));
+  const r = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id);
+  res.json({
+    ...r,
+    is_active: r.active === 1,
+    trigger_config: r.trigger_config ? JSON.parse(r.trigger_config) : {},
+    action_config: r.action_config ? JSON.parse(r.action_config) : {}
+  });
 }));
 
 app.delete('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () => {
@@ -6616,7 +6640,10 @@ app.post('/api/automation/rules/:id/test', (req, res) => requireAdmin(req, res, 
 // Message Templates
 app.get('/api/templates', (req, res) => requireManagerOrAdmin(req, res, () => {
   const rows = db.prepare("SELECT * FROM message_templates ORDER BY category, usage_count DESC, id DESC").all();
-  res.json(rows);
+  res.json(rows.map(r => {
+    try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
+    return r;
+  }));
 }));
 
 app.post('/api/templates', (req, res) => requireAdmin(req, res, () => {
@@ -6624,7 +6651,9 @@ app.post('/api/templates', (req, res) => requireAdmin(req, res, () => {
   if (!name || !content) return res.status(400).json({ error: 'name and content are required' });
   const info = db.prepare(`INSERT INTO message_templates (name, category, language, content, variables, approved)
     VALUES (?,?,?,?,?,?)`).run(name, category || 'general', language || 'en', content, variables ? JSON.stringify(variables) : null, approved ?? 0);
-  res.json(db.prepare("SELECT * FROM message_templates WHERE id=?").get(info.lastInsertRowid));
+  const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(info.lastInsertRowid);
+  try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
+  res.json(r);
 }));
 
 app.put('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
@@ -6633,7 +6662,9 @@ app.put('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
   if (!cur) return res.status(404).json({ error: 'Not found' });
   db.prepare(`UPDATE message_templates SET name=COALESCE(?,name), category=COALESCE(?,category), language=COALESCE(?,language), content=COALESCE(?,content), variables=COALESCE(?,variables), approved=COALESCE(?,approved) WHERE id=?`)
     .run(name ?? null, category ?? null, language ?? null, content ?? null, variables ? JSON.stringify(variables) : null, approved ?? null, req.params.id);
-  res.json(db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id));
+  const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
+  try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
+  res.json(r);
 }));
 
 app.delete('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
@@ -6716,10 +6747,20 @@ app.get('/api/broadcast-campaigns', (req, res) => requireManagerOrAdmin(req, res
 }));
 
 app.post('/api/broadcast-campaigns', (req, res) => requireAdmin(req, res, () => {
-  const { name, segment_type, segment_config, template_id, content, scheduled_at } = req.body || {};
+  const { name, segment_type, segment_config, segment_value, template_id, content, scheduled_at } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name is required' });
+  let finalConfig = segment_config || {};
+  if (segment_value) {
+    if (segment_type === 'by_tag' || segment_type === 'tag') {
+      finalConfig.tag_ids = [parseInt(segment_value)];
+    } else if (segment_type === 'by_status' || segment_type === 'status') {
+      finalConfig.lead_statuses = [segment_value];
+    } else if (segment_type === 'by_channel' || segment_type === 'channel') {
+      finalConfig.channel_types = [segment_value];
+    }
+  }
   const info = db.prepare(`INSERT INTO broadcast_campaigns (name, segment_type, segment_config, template_id, content, scheduled_at, created_by)
-    VALUES (?,?,?,?,?,?,?)`).run(name, segment_type || null, segment_config ? JSON.stringify(segment_config) : null, template_id || null, content || null, scheduled_at || null, req.user?.name || req.user?.email || null);
+    VALUES (?,?,?,?,?,?,?)`).run(name, segment_type || null, JSON.stringify(finalConfig), template_id || null, content || null, scheduled_at || null, req.user?.name || req.user?.email || null);
   res.json(db.prepare("SELECT * FROM broadcast_campaigns WHERE id=?").get(info.lastInsertRowid));
 }));
 

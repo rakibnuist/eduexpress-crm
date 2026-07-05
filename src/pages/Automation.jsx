@@ -14,6 +14,7 @@ import {
 import {
   BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, Legend
 } from 'recharts';
+import { toDate } from '../lib/format';
 
 const TABS = [
   { id: 'rules',      label: 'Automation Rules',   icon: Zap },
@@ -716,7 +717,7 @@ function BroadcastsTab() {
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadge(b.status)}`}>{b.status}</span>
                   {b.scheduled_at && (
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><CalendarDays size={9} />{new Date(b.scheduled_at).toLocaleDateString()}</span>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><CalendarDays size={9} />{toDate(b.scheduled_at).toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1">

@@ -355,6 +355,8 @@ export const api = {
   broadcastCampaigns: () => req('/broadcast-campaigns'),
   createBroadcastCampaign: (d) => req('/broadcast-campaigns', { method: 'POST', body: JSON.stringify(d) }),
   sendBroadcastCampaign: (id) => req(`/broadcast-campaigns/${id}/send`, { method: 'POST' }),
+  pauseBroadcast: (id) => req(`/broadcast-campaigns/${id}/pause`, { method: 'POST' }),
+  resumeBroadcast: (id) => req(`/broadcast-campaigns/${id}/resume`, { method: 'POST' }),
   deleteBroadcastCampaign: (id) => req(`/broadcast-campaigns/${id}`, { method: 'DELETE' }),
 
   conversationNotes: (id) => req(`/conversations/${id}/notes`),
