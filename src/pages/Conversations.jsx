@@ -92,7 +92,10 @@ export default function Conversations({ user }) {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
 
-  const [showContactPanel, setShowContactPanel] = useState(true);
+  const [showContactPanel, setShowContactPanel] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth >= 1280;
+  });
   const [contactNotes, setContactNotes] = useState([]);
   const [contactTags, setContactTags] = useState([]);
   const [newNote, setNewNote] = useState('');
@@ -109,7 +112,7 @@ export default function Conversations({ user }) {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return window.innerWidth < 1024;
+    return window.innerWidth < 1280;
   });
   const [expandedGroups, setExpandedGroups] = useState(() => {
     return { whatsapp: true, messenger: true, instagram: true, tiktok: true };
@@ -834,7 +837,7 @@ export default function Conversations({ user }) {
         </div>
 
         {/* ── CHAT THREAD ── */}
-        <div className={`${selectedConv ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0 bg-[#f0f4f8]`}>
+        <div className={`${selectedConv ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-[360px] md:min-w-[400px] bg-[#f0f4f8]`}>
           {selectedConv ? (
             <>
               {/* Chat Header */}
