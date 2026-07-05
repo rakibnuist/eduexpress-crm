@@ -1025,7 +1025,7 @@ function MetaIntegrationSettings() {
 
   // SSE listener for sync progress / completion / errors
   useEffect(() => {
-    const es = new EventSource('/api/events');
+    const es = new EventSource('/api/events', { withCredentials: true });
     es.addEventListener('sync_done', (e) => {
       try {
         const data = JSON.parse(e.data);

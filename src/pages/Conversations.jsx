@@ -303,7 +303,7 @@ export default function Conversations({ user }) {
   }, [selectedConv, silentRefresh, silentRefreshMessages]);
 
   useEffect(() => {
-    const es = new EventSource('/api/events');
+    const es = new EventSource('/api/events', { withCredentials: true });
     es.addEventListener('new_message', (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -324,7 +324,7 @@ export default function Conversations({ user }) {
             return prev;
           }
           const updated = [...prev];
-          updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (selectedConv && selectedConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + (data.direction === 'in' ? 1 : 0)) };
+          updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (selectedConv && selectedConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
           return updated.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
         });
         if (!selectedConv || selectedConv.id !== data.conversation_id) {

@@ -76,7 +76,7 @@ export default function NotificationBell({ user }) {
     let retry;
     let delay = 2000;
     const connect = () => {
-      es = new EventSource('/api/events');
+      es = new EventSource('/api/events', { withCredentials: true });
       es.onopen = () => { setConnected(true); delay = 2000; };
       es.onmessage = (e) => {
         try {

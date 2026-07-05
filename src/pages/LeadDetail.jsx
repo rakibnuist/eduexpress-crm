@@ -97,7 +97,7 @@ export default function LeadDetail({ user }) {
   // Real-time: prepend any new activity for this lead as it happens
   useEffect(() => {
     if (!lead?.id) return;
-    const es = new EventSource('/api/events');
+    const es = new EventSource('/api/events', { withCredentials: true });
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);

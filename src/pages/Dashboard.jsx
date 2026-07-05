@@ -48,7 +48,7 @@ export default function Dashboard({ user }) {
   useEffect(() => {
     const load = () => api.broadcasts().then(setBroadcasts).catch(() => {});
     load();
-    const es = new EventSource('/api/events');
+    const es = new EventSource('/api/events', { withCredentials: true });
     es.onmessage = (e) => {
       try { const d = JSON.parse(e.data); if (d.type === 'broadcast_new') load(); } catch {}
     };
