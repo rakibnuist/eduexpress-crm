@@ -3379,7 +3379,7 @@ app.get('/api/dashboard', (req, res) => {
       (SELECT SUM(paid) FROM leads ${baseWhere}${chinaExclusion}) AS total_paid,
       (SELECT COUNT(*) FROM leads ${baseWhere} AND meta_lead_id IS NOT NULL${chinaExclusion}) AS meta_leads,
       (SELECT COUNT(*) FROM leads ${baseWhere} AND date_added=?${chinaExclusion}) AS new_today
-  `).get(...leadParams, today, ...leadParams, today, ...leadParams, today, ...leadParams, today, ...leadParams, today);
+  `).get(...leadParams, ...leadParams, today, ...leadParams, ...leadParams, ...leadParams, today);
 
   const convScalars = db.prepare(`
     SELECT
