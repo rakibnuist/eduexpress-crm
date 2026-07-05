@@ -2891,6 +2891,81 @@ function createLeadFromContact(contactId, source, initialMessage) {
   return null;
 }
 
+function createLeadFromReferral({ contact, channel, referralData, sourcePlatform }) {
+  try {
+    if (contact.lead_id) return null; // Lead already exists
+
+    const adId = referralData.ad_id || referralData.source_id;
+    const campaignId = referralData.campaign_id || referralData.campaign_name;
+    const adTitle = referralData.ad_title || referralData.headline || '';
+    const bodyText = referralData.body || '';
+
+    const lead_id = nextLeadId();
+    let assigned_consultant = channel.consultant || null;
+    let destination = 'Bangladesh';
+    let source = 'In-House';
+
+    // Routing rules
+    const textToCheck = (adTitle + ' ' + bodyText).toLowerCase();
+    if (textToCheck.includes('china') || textToCheck.includes('chinese') || textToCheck.includes('中国')) {
+      destination = 'China';
+      source = 'China';
+      assigned_consultant = 'Abdullah Al Rakib';
+    } else if (textToCheck.includes('b2b') || textToCheck.includes('agent')) {
+      destination = 'Bangladesh';
+      source = 'B2B';
+      assigned_consultant = 'Tahmid Imam';
+    } else if (textToCheck.includes('bangladesh') || textToCheck.includes('bd') || textToCheck.includes('office')) {
+      destination = 'Bangladesh';
+      source = 'In-House';
+      assigned_consultant = 'Taj Ahmed';
+    }
+
+    const platformSourceMap = {
+      whatsapp: 'WhatsApp Ad',
+      messenger: 'Facebook Ad',
+      instagram: 'Instagram Ad'
+    };
+
+    const noteText = adTitle 
+      ? `Click-to-${sourcePlatform} Referral Ad: "${adTitle}" ${bodyText ? '- ' + bodyText : ''}`
+      : `Auto-created from Click-to-${sourcePlatform} ad.`;
+
+    const params = leadParams({
+      client_name: contact.name || 'Chat Lead',
+      phone: contact.phone || null,
+      email: contact.email || null,
+      destination,
+      source,
+      lead_source: platformSourceMap[sourcePlatform] || 'Facebook Ad',
+      lead_status: 'New Lead',
+      assigned_consultant,
+      meta_ad_id: adId || null,
+      meta_campaign: campaignId || null,
+      notes: noteText
+    }, lead_id, 0);
+
+    const info = db.prepare(LEAD_INSERT_SQL).run(params);
+    const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
+    if (lead) {
+      db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, contact.id);
+      db.prepare("UPDATE conversations SET lead_id=? WHERE contact_id=?").run(lead.id, contact.id);
+      
+      broadcast('new_lead', { lead });
+      logActivity({
+        type: 'lead_created',
+        actor: { name: 'Meta Ad Automation' },
+        lead,
+        details: { client_name: contact.name, source: platformSourceMap[sourcePlatform] || 'Facebook Ad' }
+      });
+      return lead;
+    }
+  } catch (err) {
+    console.error('[referral-lead] Failed to create lead from referral:', err.message);
+  }
+  return null;
+}
+
 
 
 // ── n8n AI Welcome Bot Integration ───────────────────────────────────────────
@@ -6080,6 +6155,18 @@ app.post('/webhook/meta', async (req, res) => {
           const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
           const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
 
+          // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
+          if (msg.referral && !contact.lead_id) {
+            createLeadFromReferral({
+              contact,
+              channel,
+              referralData: msg.referral,
+              sourcePlatform: 'whatsapp'
+            });
+            const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+            if (updatedContact) contact.lead_id = updatedContact.lead_id;
+          }
+
           let content, type = msg.type, mediaUrl = null, caption = null;
           if (msg.type === 'text')     { content = msg.text?.body; }
           else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
@@ -6210,6 +6297,19 @@ app.post('/webhook/meta', async (req, res) => {
 
         const conv = upsertConversation(contact.id, channel.id, 'messenger');
 
+        const referral = messaging.referral || messaging.message?.referral;
+        // If message is from a Meta Paid Ad (Click-to-Messenger referral), auto-create a lead
+        if (referral && !contact.lead_id) {
+          createLeadFromReferral({
+            contact,
+            channel,
+            referralData: referral,
+            sourcePlatform: 'messenger'
+          });
+          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+          if (updatedContact) contact.lead_id = updatedContact.lead_id;
+        }
+
         // Extract text or media attachment
         let text = messaging.message.text, mtype = 'text', murl = null;
         const att = messaging.message.attachments?.[0];
@@ -6262,6 +6362,19 @@ app.post('/webhook/meta', async (req, res) => {
         } catch {}
 
         const conv = upsertConversation(contact.id, channel.id, 'instagram');
+
+        const referral = msg.referral || msg.message?.referral;
+        // If message is from a Meta Paid Ad (Instagram Click-to-Chat referral), auto-create a lead
+        if (referral && !contact.lead_id) {
+          createLeadFromReferral({
+            contact,
+            channel,
+            referralData: referral,
+            sourcePlatform: 'instagram'
+          });
+          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+          if (updatedContact) contact.lead_id = updatedContact.lead_id;
+        }
         const text = msg.message.text || '[message]';
         saveInboundMessage(conv.id, text, 'text', msg.message.mid);
         console.log(`📸 Instagram [${channel.name}]: ${text}`);
