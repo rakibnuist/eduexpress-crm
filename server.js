@@ -3,14 +3,34 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, copyFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { initDatabase, isDead } from './sqldb.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
-const DB_PATH = process.env.DB_PATH || join(__dirname, 'crm.db');
+
+const PERSISTENT_HOME = '/home/u898266115';
+const LOCAL_DB_PATH = join(__dirname, 'crm.db');
+let DB_PATH = process.env.DB_PATH;
+
+if (!DB_PATH) {
+  if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
+    DB_PATH = join(PERSISTENT_HOME, 'crm.db');
+    // Auto-migrate if file is in old location
+    if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH)) {
+      try {
+        copyFileSync(LOCAL_DB_PATH, DB_PATH);
+        console.log(`[database] Auto-migrated database from ${LOCAL_DB_PATH} to ${DB_PATH}`);
+      } catch (err) {
+        console.error(`[database] Migration failed:`, err.message);
+      }
+    }
+  } else {
+    DB_PATH = LOCAL_DB_PATH;
+  }
+}
 const DB_DIR = dirname(DB_PATH);
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -45,9 +65,32 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/logout', authLimiter);
 app.use('/api/upload', uploadLimiter);
 
-const UPLOADS_DIR = join(__dirname, 'uploads');
-if (!existsSync(UPLOADS_DIR)) {
-  mkdirSync(UPLOADS_DIR, { recursive: true });
+const PERSISTENT_UPLOADS_DIR = join(PERSISTENT_HOME, 'uploads');
+const LOCAL_UPLOADS_DIR = join(__dirname, 'uploads');
+let UPLOADS_DIR;
+
+if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
+  UPLOADS_DIR = PERSISTENT_UPLOADS_DIR;
+  if (!existsSync(PERSISTENT_UPLOADS_DIR)) {
+    mkdirSync(PERSISTENT_UPLOADS_DIR, { recursive: true });
+    // Migrate existing uploads if any
+    if (existsSync(LOCAL_UPLOADS_DIR)) {
+      try {
+        const files = readdirSync(LOCAL_UPLOADS_DIR);
+        files.forEach(file => {
+          copyFileSync(join(LOCAL_UPLOADS_DIR, file), join(PERSISTENT_UPLOADS_DIR, file));
+        });
+        console.log(`[uploads] Auto-migrated ${files.length} uploads to persistent path.`);
+      } catch (err) {
+        console.error(`[uploads] Uploads migration failed:`, err.message);
+      }
+    }
+  }
+} else {
+  UPLOADS_DIR = LOCAL_UPLOADS_DIR;
+  if (!existsSync(UPLOADS_DIR)) {
+    mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
 }
 app.use('/uploads', express.static(UPLOADS_DIR));
 
