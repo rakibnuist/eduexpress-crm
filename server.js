@@ -4050,6 +4050,27 @@ app.post('/api/import/applications', (req, res) => requireAdmin(req, res, () => 
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+app.get('/api/debug/db', (req, res) => requireAdmin(req, res, () => {
+  try {
+    const channels = db.prepare("SELECT id, type, name, page_id, active, status FROM channels").all();
+    const recentConvs = db.prepare(`
+      SELECT conversations.*, contacts.name as contact_name, contacts.messenger_id
+      FROM conversations 
+      LEFT JOIN contacts ON contacts.id = conversations.contact_id 
+      ORDER BY conversations.id DESC LIMIT 15
+    `).all();
+    const recentMessages = db.prepare(`
+      SELECT messages.*, conversations.channel_id 
+      FROM messages 
+      LEFT JOIN conversations ON conversations.id = messages.conversation_id 
+      ORDER BY messages.id DESC LIMIT 30
+    `).all();
+    res.json({ channels, recentConvs, recentMessages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}));
+
 // ─── ADMIN: wipe all leads (+ documents, uni-apps, activity log, KPI targets) ───
 // Optional body: { conversations: true } → also wipes chat threads, messages & contacts.
 // Finance (income/expenses), employees, attendance, payroll, users & settings are NEVER touched.
