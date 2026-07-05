@@ -625,10 +625,10 @@ export default function Conversations({ user }) {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto py-2">
+          <div className="flex-1 overflow-y-auto py-2 space-y-1">
             {/* All Messages */}
             <button onClick={() => setChannelTab('all')}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold transition-all outline-none border-l-[3px] ${channelTab === 'all' ? 'bg-blue-50/80 border-l-blue-600 text-blue-700' : 'border-l-transparent text-slate-600 hover:bg-slate-100'}`}>
+              className={`mx-2 flex items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-all outline-none rounded-xl border ${channelTab === 'all' ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
               <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${channelTab === 'all' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'}`}>
                 <Inbox size={14} />
               </div>
@@ -645,9 +645,9 @@ export default function Conversations({ user }) {
 
             {/* WhatsApp Section */}
             {whatsappChannels.length > 0 && (
-              <div className="mt-1">
+              <div className="mt-2">
                 <button onClick={() => toggleGroup('whatsapp')}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
                   {sidebarCollapsed ? (
                     <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
                       <MessageSquare size={14} />
@@ -660,14 +660,14 @@ export default function Conversations({ user }) {
                   )}
                 </button>
                 {(expandedGroups.whatsapp || sidebarCollapsed) && (
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 mt-0.5">
                     {whatsappChannels.map(ch => {
                       const isActive = channelTab === `channel_${ch.id}`;
                       const unread = unreadCounts.byId?.[ch.id] || 0;
                       return (
                         <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
-                          className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-all outline-none border-l-[3px] relative ${isActive ? 'bg-blue-50/80 border-l-blue-600 text-blue-700' : 'border-l-transparent text-slate-600 hover:bg-slate-100'}`}>
-                          <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0 ${ch.color ? '' : 'bg-emerald-500'}`}
+                          className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
+                          <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0 ${ch.color ? '' : 'bg-emerald-500'}`}
                             style={ch.color ? { backgroundColor: ch.color } : {}}>
                             W
                           </div>
@@ -692,9 +692,9 @@ export default function Conversations({ user }) {
 
             {/* Other channel types (Messenger, Instagram, TikTok, etc.) */}
             {groupedChannels.map(group => (
-              <div key={group.type} className="mt-1">
+              <div key={group.type} className="mt-2">
                 <button onClick={() => toggleGroup(group.type)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
                   {sidebarCollapsed ? (
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: getChannelMeta(group.type).color + '15', color: getChannelMeta(group.type).color }}>
                       <ChannelIcon type={group.type} size={14} />
@@ -707,14 +707,14 @@ export default function Conversations({ user }) {
                   )}
                 </button>
                 {(expandedGroups[group.type] || sidebarCollapsed) && (
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 mt-0.5">
                     {group.channels.map(ch => {
                       const isActive = channelTab === `channel_${ch.id}` || channelTab === group.type;
                       const unread = unreadCounts.byId?.[ch.id] || 0;
                       return (
                         <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
-                          className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-all outline-none border-l-[3px] relative ${isActive ? 'bg-blue-50/80 border-l-blue-600 text-blue-700' : 'border-l-transparent text-slate-600 hover:bg-slate-100'}`}>
-                          <div className="w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0"
+                          className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
+                          <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0"
                             style={{ backgroundColor: ch.color || getChannelMeta(group.type).color }}>
                             {getChannelMeta(group.type).icon}
                           </div>
@@ -750,7 +750,7 @@ export default function Conversations({ user }) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-400">
                 <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -769,7 +769,7 @@ export default function Conversations({ user }) {
                 const sla = getSlaColor(conv.last_message_at);
                 return (
                     <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
-                      className={`w-full text-left px-3 py-2.5 flex gap-3 transition-all outline-none border-l-[3px] ${isSel ? 'bg-blue-50/60 border-l-blue-600' : 'bg-white hover:bg-slate-50/70 border-l-transparent'}`}>
+                      className={`mx-2 my-1 px-3 py-3 flex gap-3 transition-all duration-150 outline-none rounded-xl border ${isSel ? 'bg-blue-50/85 border-blue-100/80 shadow-sm text-blue-900' : 'bg-white hover:bg-slate-50/60 border-transparent'}`}>
                       <div className="relative flex-shrink-0">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
                           {initials(conv.contact_name || 'C')}
@@ -812,8 +812,8 @@ export default function Conversations({ user }) {
                             {conv.last_message || 'No messages yet'}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                          <span className="text-[9px] font-medium text-slate-400 truncate">
+                        <div className="flex items-center gap-1.5 mt-1 min-w-0">
+                          <span className="text-[9px] font-semibold text-slate-400 truncate">
                             {conv.channel_name || meta.label}
                           </span>
                           {(conv.tags || []).slice(0, 2).map(tag => (
@@ -921,15 +921,15 @@ export default function Conversations({ user }) {
                           const isIn = m.direction === 'in' || m.direction === 'inbound';
                           const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                           return (
-                            <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1`}>
-                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-4 py-2.5 shadow-sm border relative group flex flex-col gap-0.5 min-w-0 overflow-hidden
-                                ${m.is_internal_note ? 'bg-amber-50 text-amber-900 rounded-tl-md border-amber-200 border-dashed' :
-                                  isIn ? 'bg-white text-slate-800 rounded-tl-md border-slate-100/80' : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-tr-md border-transparent'}`}>
+                            <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
+                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-0 overflow-hidden
+                                ${m.is_internal_note ? 'bg-amber-50 text-amber-900 rounded-tl-xs border-amber-200/70 border-dashed' :
+                                  isIn ? 'bg-white text-slate-800 rounded-tl-xs border-slate-100' : 'bg-blue-600 text-white rounded-tr-xs border-transparent'}`}>
                                 {!isIn && m.sent_by && !m.is_internal_note && (
-                                  <p className="text-[9px] text-sky-200/80 font-black tracking-wider uppercase mb-0.5">{m.sent_by}</p>
+                                  <p className="text-[9px] text-blue-200/90 font-extrabold tracking-wider uppercase mb-0.5">{m.sent_by}</p>
                                 )}
                                 {m.is_internal_note && (
-                                  <p className="text-[9px] text-amber-600/80 font-black tracking-wider uppercase mb-0.5 flex items-center gap-1"><ClipboardList size={9} /> Internal Note</p>
+                                  <p className="text-[9px] text-amber-700/90 font-extrabold tracking-wider uppercase mb-0.5 flex items-center gap-1"><ClipboardList size={9} /> Internal Note</p>
                                 )}
                                 {m.type === 'image' && m.media_url && (
                                   <div className="mb-1 overflow-hidden rounded-xl">
@@ -956,9 +956,9 @@ export default function Conversations({ user }) {
                                   <video controls className="max-w-full max-h-56 rounded-xl mb-1" src={getMediaUrl(m)} />
                                 )}
                                 {(m.type === 'text' || !m.type || (!['image','document','audio','voice','video'].includes(m.type)) || (['image','video'].includes(m.type) && m.content && !['[Image]','[Video]'].includes(m.content) && m.content !== m.media_url)) && (
-                                  <p className="text-xs leading-relaxed whitespace-pre-wrap break-words font-medium">{m.content}</p>
+                                  <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words font-normal">{m.content}</p>
                                 )}
-                                <div className={`flex items-center justify-end gap-1 text-[9px] font-semibold ${isIn ? 'text-slate-400' : 'text-sky-200/70'}`}>
+                                <div className={`flex items-center justify-end gap-1 text-[9px] font-semibold mt-0.5 ${isIn ? 'text-slate-400' : 'text-blue-200/80'}`}>
                                   <span>{timeStr}</span>
                                   {m.source && !m.is_internal_note && (<span className="text-[8px] bg-slate-100/50 px-1 rounded">{m.source}</span>)}
                                   {!isIn && !m.is_internal_note && (m.status === 'read' ? <CheckCheck size={11} className="text-sky-300" /> : m.status === 'delivered' ? <CheckCheck size={11} className="text-white/60" /> : m.status === 'failed' ? <AlertCircle size={11} className="text-rose-300" /> : <Check size={11} className="text-white/60" />)}
@@ -1052,88 +1052,95 @@ export default function Conversations({ user }) {
                       <p className="text-xs font-bold text-slate-700">Contact Details</p>
                       <button onClick={() => setShowContactPanel(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={13} /></button>
                     </div>
-                    <div className="px-4 pt-4 pb-3 flex flex-col items-center gap-2 border-b border-slate-100">
-                      <div className="relative">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-lg shadow bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
-                          {initials(selectedConv.contact_name || 'C')}
-                        </div>
-                        <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-md flex items-center justify-center border-[2px] border-white text-[9px] font-black text-white shadow-sm ${getChannelMeta(selectedConv.channel_type).bg}`}>
-                          {getChannelMeta(selectedConv.channel_type).icon}
-                        </span>
-                      </div>
-                      <p className="text-sm font-bold text-slate-800 text-center">{selectedConv.contact_name || 'Unknown'}</p>
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full text-white ${selectedConv.status === 'open' ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-                          {selectedConv.status === 'open' ? '● Open' : '● Archived'}
-                        </span>
-                        {selectedConv.is_priority && (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 flex items-center gap-1">
-                            <Star size={9} fill="currentColor" /> Priority
+                    <div className="p-4 border-b border-slate-100 flex flex-col items-center">
+                      <div className="w-full bg-slate-50/70 border border-slate-100 rounded-2xl p-4 flex flex-col items-center gap-2.5 shadow-sm">
+                        <div className="relative">
+                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl shadow-md bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
+                            {initials(selectedConv.contact_name || 'C')}
+                          </div>
+                          <span className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-lg flex items-center justify-center border-[2px] border-white text-[10px] font-black text-white shadow-sm ${getChannelMeta(selectedConv.channel_type).bg}`}>
+                            {getChannelMeta(selectedConv.channel_type).icon}
                           </span>
-                        )}
+                        </div>
+                        <p className="text-sm font-bold text-slate-800 text-center tracking-tight">{selectedConv.contact_name || 'Unknown Contact'}</p>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[9px] font-extrabold px-2.5 py-0.5 rounded-full text-white ${selectedConv.status === 'open' ? 'bg-emerald-500' : 'bg-slate-400'}`}>
+                            {selectedConv.status === 'open' ? '● Open' : '● Archived'}
+                          </span>
+                          {selectedConv.is_priority && (
+                            <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-700 flex items-center gap-1">
+                              <Star size={9} fill="currentColor" /> Priority
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     {/* Info rows */}
-                    <div className="px-4 py-3 space-y-3">
-                      {selectedConv.contact_phone && (
-                        <div className="flex items-start gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 mt-0.5"><Phone size={12} className="text-slate-500" /></div>
-                          <div>
-                            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Phone</p>
-                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.contact_phone}</p>
+                    <div className="p-4 space-y-3.5">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Contact Information</p>
+                      <div className="bg-slate-50/50 border border-slate-100 rounded-2xl p-3.5 space-y-3.5 shadow-xs">
+                        {selectedConv.contact_phone && (
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Phone size={12} className="text-slate-500" /></div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Phone</p>
+                              <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.contact_phone}</p>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Hash size={12} className="text-slate-500" /></div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Channel</p>
+                            <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.channel_name || getChannelMeta(selectedConv.channel_type).label}</p>
+                            <p className="text-[10px] text-slate-400/80 capitalize font-medium">{selectedConv.channel_type}</p>
                           </div>
                         </div>
-                      )}
-                      <div className="flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 mt-0.5"><Hash size={12} className="text-slate-500" /></div>
-                        <div>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Channel</p>
-                          <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.channel_name || getChannelMeta(selectedConv.channel_type).label}</p>
-                          <p className="text-[10px] text-slate-400 capitalize">{selectedConv.channel_type}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 mt-0.5"><Calendar size={12} className="text-slate-500" /></div>
-                        <div>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Last message</p>
-                          <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.last_message_at ? new Date(selectedConv.last_message_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</p>
-                        </div>
-                      </div>
-                      {selectedConv.assigned_to && (
-                        <div className="flex items-start gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5"><UserPlus size={12} className="text-blue-500" /></div>
-                          <div>
-                            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Assigned To</p>
-                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.assigned_to}</p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Calendar size={12} className="text-slate-500" /></div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Last Message</p>
+                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.last_message_at ? new Date(selectedConv.last_message_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</p>
                           </div>
                         </div>
-                      )}
+                        {selectedConv.assigned_to && (
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-blue-50/50 border border-blue-100/30 flex items-center justify-center flex-shrink-0"><UserPlus size={12} className="text-blue-500" /></div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Assigned To</p>
+                              <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.assigned_to}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Lead Status */}
-                    <div className="px-4 py-3 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-2">Lead Status</p>
+                    <div className="p-4 border-t border-slate-100">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Lead Status</p>
                       {selectedConv.lead_id ? (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">{selectedConv.lead_status || 'Lead'}</span>
-                            <Link to={`/leads/${selectedConv.lead_id}`} className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-0.5">
-                              View <ExternalLink size={10} />
+                        <div className="bg-emerald-50/30 border border-emerald-100/50 rounded-2xl p-3.5 space-y-2.5 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200/55">{selectedConv.lead_status || 'Lead'}</span>
+                            <Link to={`/leads/${selectedConv.lead_id}`} className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-0.5 transition-colors">
+                              View Profile <ExternalLink size={10} />
                             </Link>
                           </div>
                           {(selectedConv.lead_employee_name || selectedConv.lead_assigned_consultant) && (
-                            <p className="text-[10px] text-slate-500">
-                              Consultant: <span className="font-semibold text-slate-700">{selectedConv.lead_employee_name || selectedConv.lead_assigned_consultant}</span>
-                              {selectedConv.lead_destination && <> · Destination: <span className="font-semibold text-slate-700">{selectedConv.lead_destination}</span></>}
-                            </p>
+                            <div className="text-[10px] text-slate-500 leading-normal space-y-0.5">
+                              <p>Consultant: <span className="font-bold text-slate-700">{selectedConv.lead_employee_name || selectedConv.lead_assigned_consultant}</span></p>
+                              {selectedConv.lead_destination && <p>Destination: <span className="font-bold text-slate-700">{selectedConv.lead_destination}</span></p>}
+                            </div>
                           )}
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 inline-block">New Prospect</span>
+                        <div className="bg-amber-50/35 border border-amber-100/50 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-amber-800 bg-amber-100/60 px-2.5 py-0.5 rounded-full border border-amber-200/50">New Prospect</span>
+                          </div>
                           <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
-                            className="w-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2 rounded-xl transition-colors shadow-sm">
+                            className="w-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2 rounded-xl transition-all duration-150 shadow-sm active:scale-95 cursor-pointer">
                             Convert to Lead
                           </button>
                         </div>
@@ -1141,10 +1148,10 @@ export default function Conversations({ user }) {
                     </div>
 
                     {/* Tags */}
-                    <div className="px-4 py-3 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Tags</p>
-                        <button onClick={() => setShowTagPicker(p => !p)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors"><Plus size={12} /></button>
+                    <div className="p-4 border-t border-slate-100">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tags</p>
+                        <button onClick={() => setShowTagPicker(p => !p)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition-all cursor-pointer"><Plus size={12} /></button>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {contactTags.length === 0 && (<p className="text-[10px] text-slate-400 italic">No tags</p>)}
@@ -1174,14 +1181,14 @@ export default function Conversations({ user }) {
                     </div>
 
                     {/* Internal Notes */}
-                    <div className="px-4 py-3 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-2">Internal Notes</p>
-                      <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
+                    <div className="p-4 border-t border-slate-100">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Internal Notes</p>
+                      <div className="space-y-2 max-h-40 overflow-y-auto mb-2.5">
                         {contactNotes.length === 0 ? (
                           <p className="text-[10px] text-slate-400 italic">No notes yet</p>
                         ) : contactNotes.map(note => (
                           <div key={note.id} className="bg-amber-50/60 border border-amber-100/60 rounded-xl p-2.5">
-                            <p className="text-[11px] text-slate-700 leading-relaxed">{note.text}</p>
+                            <p className="text-[11px] text-slate-700 leading-relaxed font-medium">{note.text}</p>
                             <div className="flex items-center gap-1.5 mt-1.5">
                               <span className="text-[9px] text-amber-600 font-bold">{note.author || 'Team'}</span>
                               <span className="text-[9px] text-slate-400">·</span>
@@ -1195,31 +1202,35 @@ export default function Conversations({ user }) {
                           placeholder="Add a note…"
                           className="flex-1 bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/60 resize-none placeholder-slate-400 transition-all" />
                         <button onClick={handleAddNote} disabled={addingNote || !newNote.trim()}
-                          className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white p-2 rounded-xl shadow-sm transition-all flex-shrink-0">
+                          className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white p-2 rounded-xl shadow-sm transition-all flex-shrink-0 cursor-pointer">
                           {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
                         </button>
                       </div>
                     </div>
 
                     {/* Quick Actions */}
-                    <div className="px-4 pb-4 flex flex-col gap-2 border-t border-slate-100 pt-3">
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1">Quick Actions</p>
+                    <div className="p-4 pb-6 flex flex-col gap-2 border-t border-slate-100">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Quick Actions</p>
                       <button onClick={handleAssignToMe} disabled={updatingConv}
-                        className="flex items-center justify-between bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50">
-                        <span className="flex items-center gap-2"><UserPlus size={13} /> Assign to Me</span><ChevronRight size={13} />
+                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-blue-50/80 hover:text-blue-700 transition-all duration-150 border border-slate-100/70 disabled:opacity-50 active:scale-98 cursor-pointer">
+                        <UserPlus size={13} className="text-blue-500 flex-shrink-0" />
+                        <span>Assign to Me</span>
                       </button>
                       <button onClick={handleTogglePriority} disabled={updatingConv}
-                        className="flex items-center justify-between bg-amber-50 hover:bg-amber-100 text-amber-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50">
-                        <span className="flex items-center gap-2"><Star size={13} /> {selectedConv.is_priority ? 'Remove Priority' : 'Mark as Priority'}</span><ChevronRight size={13} />
+                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-amber-50/80 hover:text-amber-700 transition-all duration-150 border border-slate-100/70 disabled:opacity-50 active:scale-98 cursor-pointer">
+                        <Star size={13} className="text-amber-500 flex-shrink-0" fill={selectedConv.is_priority ? "currentColor" : "none"} />
+                        <span>{selectedConv.is_priority ? 'Remove Priority' : 'Mark as Priority'}</span>
                       </button>
                       <button onClick={() => handleToggleArchive(selectedConv)}
-                        className="flex items-center justify-between bg-slate-50 hover:bg-slate-100 text-slate-600 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors">
-                        <span className="flex items-center gap-2"><Archive size={13} /> {selectedConv.status === 'archived' ? 'Reopen' : 'Archive'}</span><ChevronRight size={13} />
+                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 hover:text-slate-900 transition-all duration-150 border border-slate-100/70 active:scale-98 cursor-pointer">
+                        <Archive size={13} className="text-slate-500 flex-shrink-0" />
+                        <span>{selectedConv.status === 'archived' ? 'Reopen' : 'Archive'}</span>
                       </button>
                       {!selectedConv.lead_id && (
                         <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
-                          className="flex items-center justify-between bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-colors">
-                          <span className="flex items-center gap-2"><UserPlus size={13} /> Move to Lead</span><ChevronRight size={13} />
+                          className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-emerald-50/85 hover:text-emerald-700 transition-all duration-150 border border-slate-100/70 active:scale-98 cursor-pointer">
+                          <UserPlus size={13} className="text-emerald-500 flex-shrink-0" />
+                          <span>Move to Lead</span>
                         </button>
                       )}
                     </div>

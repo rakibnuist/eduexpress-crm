@@ -5417,7 +5417,7 @@ async function syncChannelMessages(channelId, months = 6) {
           + `&limit=25&access_token=${token}`;
         let convMsgCount = 0;
 
-        while (msgUrl && imported + skipped < MAX_MESSAGES && convMsgCount < 500) {
+        while (msgUrl && imported + skipped < MAX_MESSAGES && convMsgCount < 50) {
           const { items: msgs, nextUrl: nextMsgUrl } = await fbGet(msgUrl, 'messages');
           msgUrl = nextMsgUrl;
           if (msgs.length === 0) break;
