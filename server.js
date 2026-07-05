@@ -5457,7 +5457,7 @@ async function syncChannelMessages(channelId, months = 6) {
 // Runs in the BACKGROUND and responds immediately — a long sync would otherwise
 // exceed nginx's gateway timeout (504). Progress streams over SSE; the inbox
 // polling picks up new conversations as they're imported.
-app.post('/api/channels/:id/sync', async (req, res) => {
+app.post('/api/channels/:id/load-history', async (req, res) => {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
   const effectiveToken = channel.access_token || getConfig('page_access_token');

@@ -23,7 +23,15 @@ async function req(path, opts = {}, attempt = 1) {
     // Try to extract a friendlier error message from a JSON body
     let msg = '';
     try { const j = await r.clone().json(); msg = j.error || j.message || ''; } catch {}
-    if (!msg) { try { msg = await r.text(); } catch {} }
+    if (!msg) {
+      try {
+        msg = await r.text();
+        const trimmed = msg.trim();
+        if (trimmed.startsWith('<') || trimmed.includes('hcdn-cgi') || trimmed.includes('jschallenge') || trimmed.includes('cloudflare')) {
+          msg = 'Request blocked by security firewall (Hostinger CDN). Please refresh the page or solve the challenge in your browser.';
+        }
+      } catch {}
+    }
     throw new Error(msg || `Request failed (${r.status})`);
   }
   return r.json();
@@ -187,7 +195,7 @@ export const api = {
   createChannel:  (d)    => req('/channels',       { method: 'POST', body: JSON.stringify(d) }),
   updateChannel:  (id, d)=> req(`/channels/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteChannel:  (id)   => req(`/channels/${id}`, { method: 'DELETE' }),
-  syncChannel:    (id)   => req(`/channels/${id}/sync`, { method: 'POST' }),
+  syncChannel:    (id)   => req(`/channels/${id}/load-history`, { method: 'POST' }),
 
   // Conversations & Live Chat
   conversations:   (p = {})  => req('/conversations?' + toQuery(p)),
