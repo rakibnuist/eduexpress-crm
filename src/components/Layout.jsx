@@ -125,47 +125,50 @@ export default function Layout({ children, user, onLogout }) {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 overflow-hidden relative">
+      {/* Sidebar spacer for desktop to prevent layout shift */}
+      <div className="hidden lg:block lg:w-16 lg:flex-shrink-0 transition-all duration-300" />
+
       {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-40 w-60 bg-white border-r border-slate-200 flex flex-col
-        transition-transform duration-200 lg:translate-x-0 lg:static
+      <aside className={`fixed inset-y-0 left-0 z-40 w-60 bg-white border-r border-slate-200 flex flex-col group
+        transition-all duration-300 ease-in-out lg:translate-x-0 lg:w-16 lg:hover:w-60 lg:hover:shadow-2xl lg:absolute
         ${open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
 
         {/* Logo */}
-        <div className="h-16 flex items-center gap-3 px-5 border-b border-slate-100 flex-shrink-0">
+        <div className="h-16 flex items-center gap-3 px-5 border-b border-slate-100 flex-shrink-0 lg:px-3.5 lg:group-hover:px-5 transition-all duration-300">
           <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
             <GraduationCap size={18} className="text-white" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">
             <p className="font-bold text-slate-800 text-sm leading-tight">EduExpress</p>
             <p className="text-xs text-slate-400 truncate">International Core</p>
           </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto lg:px-2 lg:group-hover:px-3 transition-all duration-300">
           {nav.map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} end={to === '/'}
               onClick={() => setOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all lg:px-2.5 lg:group-hover:px-3
                 ${isActive
                   ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`
               }>
               <Icon size={17} className="flex-shrink-0" />
-              <span className="flex-1">{label}</span>
+              <span className="flex-1 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">{label}</span>
             </NavLink>
           ))}
         </nav>
 
         {/* Footer — current user pill */}
-        <div className="p-3 border-t border-slate-100 flex-shrink-0">
-          <div className="bg-slate-50 hover:bg-slate-100 rounded-xl p-2.5 flex items-center gap-2.5 transition-colors">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+        <div className="p-3 border-t border-slate-100 flex-shrink-0 lg:p-1.5 lg:group-hover:p-3 transition-all duration-300">
+          <div className="bg-slate-50 hover:bg-slate-100 rounded-xl p-2.5 flex items-center gap-2.5 transition-all duration-300 lg:p-1 lg:group-hover:p-2.5">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-xs">
               {initials}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">
               <p className="text-xs font-semibold text-slate-800 truncate">{user?.name || 'User'}</p>
               <div className="flex items-center gap-1.5">
                 <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${roleBadgeClass}`}>{roleLabel}</span>
@@ -173,7 +176,7 @@ export default function Layout({ children, user, onLogout }) {
               </div>
             </div>
             <button onClick={logout} title="Log out" aria-label="Log out"
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex-shrink-0 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 lg:group-hover:w-auto overflow-hidden">
               <LogOut size={14} />
             </button>
           </div>
