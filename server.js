@@ -357,6 +357,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Finance access guard helper (Founder & CEO, Managing Director, and Investors)
+function requireFinance(req, res, next) {
+  if (!isFullAdmin(req.user) && !isInvestor(req.user)) {
+    return res.status(403).json({ error: 'Finance access only' });
+  }
+  next();
+}
+
 // Manager-or-admin guard — Application Managers, Marketing Managers, and full admins
 function requireManagerOrAdmin(req, res, next) {
   if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager')) {
@@ -4378,7 +4386,7 @@ app.put('/api/cashflow/initial', (req, res) => requireAdmin(req, res, () => {
 
 // Monthly ledger — what the Excel shows for one month, side by side.
 // Includes running balance per row so the table reads like a real cashflow.
-app.get('/api/cashflow', (req, res) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/cashflow', (req, res) => requireFinance(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE i.month=? AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month);
   const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to AS client_name,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.month=? ORDER BY x.date, x.id`).all(month);
@@ -4418,7 +4426,7 @@ app.get('/api/cashflow', (req, res) => requireManagerOrAdmin(req, res, () => {
 }));
 
 // Year view — 12 months at a glance with running cash.
-app.get('/api/cashflow/year', (req, res) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/cashflow/year', (req, res) => requireFinance(req, res, () => {
   const year = (req.query.year || new Date().toISOString().slice(0, 4)).toString();
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const initial = parseFloat(getConfig('cash_initial')) || 0;
@@ -4439,7 +4447,7 @@ app.get('/api/cashflow/year', (req, res) => requireManagerOrAdmin(req, res, () =
 
 // Investor / partner contributions — derived from income where category='Investment'.
 // Tracks both totals by person and time-series.
-app.get('/api/cashflow/investors', (req, res) => requireAdmin(req, res, () => {
+app.get('/api/cashflow/investors', (req, res) => requireFinance(req, res, () => {
   const rows = db.prepare(`SELECT date, month, client_name, reference, amount, notes
                            FROM income WHERE category='Investment' ORDER BY date, id`).all();
   const byPerson = {};

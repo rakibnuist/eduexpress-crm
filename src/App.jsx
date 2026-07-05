@@ -85,8 +85,8 @@ export default function App() {
                         {hasPermission(user, PERMISSIONS.VIEW_CHAT_INBOX) && <Route path="/conversations" element={<Conversations user={user} />} />}
                         {canManageMarketing(user) && <Route path="/marketing" element={<Marketing />} />}
                         {canViewAutomation(user) && <Route path="/automation" element={<Automation />} />}
-                        {isFullAdmin(user) && <Route path="/finance" element={<Finance />} />}
-                        {isFullAdmin(user) && <Route path="/hr" element={<HR user={user} />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_FINANCE) && <Route path="/finance" element={<Finance />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_HR) && <Route path="/hr" element={<HR user={user} />} />}
                         {isFullAdmin(user) && <Route path="/settings" element={<Settings />} />}
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>
