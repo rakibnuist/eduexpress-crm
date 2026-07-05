@@ -2251,7 +2251,16 @@ function runMigrations() {
       UPDATE income 
       SET exclude_from_cash = 1 
       WHERE category = 'Investment' 
+        AND date < '2026-06-01'
         AND NOT (client_name = 'Sakib Al Jubaer' AND amount = 100000 AND date = '2026-05-15')
+    `).run();
+
+    // Ensure newer investments (June 2026 onwards) are included in cash calculations
+    db.prepare(`
+      UPDATE income 
+      SET exclude_from_cash = 0 
+      WHERE category = 'Investment' 
+        AND date >= '2026-06-01'
     `).run();
 
     console.log("[migration] Partner investments self-healing checks complete.");
