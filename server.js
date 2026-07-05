@@ -1195,15 +1195,19 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
-    // Trigger historical sync on startup in background for all active Messenger/Instagram channels sequentially
+    // Trigger historical sync on startup in background for all active channels sequentially
     setTimeout(async () => {
       try {
-        const activeChannels = db.prepare("SELECT id, name FROM channels WHERE active = 1 AND type IN ('messenger', 'instagram', 'tiktok')").all();
+        const activeChannels = db.prepare("SELECT id, name, type FROM channels WHERE active = 1").all();
         for (const chan of activeChannels) {
-          console.log(`[startup-sync] Triggering sequential background sync (1 month) for channel: ${chan.name} (ID: ${chan.id})`);
+          console.log(`[startup-sync] Syncing metadata for channel: ${chan.name} (ID: ${chan.id})`);
           try {
-            const res = await syncChannelMessages(chan.id, 1);
-            console.log(`[startup-sync] Completed background sync for ${chan.name}: Imported ${res.imported} messages.`);
+            await syncChannelMetadata(chan.id);
+            if (chan.type === 'messenger' || chan.type === 'instagram') {
+              console.log(`[startup-sync] Triggering sequential background sync (1 month) for channel: ${chan.name}`);
+              const res = await syncChannelMessages(chan.id, 1);
+              console.log(`[startup-sync] Completed background sync for ${chan.name}: Imported ${res.imported} messages.`);
+            }
           } catch (e) {
             console.error(`[startup-sync] Background sync failed for ${chan.name}:`, e.message);
           }
@@ -2076,6 +2080,7 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN meta_campaign TEXT`,
     `ALTER TABLE channels   ADD COLUMN active INTEGER DEFAULT 1`,
     `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
+    `ALTER TABLE channels   ADD COLUMN avatar_url TEXT`,
     `ALTER TABLE users      ADD COLUMN emp_id TEXT`,
     `ALTER TABLE leads      ADD COLUMN application_stage TEXT`,
     `ALTER TABLE leads      ADD COLUMN visa_deadline TEXT`,
@@ -5317,7 +5322,9 @@ app.post('/api/channels', (req, res) => {
   const d = req.body;
   const info = db.prepare(`INSERT INTO channels (type,name,consultant,phone_number_id,waba_id,page_id,ig_account_id,access_token,webhook_verify_token,status,color,active) VALUES (@type,@name,@consultant,@phone_number_id,@waba_id,@page_id,@ig_account_id,@access_token,@webhook_verify_token,@status,@color,@active)`)
     .run({ type: d.type, name: d.name, consultant: d.consultant||null, phone_number_id: d.phone_number_id||null, waba_id: d.waba_id||null, page_id: d.page_id||null, ig_account_id: d.ig_account_id||null, access_token: d.access_token||null, webhook_verify_token: d.webhook_verify_token||'eduexpress_verify_2024', status: d.status||'active', color: d.color||'#3b82f6', active: d.active ?? 1 });
-  res.json(db.prepare("SELECT * FROM channels WHERE id=?").get(info.lastInsertRowid));
+  const newChan = db.prepare("SELECT * FROM channels WHERE id=?").get(info.lastInsertRowid);
+  syncChannelMetadata(newChan.id).catch(e => console.error('[channel-metadata] Post-create sync failed:', e.message));
+  res.json(newChan);
 });
 
 app.put('/api/channels/:id', (req, res) => {
@@ -5327,7 +5334,9 @@ app.put('/api/channels/:id', (req, res) => {
   const token = (d.access_token && !d.access_token.includes('••')) ? d.access_token : existing.access_token;
   db.prepare(`UPDATE channels SET type=@type,name=@name,consultant=@consultant,phone_number_id=@phone_number_id,waba_id=@waba_id,page_id=@page_id,ig_account_id=@ig_account_id,access_token=@access_token,webhook_verify_token=@webhook_verify_token,status=@status,color=@color,active=@active WHERE id=@id`)
     .run({ ...d, id: req.params.id, consultant: d.consultant||null, access_token: token, active: d.active ?? existing.active ?? 1 });
-  res.json(db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id));
+  const updatedChan = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
+  syncChannelMetadata(updatedChan.id).catch(e => console.error('[channel-metadata] Post-update sync failed:', e.message));
+  res.json(updatedChan);
 });
 
 app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels WHERE id=?").run(req.params.id); res.json({ ok:true }); });
@@ -5351,6 +5360,45 @@ async function resolvePageAccessToken(pageId, configuredToken) {
     console.error(`[facebook] Network error resolving Page Access Token for Page ID ${pageId}:`, err.message);
   }
   return configuredToken;
+}
+
+// Helper to sync channel name & avatar from Graph API
+async function syncChannelMetadata(channelId) {
+  const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
+  if (!channel) return;
+  let token = channel.access_token || getConfig('page_access_token');
+  if (!token) return;
+
+  if (channel.type === 'messenger' || channel.type === 'instagram') {
+    const pageId = channel.page_id;
+    if (!pageId) return;
+    try {
+      const effectiveToken = await resolvePageAccessToken(pageId, token);
+      const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}?fields=name,picture.type(large)&access_token=${effectiveToken}`);
+      const data = await res.json();
+      if (data.name) {
+        const avatarUrl = data.picture?.data?.url || null;
+        db.prepare("UPDATE channels SET name = ?, avatar_url = ? WHERE id = ?").run(data.name, avatarUrl, channelId);
+        console.log(`[channel-metadata] Updated messenger/instagram channel ${channelId} (${data.name}) avatar: ${avatarUrl ? 'yes' : 'no'}`);
+      }
+    } catch (err) {
+      console.warn(`[channel-metadata] Error syncing messenger/instagram channel ${channelId}:`, err.message);
+    }
+  } else if (channel.type === 'whatsapp') {
+    const phoneId = channel.phone_number_id;
+    if (!phoneId) return;
+    try {
+      const res = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/whatsapp_business_profile?fields=profile_picture_url&access_token=${token}`);
+      const data = await res.json();
+      const avatarUrl = data.data?.[0]?.profile_picture_url || null;
+      if (avatarUrl) {
+        db.prepare("UPDATE channels SET avatar_url = ? WHERE id = ?").run(avatarUrl, channelId);
+        console.log(`[channel-metadata] Updated WhatsApp channel ${channelId} avatar: yes`);
+      }
+    } catch (err) {
+      console.warn(`[channel-metadata] Error syncing WhatsApp channel ${channelId}:`, err.message);
+    }
+  }
 }
 
 // Helper to sync historical messages from Facebook/Instagram Page Channel
@@ -5576,12 +5624,16 @@ app.post('/api/channels/:id/load-history', async (req, res) => {
   // ── Validate the token before starting background sync ──
   try {
     const platform = channel.type === 'instagram' ? 'instagram' : 'messenger';
-    const testUrl = `https://graph.facebook.com/v19.0/${channel.page_id}?fields=name&access_token=${effectiveToken}`;
+    const testUrl = `https://graph.facebook.com/v19.0/${channel.page_id}?fields=name,picture.type(large)&access_token=${effectiveToken}`;
     const testRes = await fetch(testUrl);
     const testData = await testRes.json();
     if (testData.error) {
       console.error(`[sync] Token validation failed for ${channel.name}: ${testData.error.message}`);
       return res.status(400).json({ error: `Facebook API token invalid: ${testData.error.message}` });
+    }
+    if (testData.name) {
+      const avatarUrl = testData.picture?.data?.url || null;
+      db.prepare("UPDATE channels SET name = ?, avatar_url = ? WHERE id = ?").run(testData.name, avatarUrl, channel.id);
     }
   } catch (e) {
     console.error(`[sync] Token validation network error for ${channel.name}:`, e.message);

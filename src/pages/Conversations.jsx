@@ -12,7 +12,7 @@ import {
   Filter, ArrowLeft, Bell, LayoutTemplate,
   ChevronDown, Menu as MenuIcon
 } from 'lucide-react';
-import { timeAgo, initials } from '../lib/format';
+import { timeAgo, initials, formatLastMessageTime } from '../lib/format';
 
 /* ── helpers ── */
 const getMediaUrl = (msg) => {
@@ -669,11 +669,16 @@ export default function Conversations({ user }) {
                       const unread = unreadCounts.byId?.[ch.id] || 0;
                       return (
                         <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
+                          title={ch.name || ch.consultant || 'WhatsApp'}
                           className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
-                          <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0 ${ch.color ? '' : 'bg-emerald-500'}`}
-                            style={ch.color ? { backgroundColor: ch.color } : {}}>
-                            W
-                          </div>
+                          {ch.avatar_url ? (
+                            <img src={ch.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
+                          ) : (
+                            <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0 ${ch.color ? '' : 'bg-emerald-500'}`}
+                              style={ch.color ? { backgroundColor: ch.color } : {}}>
+                              W
+                            </div>
+                          )}
                           {!sidebarCollapsed && (
                             <>
                               <span className="flex-1 text-left truncate">{ch.name || ch.consultant || 'WhatsApp'}</span>
@@ -716,11 +721,16 @@ export default function Conversations({ user }) {
                       const unread = unreadCounts.byId?.[ch.id] || 0;
                       return (
                         <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
+                          title={ch.name || group.label}
                           className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
-                          <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0"
-                            style={{ backgroundColor: ch.color || getChannelMeta(group.type).color }}>
-                            {getChannelMeta(group.type).icon}
-                          </div>
+                          {ch.avatar_url ? (
+                            <img src={ch.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0"
+                              style={{ backgroundColor: ch.color || getChannelMeta(group.type).color }}>
+                              {getChannelMeta(group.type).icon}
+                            </div>
+                          )}
                           {!sidebarCollapsed && (
                             <>
                               <span className="flex-1 text-left truncate">{ch.name || group.label}</span>
@@ -797,7 +807,7 @@ export default function Conversations({ user }) {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <span className="text-[10px] text-slate-400 whitespace-nowrap">{timeAgo(conv.last_message_at)}</span>
+                            <span className="text-[10px] text-slate-400 whitespace-nowrap">{formatLastMessageTime(conv.last_message_at)}</span>
                             {conv.unread_count > 0 && (
                               <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-4 text-center shadow-sm">
                                 {conv.unread_count}

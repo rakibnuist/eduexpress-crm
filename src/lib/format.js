@@ -51,6 +51,36 @@ export function timeAgo(iso) {
   return fmtDate(iso, 'short');
 }
 
+// Formats for chat list items: "02:10 PM", "Yesterday", "Friday", "26 Jun"
+export function formatLastMessageTime(iso) {
+  const d = toDate(iso);
+  if (!d) return '';
+  const now = new Date();
+  
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  
+  if (msgDate.getTime() === today.getTime()) {
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (msgDate.getTime() === yesterday.getTime()) {
+    return 'Yesterday';
+  }
+  
+  const diffDays = Math.floor((today.getTime() - msgDate.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 7) {
+    return d.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+  
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  }
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' });
+}
+
 // Pluralise: pluralise(1, 'lead') → '1 lead', pluralise(3, 'lead') → '3 leads'
 export function pluralise(n, word, plural) {
   return `${n} ${n === 1 ? word : (plural || word + 's')}`;
