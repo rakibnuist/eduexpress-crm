@@ -5322,6 +5322,24 @@ app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels
 // Track in-flight syncs so a channel can't be synced twice at once.
 const activeSyncs = new Set();
 
+// Helper to resolve dynamic Page Access Token using System User token if needed
+async function resolvePageAccessToken(pageId, configuredToken) {
+  if (!pageId || !configuredToken) return configuredToken;
+  try {
+    const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}?fields=access_token&access_token=${configuredToken}`);
+    const data = await res.json();
+    if (data.access_token) {
+      console.log(`[facebook] Dynamically resolved Page Access Token for Page ID: ${pageId}`);
+      return data.access_token;
+    } else if (data.error) {
+      console.warn(`[facebook] Token resolution API returned error for Page ID ${pageId}: ${data.error.message}`);
+    }
+  } catch (err) {
+    console.error(`[facebook] Network error resolving Page Access Token for Page ID ${pageId}:`, err.message);
+  }
+  return configuredToken;
+}
+
 // Helper to sync historical messages from Facebook/Instagram Page Channel
 async function syncChannelMessages(channelId, months = 6) {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
@@ -5333,7 +5351,7 @@ async function syncChannelMessages(channelId, months = 6) {
   if (channel.type !== 'messenger' && channel.type !== 'instagram') return { imported: 0, skipped: 0 };
 
   // Fallback: use global page_access_token if channel-level token is missing
-  const token = channel.access_token || getConfig('page_access_token');
+  let token = channel.access_token || getConfig('page_access_token');
   if (!token) {
     console.error(`[sync] No access token for channel ${channel.name} (id=${channelId})`);
     return { imported: 0, skipped: 0 };
@@ -5344,6 +5362,9 @@ async function syncChannelMessages(channelId, months = 6) {
     console.error(`[sync] No page_id for channel ${channel.name} (id=${channelId}) — cannot call conversations API`);
     return { imported: 0, skipped: 0 };
   }
+
+  // Dynamically resolve the Page Access Token from the configured token (e.g. System User token)
+  token = await resolvePageAccessToken(pageId, token);
 
   const since   = Math.floor(Date.now() / 1000) - (months * 30 * 24 * 3600);
 
@@ -5524,7 +5545,7 @@ async function syncChannelMessages(channelId, months = 6) {
 app.post('/api/channels/:id/load-history', async (req, res) => {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
-  const effectiveToken = channel.access_token || getConfig('page_access_token');
+  let effectiveToken = channel.access_token || getConfig('page_access_token');
   if (!effectiveToken) return res.status(400).json({ error: 'No access token configured for this channel' });
   if (!channel.page_id) return res.status(400).json({ error: 'No page_id set on this channel' });
   if (channel.type !== 'messenger' && channel.type !== 'instagram' && channel.type !== 'tiktok')
@@ -5535,6 +5556,9 @@ app.post('/api/channels/:id/load-history', async (req, res) => {
     return res.status(409).json({ error: 'A sync is already running for this channel' });
 
   const { months = 6 } = req.body || {};
+
+  // Dynamically resolve the Page Access Token from the configured token (e.g. System User token)
+  effectiveToken = await resolvePageAccessToken(channel.page_id, effectiveToken);
 
   // ── Validate the token before starting background sync ──
   try {
@@ -6350,10 +6374,11 @@ app.post('/webhook/meta', async (req, res) => {
         const channel = db.prepare("SELECT * FROM channels WHERE page_id=? AND type='messenger'").get(pageId);
         if (!channel) continue;
 
-        const contact = upsertContact({ name: `Messenger User`, messenger_id: senderId });
+        const contact = db.prepare("SELECT id FROM contacts WHERE messenger_id=?").get(senderId) || upsertContact({ name: `Messenger User`, messenger_id: senderId });
         // Fetch name + profile picture from Messenger API
         try {
-          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,profile_pic&access_token=${channel.access_token}`);
+          const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
+          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,profile_pic&access_token=${pageToken}`);
           const nd = await nr.json();
           if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
           if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
@@ -6418,9 +6443,10 @@ app.post('/webhook/meta', async (req, res) => {
         const channel = db.prepare("SELECT * FROM channels WHERE ig_account_id=? AND type='instagram'").get(igAccountId);
         if (!channel) continue;
 
-        const contact = upsertContact({ name: `Instagram User`, instagram_id: senderId });
+        const contact = db.prepare("SELECT id FROM contacts WHERE instagram_id=?").get(senderId) || upsertContact({ name: `Instagram User`, instagram_id: senderId });
         try {
-          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,username&access_token=${channel.access_token}`);
+          const pageToken = await resolvePageAccessToken(channel.page_id, channel.access_token);
+          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,username&access_token=${pageToken}`);
           const nd = await nr.json();
           if (nd.name || nd.username) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name||'@'+nd.username, contact.id);
         } catch {}
