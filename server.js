@@ -33,6 +33,7 @@ if (!DB_PATH) {
 }
 const DB_DIR = dirname(DB_PATH);
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy (e.g. Hostinger's reverse proxy)
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
@@ -6388,7 +6389,7 @@ app.post('/webhook/meta', async (req, res) => {
         const channel = db.prepare("SELECT * FROM channels WHERE page_id=? AND type='messenger'").get(pageId);
         if (!channel) continue;
 
-        const contact = db.prepare("SELECT id FROM contacts WHERE messenger_id=?").get(senderId) || upsertContact({ name: `Messenger User`, messenger_id: senderId });
+        const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(senderId) || upsertContact({ name: `Messenger User`, messenger_id: senderId });
         // Fetch name + profile picture from Messenger API
         try {
           const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
@@ -6457,7 +6458,7 @@ app.post('/webhook/meta', async (req, res) => {
         const channel = db.prepare("SELECT * FROM channels WHERE ig_account_id=? AND type='instagram'").get(igAccountId);
         if (!channel) continue;
 
-        const contact = db.prepare("SELECT id FROM contacts WHERE instagram_id=?").get(senderId) || upsertContact({ name: `Instagram User`, instagram_id: senderId });
+        const contact = db.prepare("SELECT * FROM contacts WHERE instagram_id=?").get(senderId) || upsertContact({ name: `Instagram User`, instagram_id: senderId });
         try {
           const pageToken = await resolvePageAccessToken(channel.page_id, channel.access_token);
           const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,username&access_token=${pageToken}`);
