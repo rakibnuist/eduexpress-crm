@@ -922,7 +922,7 @@ export default function Conversations({ user }) {
                           const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                           return (
                             <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
-                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-0 overflow-hidden
+                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
                                 ${m.is_internal_note ? 'bg-amber-50 text-amber-900 rounded-tl-xs border-amber-200/70 border-dashed' :
                                   isIn ? 'bg-white text-slate-800 rounded-tl-xs border-slate-100' : 'bg-blue-600 text-white rounded-tr-xs border-transparent'}`}>
                                 {!isIn && m.sent_by && !m.is_internal_note && (
