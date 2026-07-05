@@ -42,7 +42,7 @@ const getChannelMeta = (type) => CHANNEL_META[type] || { label: type, color: '#6
 
 const getSlaColor = (lastMessageAt) => {
   if (!lastMessageAt) return 'bg-slate-300';
-  const minutes = (Date.now() - new Date(lastMessageAt).getTime()) / 60000;
+  const minutes = (Date.now() - (toDate(lastMessageAt) || new Date()).getTime()) / 60000;
   if (minutes < 30) return 'bg-emerald-500';
   if (minutes < 120) return 'bg-amber-500';
   return 'bg-rose-500';
@@ -204,7 +204,7 @@ export default function Conversations({ user }) {
     list.sort((a, b) => {
       if (a.is_priority !== b.is_priority) return b.is_priority ? 1 : -1;
       if ((a.unread_count || 0) !== (b.unread_count || 0)) return (b.unread_count || 0) - (a.unread_count || 0);
-      return new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0);
+      return (toDate(b.last_message_at) || new Date(0)) - (toDate(a.last_message_at) || new Date(0));
     });
     return list;
   }, [conversations, channelTab, search, statusFilter, user?.id, isFullAccess, channels, isMyWhatsApp]);
@@ -328,7 +328,7 @@ export default function Conversations({ user }) {
           }
           const updated = [...prev];
           updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (selectedConv && selectedConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
-          return updated.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+          return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
         });
         if (!selectedConv || selectedConv.id !== data.conversation_id) {
           const meta = getChannelMeta(data.channel_type || 'whatsapp');
@@ -383,7 +383,7 @@ export default function Conversations({ user }) {
             if (idx === -1) return prev;
             const updated = [...prev];
             updated[idx] = { ...updated[idx], last_message: res.message.content || (res.message.type === 'image' ? '📷 Image' : '📎 Document'), last_message_at: res.message.created_at || new Date().toISOString() };
-            return updated.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+            return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
           });
         }
       }
@@ -942,7 +942,7 @@ export default function Conversations({ user }) {
                           );
                           const m = item.msg;
                           const isIn = m.direction === 'in' || m.direction === 'inbound';
-                          const timeStr = new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
+                          const timeStr = toDate(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
                           return (
                             <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
                               <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
@@ -1124,7 +1124,7 @@ export default function Conversations({ user }) {
                           <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Calendar size={12} className="text-slate-500" /></div>
                           <div className="min-w-0 flex-1">
                             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Last Message</p>
-                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.last_message_at ? new Date(selectedConv.last_message_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</p>
+                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.last_message_at ? toDate(selectedConv.last_message_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Dhaka' }) : 'N/A'}</p>
                           </div>
                         </div>
                         {selectedConv.assigned_to && (
@@ -1215,7 +1215,7 @@ export default function Conversations({ user }) {
                             <div className="flex items-center gap-1.5 mt-1.5">
                               <span className="text-[9px] text-amber-600 font-bold">{note.author || 'Team'}</span>
                               <span className="text-[9px] text-slate-400">·</span>
-                              <span className="text-[9px] text-slate-400">{new Date(note.created_at).toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
+                              <span className="text-[9px] text-slate-400">{toDate(note.created_at).toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
                             </div>
                           </div>
                         ))}
