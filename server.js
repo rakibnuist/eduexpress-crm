@@ -17,7 +17,7 @@ let DB_PATH = process.env.DB_PATH;
 
 if (!DB_PATH) {
   if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
-    DB_PATH = join(PERSISTENT_HOME, 'crm.db');
+    DB_PATH = join(PERSISTENT_HOME, 'crm-data', 'crm.db');
     // Auto-migrate if file is in old location
     if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH)) {
       try {
@@ -1194,15 +1194,20 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
-    // Trigger historical sync on startup in background for all active Messenger/Instagram channels
+    // Trigger historical sync on startup in background for all active Messenger/Instagram channels sequentially
     setTimeout(async () => {
       try {
         const activeChannels = db.prepare("SELECT id, name FROM channels WHERE active = 1 AND type IN ('messenger', 'instagram', 'tiktok')").all();
         for (const chan of activeChannels) {
-          console.log(`[startup-sync] Triggering background sync for channel: ${chan.name} (ID: ${chan.id})`);
-          syncChannelMessages(chan.id, 6)
-            .then(res => console.log(`[startup-sync] Completed background sync for ${chan.name}: Imported ${res.imported} messages.`))
-            .catch(e => console.error(`[startup-sync] Background sync failed for ${chan.name}:`, e.message));
+          console.log(`[startup-sync] Triggering sequential background sync (1 month) for channel: ${chan.name} (ID: ${chan.id})`);
+          try {
+            const res = await syncChannelMessages(chan.id, 1);
+            console.log(`[startup-sync] Completed background sync for ${chan.name}: Imported ${res.imported} messages.`);
+          } catch (e) {
+            console.error(`[startup-sync] Background sync failed for ${chan.name}:`, e.message);
+          }
+          // Sleep 3 seconds between channels to allow the engine/GC to stabilize
+          await new Promise(r => setTimeout(r, 3000));
         }
       } catch (err) {
         console.error('[startup-sync] Error checking active channels for startup sync:', err.message);
@@ -2348,14 +2353,23 @@ function runMigrations() {
     console.error("[migration] Failed to self-heal conversations status:", e.message);
   }
 
-  // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token
+  // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token if empty
   try {
     const newToken = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';
-    const info = db.prepare("UPDATE channels SET access_token = ?").run(newToken);
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
-    // Also store as CAPI token for Conversions API events
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
-    console.log(`[migration] Self-healed ${info.changes} channels, page_access_token, and capi_token with Global Access Token.`);
+    const info = db.prepare("UPDATE channels SET access_token = ? WHERE access_token IS NULL OR access_token = ''").run(newToken);
+    
+    // Only insert default configurations if not already set
+    const hasPageToken = db.prepare("SELECT value FROM meta_config WHERE key = 'page_access_token'").get();
+    if (!hasPageToken || !hasPageToken.value) {
+      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
+    }
+    const hasCapiToken = db.prepare("SELECT value FROM meta_config WHERE key = 'capi_token'").get();
+    if (!hasCapiToken || !hasCapiToken.value) {
+      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
+    }
+    if (info.changes > 0) {
+      console.log(`[migration] Self-healed ${info.changes} channels with Global Access Token.`);
+    }
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
   }
