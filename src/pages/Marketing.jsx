@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import Modal from '../components/Modal';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import { toDate } from '../lib/format';
 import {
   LayoutDashboard, Kanban, CalendarDays, BarChart3, FolderKanban, Image, BookOpen, Lightbulb, Rocket, Settings,
   Plus, Search, Filter, ChevronRight, Clock, Check, AlertTriangle, X, RefreshCw, Zap, Wand2, Sparkles,
@@ -56,7 +57,7 @@ export default function Marketing() {
   const [editingPost, setEditingPost] = useState(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [currentMonth, setCurrentMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [currentMonth, setCurrentMonth] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' }).slice(0, 7));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -355,7 +356,7 @@ function CalendarHub({ month, setMonth, slots, posts, campaigns, templates, onEd
         {days.map(day => {
           const dateStr = `${month}-${String(day).padStart(2, '0')}`;
           const daySlots = slotsByDay[dateStr] || [];
-          const isToday = dateStr === new Date().toISOString().slice(0, 10);
+          const isToday = dateStr === new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
           return (
             <div key={day} className={`bg-white rounded-lg border min-h-[120px] p-2 transition hover:shadow-md cursor-pointer ${isToday ? 'border-blue-400 ring-1 ring-blue-100' : 'border-slate-200'}`} onClick={() => openDay(day)}>
               <div className="flex items-center justify-between mb-1">
@@ -427,7 +428,7 @@ function DayDetailModal({ date, slots, posts, unscheduledPosts, onClose, onEditP
     <Modal onClose={onClose} className="max-w-2xl w-full">
       <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-bold text-slate-800">{new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+          <h2 className="text-sm font-bold text-slate-800">{new Date(date + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'Asia/Dhaka' })}</h2>
           <p className="text-[10px] text-slate-400">{slots.length} slots · {slots.filter(s => s.post_id).length} filled</p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400"><X size={16} /></button>
@@ -973,7 +974,7 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
                   <div key={c.id} className="flex gap-3">
                     <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-[10px] font-bold shrink-0">{c.user_name?.charAt(0) || 'U'}</div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-700">{c.user_name}</span><span className="text-[10px] text-slate-400">{new Date(c.created_at).toLocaleString()}</span></div>
+                      <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-700">{c.user_name}</span><span className="text-[10px] text-slate-400">{toDate(c.created_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}</span></div>
                       <p className="text-xs text-slate-600 mt-0.5">{c.comment}</p>
                     </div>
                   </div>
@@ -1009,7 +1010,7 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
                 {logs.length === 0 ? <p className="text-sm text-slate-400 text-center py-8">No history.</p> : logs.map(l => (
                   <div key={l.id} className="flex items-center gap-3 text-xs p-2 rounded-lg bg-slate-50">
                     <Clock size={12} className="text-slate-400" />
-                    <span className="text-slate-500">{new Date(l.created_at).toLocaleString()}</span>
+                    <span className="text-slate-500">{toDate(l.created_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
                     <span className="font-medium text-slate-700">{l.actor}</span>
                     <span className="text-slate-400">moved</span>
                     <span className="font-medium text-blue-600">{STATUS_CONFIG[l.from_status]?.label || l.from_status}</span>
