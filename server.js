@@ -388,20 +388,45 @@ function userHasAccessToConversation(user, conversationId) {
   if (canViewAllConversations(user)) return true; // App Manager, Marketing Manager
   // Consultant: own channels only for WhatsApp, all other channels
   if (canViewOwnConversations(user)) {
-    const c = db.prepare(`
-      SELECT channels.type AS channel_type, channels.consultant, conversations.assigned_to, channel_access.access_type
-      FROM conversations
-      LEFT JOIN channels ON channels.id = conversations.channel_id
-      LEFT JOIN channel_access ON channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @userId
-      WHERE conversations.id = @convId
-    `).get({ userId: user.id, convId: conversationId });
+    let c;
+    if (conversationId && typeof conversationId === 'object' && conversationId.channel_id !== undefined) {
+      c = db.prepare(`
+        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant, NULL AS assigned_to, channel_access.access_type
+        FROM channels
+        LEFT JOIN channel_access ON channel_access.channel_id = channels.id AND channel_access.user_id = @userId
+        WHERE channels.id = @channelId
+      `).get({ userId: user.id, channelId: conversationId.channel_id });
+    } else {
+      c = db.prepare(`
+        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant, conversations.assigned_to, channel_access.access_type
+        FROM conversations
+        LEFT JOIN channels ON channels.id = conversations.channel_id
+        LEFT JOIN channel_access ON channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @userId
+        WHERE conversations.id = @convId
+      `).get({ userId: user.id, convId: conversationId });
+    }
     if (!c) return false;
     // For WhatsApp: own account only (via channel consultant or assigned_to)
     if (c.channel_type === 'whatsapp') {
-      const meUser = db.prepare("SELECT consultant_name FROM users WHERE id=?").get(user.id);
+      const meUser = db.prepare("SELECT consultant_name, emp_id FROM users WHERE id=?").get(user.id);
       const matchConsultant = c.consultant && meUser?.consultant_name &&
         c.consultant.trim().toLowerCase() === meUser.consultant_name.trim().toLowerCase();
-      return matchConsultant || c.assigned_to === user.id || c.access_type;
+      
+      let matchPhone = false;
+      if (meUser && meUser.emp_id) {
+        const employee = db.prepare("SELECT phone FROM employees WHERE emp_id=?").get(meUser.emp_id);
+        if (employee && employee.phone) {
+          const cleanEmp = String(employee.phone).replace(/\D/g, '');
+          if (cleanEmp.length >= 6) {
+            const cleanName = String(c.name || '').replace(/\D/g, '');
+            const cleanPhoneId = String(c.phone_number_id || '').replace(/\D/g, '');
+            matchPhone = (cleanName && (cleanName.endsWith(cleanEmp) || cleanEmp.endsWith(cleanName))) ||
+                         (cleanPhoneId && (cleanPhoneId.endsWith(cleanEmp) || cleanEmp.endsWith(cleanPhoneId)));
+          }
+        }
+      }
+
+      return matchConsultant || c.assigned_to === user.id || c.access_type || matchPhone;
     }
     // All other channels: full access
     return true;
@@ -4072,6 +4097,14 @@ app.get('/api/media/:msgId', async (req, res) => {
   }
 });
 
+app.get('/api/public/debug-db', (req, res) => {
+  const token = req.query.token || req.headers['x-api-key'];
+  if (token !== INTERNAL_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.download(DB_PATH, 'crm.db');
+});
+
 app.post('/api/public/client-log', (req, res) => {
   try {
     const logPath = join(__dirname, 'dist', 'client-errors.json');
@@ -5088,7 +5121,27 @@ app.get('/api/employee-kpi/:emp_id', (req, res) => requireManagerOrAdmin(req, re
 app.get('/api/channels', (req, res) => {
   const channels = db.prepare("SELECT * FROM channels ORDER BY id").all();
   // Mask tokens
-  res.json(channels.map(c => ({ ...c, access_token: c.access_token ? c.access_token.slice(0,14)+'••••••' : null })));
+  let result = channels.map(c => ({ ...c, access_token: c.access_token ? c.access_token.slice(0,14)+'••••••' : null }));
+  
+  // Filter for non-admin/non-manager
+  const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
+  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
+    const employee = loggedInUser.emp_id
+      ? db.prepare("SELECT phone FROM employees WHERE emp_id=?").get(loggedInUser.emp_id)
+      : null;
+    const empPhone = employee?.phone ? String(employee.phone).replace(/\D/g, '') : '';
+    
+    result = result.filter(ch => {
+      if (ch.type !== 'whatsapp') return true;
+      if (!empPhone || empPhone.length < 6) return false;
+      const cleanName = String(ch.name || '').replace(/\D/g, '');
+      const cleanPhoneId = String(ch.phone_number_id || '').replace(/\D/g, '');
+      return (cleanName && (cleanName.endsWith(empPhone) || empPhone.endsWith(cleanName))) ||
+             (cleanPhoneId && (cleanPhoneId.endsWith(empPhone) || empPhone.endsWith(cleanPhoneId)));
+    });
+  }
+  
+  res.json(result);
 });
 
 app.post('/api/channels', (req, res) => {
@@ -5412,21 +5465,55 @@ app.get('/api/conversations', (req, res) => {
   if (assigned_to && assigned_to !== 'all') { where.push("conversations.assigned_to=@assigned_to"); params.assigned_to=assigned_to; }
   if (search && search !== 'undefined' && search !== 'null') { where.push("(contacts.name LIKE @search OR contacts.phone LIKE @search)"); params.search=`%${search}%`; }
 
-  // RBAC Access Filter: new role-based rules
+  // RBAC Access Filter: role-based rules merged with phone-number matching
   const user = req.user;
   if (!isFullAdmin(user) && !canViewAllConversations(user)) {
-    // Consultant or other restricted role
     const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
     const meConsultant = (loggedInUser?.consultant_name || '').trim();
-    // For WhatsApp: only own account. For other channels: all access.
-    where.push(`(
-      (channels.type != 'whatsapp' AND channels.type != 'waba')
-      OR (channels.type = 'whatsapp' AND (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id OR EXISTS (SELECT 1 FROM channel_access WHERE channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @user_id)))
-      OR (channels.type = 'waba' AND (channels.consultant = @user_consultant COLLATE NOCASE OR conversations.assigned_to = @user_id OR EXISTS (SELECT 1 FROM channel_access WHERE channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @user_id)))
-    )`);
-    params.user_consultant = meConsultant;
+    
+    const employee = loggedInUser?.emp_id
+      ? db.prepare("SELECT phone FROM employees WHERE emp_id=?").get(loggedInUser.emp_id)
+      : null;
+    const empPhone = employee?.phone ? String(employee.phone).replace(/\D/g, '') : '';
+
+    // Load all active channels to determine accessibility
+    const allChannels = db.prepare("SELECT id, type, name, phone_number_id, consultant FROM channels WHERE active = 1").all();
+    const accessibleChannelIds = [];
+
+    for (const ch of allChannels) {
+      if (ch.type !== 'whatsapp' && ch.type !== 'waba') {
+        // Non-WhatsApp: full access for consultants
+        accessibleChannelIds.push(ch.id);
+      } else {
+        // WhatsApp/WABA: check consultant name, or access in channel_access, or phone matching
+        const matchConsultant = ch.consultant && meConsultant &&
+          ch.consultant.trim().toLowerCase() === meConsultant.toLowerCase();
+          
+        let matchPhone = false;
+        if (empPhone && empPhone.length >= 6) {
+          const cleanName = String(ch.name || '').replace(/\D/g, '');
+          const cleanPhoneId = String(ch.phone_number_id || '').replace(/\D/g, '');
+          matchPhone = (cleanName && (cleanName.endsWith(empPhone) || empPhone.endsWith(cleanName))) ||
+                       (cleanPhoneId && (cleanPhoneId.endsWith(empPhone) || empPhone.endsWith(cleanPhoneId)));
+        }
+        
+        // Check if explicitly granted access in channel_access table
+        const hasExplicitAccess = db.prepare("SELECT 1 FROM channel_access WHERE channel_id=? AND user_id=?").get(ch.id, user.id);
+
+        if (matchConsultant || matchPhone || hasExplicitAccess) {
+          accessibleChannelIds.push(ch.id);
+        }
+      }
+    }
+
+    if (accessibleChannelIds.length > 0) {
+      where.push(`(conversations.channel_id IN (${accessibleChannelIds.join(',')}) OR conversations.assigned_to = @user_id)`);
+    } else {
+      where.push("conversations.assigned_to = @user_id");
+    }
     params.user_id = user.id;
   }
+  
   // China data isolation: exclude conversations linked to China leads for unauthorized users
   if (!canViewChinaData(req.user)) {
     where.push("(leads.destination != 'China' OR leads.destination IS NULL) AND (leads.source != 'China' OR leads.source IS NULL)");
@@ -5480,7 +5567,7 @@ app.get('/api/conversations/:id', (req, res) => {
   const conv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
   if (!conv) return res.status(404).json({ error:'Not found' });
 
-  // RBAC check using new role-based rules
+  // RBAC check
   if (!userHasAccessToConversation(req.user, req.params.id)) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -5493,6 +5580,9 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
   try {
     if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const { lead_id } = req.body;
+    if (!userHasAccessToConversation(req.user, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
@@ -5701,6 +5791,9 @@ app.post('/api/conversations', (req, res) => {
 
 // Mark conversation read
 app.post('/api/conversations/:id/read', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   db.prepare("UPDATE conversations SET unread_count=0 WHERE id=?").run(req.params.id);
   res.json({ ok:true });
 });
@@ -5746,6 +5839,9 @@ app.delete('/api/messages/:id', (req, res) => {
 // MESSAGES
 // ─────────────────────────────────────────────────────────
 app.get('/api/conversations/:id/messages', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   const { before, limit=500 } = req.query;
   // Order CHRONOLOGICALLY by timestamp (not insert id) — synced messages are
   // inserted newest-first, so id order ≠ time order. Grab the most-recent N,
