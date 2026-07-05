@@ -23,7 +23,30 @@ export function toDate(iso) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Common date formats
+// Helper to get Date components in Dhaka timezone
+export function getDhakaDateParts(date) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false
+  });
+  const parts = formatter.formatToParts(date);
+  const find = (type) => parts.find(p => p.type === type).value;
+  return {
+    year: parseInt(find('year')),
+    month: parseInt(find('month')) - 1, // 0-indexed
+    day: parseInt(find('day')),
+    hour: parseInt(find('hour')),
+    minute: parseInt(find('minute'))
+  };
+}
+
+// Common date formats — forced to GMT+6 (Dhaka) timezone
 export function fmtDate(iso, fmt = 'long') {
   const d = toDate(iso);
   if (!d) return '';
@@ -35,8 +58,11 @@ export function fmtDate(iso, fmt = 'long') {
     time:  { hour: '2-digit', minute: '2-digit' },
     datetime: { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' },
   }[fmt];
-  if (fmt === 'iso') return d.toISOString().slice(0, 10);
-  return d.toLocaleString('en-GB', opts);
+  if (fmt === 'iso') {
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' });
+    return formatter.format(d);
+  }
+  return d.toLocaleString('en-GB', { ...opts, timeZone: 'Asia/Dhaka' });
 }
 
 // "3m ago" / "2h ago" / "5d ago" — falls back to a short date if older.
@@ -51,20 +77,23 @@ export function timeAgo(iso) {
   return fmtDate(iso, 'short');
 }
 
-// Formats for chat list items: "02:10 PM", "Yesterday", "Friday", "26 Jun"
+// Formats for chat list items: "02:10 PM", "Yesterday", "Friday", "26 Jun" — forced to Dhaka timezone
 export function formatLastMessageTime(iso) {
   const d = toDate(iso);
   if (!d) return '';
   const now = new Date();
   
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dParts = getDhakaDateParts(d);
+  const nowParts = getDhakaDateParts(now);
+  
+  const today = new Date(nowParts.year, nowParts.month, nowParts.day);
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   
-  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const msgDate = new Date(dParts.year, dParts.month, dParts.day);
   
   if (msgDate.getTime() === today.getTime()) {
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
   }
   if (msgDate.getTime() === yesterday.getTime()) {
     return 'Yesterday';
@@ -72,13 +101,13 @@ export function formatLastMessageTime(iso) {
   
   const diffDays = Math.floor((today.getTime() - msgDate.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays < 7) {
-    return d.toLocaleDateString('en-US', { weekday: 'long' });
+    return d.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Dhaka' });
   }
   
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  if (dParts.year === nowParts.year) {
+    return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'Asia/Dhaka' });
   }
-  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' });
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'Asia/Dhaka' });
 }
 
 // Pluralise: pluralise(1, 'lead') → '1 lead', pluralise(3, 'lead') → '3 leads'

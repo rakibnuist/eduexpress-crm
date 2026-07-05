@@ -12,7 +12,7 @@ import {
   Filter, ArrowLeft, Bell, LayoutTemplate,
   ChevronDown, Menu as MenuIcon
 } from 'lucide-react';
-import { timeAgo, initials, formatLastMessageTime } from '../lib/format';
+import { timeAgo, initials, formatLastMessageTime, toDate, getDhakaDateParts } from '../lib/format';
 
 /* ── helpers ── */
 const getMediaUrl = (msg) => {
@@ -483,13 +483,23 @@ export default function Conversations({ user }) {
     const groups = [];
     let lastDate = null;
     msgs.forEach((m, idx) => {
-      const d = new Date(m.created_at);
-      const dateStr = d.toDateString();
+      const d = toDate(m.created_at);
+      if (!d) return;
+      const dateStr = d.toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' });
       if (dateStr !== lastDate) {
-        const today = new Date(); const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-        let label = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-        if (dateStr === today.toDateString()) label = 'Today';
-        else if (dateStr === yesterday.toDateString()) label = 'Yesterday';
+        const now = new Date();
+        const dParts = getDhakaDateParts(d);
+        const nowParts = getDhakaDateParts(now);
+        
+        const today = new Date(nowParts.year, nowParts.month, nowParts.day);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        const msgDate = new Date(dParts.year, dParts.month, dParts.day);
+        
+        let label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'Asia/Dhaka' });
+        if (msgDate.getTime() === today.getTime()) label = 'Today';
+        else if (msgDate.getTime() === yesterday.getTime()) label = 'Yesterday';
         groups.push({ type: 'separator', label, key: `sep-${idx}` });
         lastDate = dateStr;
       }
@@ -932,7 +942,7 @@ export default function Conversations({ user }) {
                           );
                           const m = item.msg;
                           const isIn = m.direction === 'in' || m.direction === 'inbound';
-                          const timeStr = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          const timeStr = new Date(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
                           return (
                             <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
                               <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
@@ -1205,7 +1215,7 @@ export default function Conversations({ user }) {
                             <div className="flex items-center gap-1.5 mt-1.5">
                               <span className="text-[9px] text-amber-600 font-bold">{note.author || 'Team'}</span>
                               <span className="text-[9px] text-slate-400">·</span>
-                              <span className="text-[9px] text-slate-400">{new Date(note.created_at).toLocaleDateString()}</span>
+                              <span className="text-[9px] text-slate-400">{new Date(note.created_at).toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
                             </div>
                           </div>
                         ))}
