@@ -39,23 +39,7 @@ export default function Login({ onSuccess }) {
     }
 
     if (!loc) {
-      let msg = 'Location access is required to log in. ';
-      if (geoError) {
-        if (geoError.code === 1) {
-          msg += 'Please allow location permission in your browser settings and try again.';
-        } else if (geoError.code === 2) {
-          msg += 'Position unavailable. Windows was unable to determine your physical location. Check if Wi-Fi is enabled.';
-        } else if (geoError.code === 3) {
-          msg += 'Location request timed out. Please try again.';
-        } else {
-          msg += `Error: ${geoError.message || 'Unknown error'}`;
-        }
-      } else {
-        msg += 'Please ensure location is enabled and try again.';
-      }
-      setError(msg);
-      setLoading(false);
-      return;
+      console.warn('[geolocation] Geolocation failed or timed out. Proceeding with login as optional check.');
     }
 
     try {

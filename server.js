@@ -262,18 +262,16 @@ app.post('/api/auth/login', (req, res) => {
   if (enforceLocation && Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
     const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
     if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
-      return res.status(403).json({
-        error: 'Location access is required to log in. Please allow location permission in your browser and try again.',
-        code: 'NO_LOCATION',
-      });
-    }
-    const distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
-    if (distFromOffice > officeRadius) {
-      return res.status(403).json({
-        error: `You must be at the office to log in. You are currently ${Math.round(distFromOffice)}m away.`,
-        code: 'OUTSIDE_OFFICE',
-        distance: Math.round(distFromOffice),
-      });
+      console.warn(`[login] User ${email} logged in without location coordinates`);
+    } else {
+      const distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
+      if (distFromOffice > officeRadius) {
+        return res.status(403).json({
+          error: `You must be at the office to log in. You are currently ${Math.round(distFromOffice)}m away.`,
+          code: 'OUTSIDE_OFFICE',
+          distance: Math.round(distFromOffice),
+        });
+      }
     }
   }
   // ── End enforcement ────────────────────────────────────────────────────────
