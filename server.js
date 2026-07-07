@@ -20,20 +20,16 @@ const PERSISTENT_HOME = '/home/u898266115';
 const LOCAL_DB_PATH = join(__dirname, 'crm.db');
 let DB_PATH = process.env.DB_PATH;
 
-if (!DB_PATH) {
-  if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
-    DB_PATH = LOCAL_DB_PATH;
-    const oldDbPath = join(PERSISTENT_HOME, 'crm-data', 'crm.db');
-    if (existsSync(oldDbPath) && !existsSync(LOCAL_DB_PATH)) {
-      try {
-        copyFileSync(oldDbPath, LOCAL_DB_PATH);
-        console.log(`[database] Auto-migrated database from ${oldDbPath} to ${LOCAL_DB_PATH}`);
-      } catch (err) {
-        console.error(`[database] Migration from legacy path failed:`, err.message);
-      }
+if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
+  DB_PATH = LOCAL_DB_PATH;
+  const oldDbPath = join(PERSISTENT_HOME, 'crm-data', 'crm.db');
+  if (existsSync(oldDbPath) && !existsSync(LOCAL_DB_PATH)) {
+    try {
+      copyFileSync(oldDbPath, LOCAL_DB_PATH);
+      console.log(`[database] Auto-migrated database from ${oldDbPath} to ${LOCAL_DB_PATH}`);
+    } catch (err) {
+      console.error(`[database] Migration from legacy path failed:`, err.message);
     }
-  } else {
-    DB_PATH = LOCAL_DB_PATH;
   }
 }
 const DB_DIR = dirname(DB_PATH);
