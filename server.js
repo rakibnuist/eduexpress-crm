@@ -5606,7 +5606,7 @@ async function syncChannelMetadata(channelId) {
 }
 
 // Helper to sync historical messages from Facebook/Instagram Page Channel
-async function syncChannelMessages(channelId, months = 6) {
+async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
   if (!channel) return { imported: 0, skipped: 0 };
   if (channel.type === 'tiktok') {
@@ -5729,13 +5729,13 @@ async function syncChannelMessages(channelId, months = 6) {
     console.log(`[sync] Starting ${channel.name} (${platform}) pageId=${pageId} token=${token.slice(0,14)}...`);
 
     let stop = false;
-    while (convUrl && !stop && imported + skipped < MAX_MESSAGES) {
+    while (convUrl && !stop && imported + skipped < MAX_MESSAGES && conversations < maxConvs) {
       const { items: fbConvs, nextUrl } = await fbGet(convUrl, 'conversations');
       console.log(`[sync] Got ${fbConvs.length} conversations from FB`);
       convUrl = nextUrl;
 
       for (const fbConv of fbConvs) {
-        if (imported + skipped >= MAX_MESSAGES) break;
+        if (imported + skipped >= MAX_MESSAGES || conversations >= maxConvs) { stop = true; break; }
 
         const updatedMs = fbConv.updated_time ? new Date(fbConv.updated_time).getTime() : 0;
         if (updatedMs && updatedMs < cutoffMs) { stop = true; break; }
@@ -8448,18 +8448,23 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+let isBackgroundSyncing = false;
+
 // Background loop to poll Facebook for new messages because webhooks are dropped in Development mode
 setInterval(async () => {
   try {
-    if (!dbReady) return;
+    if (!dbReady || isBackgroundSyncing) return;
+    isBackgroundSyncing = true;
     const channels = db.prepare("SELECT id, name, type FROM channels WHERE type IN ('messenger', 'instagram') AND active = 1").all();
     for (const channel of channels) {
-      // Run a fast, 1-month sync in the background
-      await syncChannelMessages(channel.id, 1).catch(err => {
+      // Run a fast, 1-month sync (max 5 conversations) in the background to prevent WASM OOM crashes
+      await syncChannelMessages(channel.id, 1, 5).catch(err => {
         console.warn(`[sync-polling-loop] Sync failed for channel ${channel.name}:`, err.message);
       });
     }
   } catch (err) {
     console.error('[sync-polling-loop] Global error in background loop:', err.message);
+  } finally {
+    isBackgroundSyncing = false;
   }
 }, 15000);
