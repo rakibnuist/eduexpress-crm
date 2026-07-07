@@ -27,8 +27,18 @@ async function req(path, opts = {}, attempt = 1) {
       try {
         msg = await r.text();
         const trimmed = msg.trim();
-        if (trimmed.startsWith('<') || trimmed.includes('hcdn-cgi') || trimmed.includes('jschallenge') || trimmed.includes('cloudflare')) {
+        const isFirewall = trimmed.includes('hcdn-cgi') || 
+                           trimmed.includes('jschallenge') || 
+                           trimmed.includes('cloudflare') || 
+                           trimmed.includes('security check');
+        if (isFirewall) {
           msg = 'Request blocked by security firewall (Hostinger CDN). Please refresh the page or solve the challenge in your browser.';
+        } else if (trimmed.startsWith('<')) {
+          const titleMatch = trimmed.match(/<title>([\s\S]*?)<\/title>/i);
+          const title = titleMatch ? titleMatch[1].trim() : '';
+          msg = `Server HTML Error (${r.status})${title ? `: ${title}` : ''}`;
+        } else {
+          msg = trimmed.substring(0, 150) || `Request failed (${r.status})`;
         }
       } catch {}
     }
