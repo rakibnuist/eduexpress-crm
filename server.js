@@ -182,6 +182,18 @@ app.get('/health', (_req, res) => {
   res.json({ status: dbReady ? 'ready' : 'starting' });
 });
 
+app.get('/diagnose-db', (req, res) => {
+  try {
+    const fs = require('fs');
+    const size = existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
+    const integrity = db.prepare("PRAGMA integrity_check").get();
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, tables });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 // Block all API calls until DB is ready, and return 503 cleanly if the WASM
 // instance died from OOM (the process is restarting itself in the background).
 app.use((req, res, next) => {
