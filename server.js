@@ -43,21 +43,21 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Rate limiting — prevent brute-force and abuse
 const standardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // limit each IP to 300 requests per windowMs
+  max: 10000, // limit each IP to 10000 requests per windowMs (essential since entire office shares a single IP)
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 });
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20, // stricter for auth endpoints
+  max: 500, // increased for office-wide deployments sharing one IP
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts, please try again later.' },
 });
 const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 50, // uploads are expensive
+  max: 200, 
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Upload quota exceeded, please try again later.' },
