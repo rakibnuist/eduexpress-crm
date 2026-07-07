@@ -2947,7 +2947,13 @@ function upsertConversation(contactId, channelId, channelType) {
       const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(channelId);
       if (chan && chan.consultant) {
         const emp = db.prepare("SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1").get(chan.consultant);
-        db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?").run(chan.consultant, emp ? emp.id : null, existing.id);
+        try {
+          db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?").run(chan.consultant, emp ? emp.id : null, existing.id);
+        } catch {
+          try {
+            db.prepare("UPDATE conversations SET assigned_to=? WHERE id=?").run(chan.consultant, existing.id);
+          } catch (e) { console.error('Auto-assign update failed:', e.message); }
+        }
         existing.assigned_to = chan.consultant;
         existing.assigned_to_id = emp ? emp.id : null;
       }
@@ -2965,8 +2971,20 @@ function upsertConversation(contactId, channelId, channelType) {
     if (emp) assigned_to_id = emp.id;
   }
 
-  const info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to,assigned_to_id) VALUES (?,?,?, 'open', ?, ?)`)
-    .run(contactId, channelId, channelType, assigned_to, assigned_to_id);
+  let info;
+  try {
+    info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to,assigned_to_id) VALUES (?,?,?, 'open', ?, ?)`)
+      .run(contactId, channelId, channelType, assigned_to, assigned_to_id);
+  } catch (err) {
+    // Fallback: if assigned_to_id column is missing in production database
+    try {
+      info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to) VALUES (?,?,?, 'open', ?)`)
+        .run(contactId, channelId, channelType, assigned_to);
+    } catch (e2) {
+      info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status) VALUES (?,?,?,'open')`)
+        .run(contactId, channelId, channelType);
+    }
+  }
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 
