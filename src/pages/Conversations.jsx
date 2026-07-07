@@ -361,7 +361,8 @@ export default function Conversations({ user }) {
     const POLL_INTERVAL = 5000;
     const SSE_FAIL_THRESHOLD = 2;
 
-    const isSseDisabled = sessionStorage.getItem('disable_sse') === 'true';
+    const isProduction = typeof window !== 'undefined' && window.location.hostname === 'crm.eduexpressint.com';
+    const isSseDisabled = isProduction || sessionStorage.getItem('disable_sse') === 'true';
 
     function handleNewMessageData(data) {
       const currConv = selectedConvRef.current;
