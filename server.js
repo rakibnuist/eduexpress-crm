@@ -2939,8 +2939,32 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_
 
 function upsertConversation(contactId, channelId, channelType) {
   const existing = db.prepare("SELECT * FROM conversations WHERE contact_id=? AND channel_id=? AND status != 'resolved'").get(contactId, channelId);
-  if (existing) return existing;
-  const info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status) VALUES (?,?,?,'open')`).run(contactId, channelId, channelType);
+  if (existing) {
+    // If existing conversation is not assigned, but channel has a consultant, auto-assign it now
+    if (!existing.assigned_to) {
+      const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(channelId);
+      if (chan && chan.consultant) {
+        const emp = db.prepare("SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1").get(chan.consultant);
+        db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?").run(chan.consultant, emp ? emp.id : null, existing.id);
+        existing.assigned_to = chan.consultant;
+        existing.assigned_to_id = emp ? emp.id : null;
+      }
+    }
+    return existing;
+  }
+  
+  // Look up channel's consultant
+  const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(channelId);
+  let assigned_to = null;
+  let assigned_to_id = null;
+  if (chan && chan.consultant) {
+    assigned_to = chan.consultant;
+    const emp = db.prepare("SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1").get(chan.consultant);
+    if (emp) assigned_to_id = emp.id;
+  }
+
+  const info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to,assigned_to_id) VALUES (?,?,?, 'open', ?, ?)`)
+    .run(contactId, channelId, channelType, assigned_to, assigned_to_id);
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 

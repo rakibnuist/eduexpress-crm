@@ -1101,11 +1101,11 @@ export default function Conversations({ user }) {
                               <div className="flex-1 h-px bg-[#e4e6eb]" />
                             </div>
                           );
-                          const msg = item;
+                          const msg = item.msg;
                           const isOut = msg.direction === 'out' || msg.direction === 'outbound';
                           const mediaUrl = getMediaUrl(msg);
                           return (
-                            <div key={msg.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5`}>
+                            <div key={msg.id || item.key} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5`}>
                               {!isOut && (
                                 selectedConv.contact_avatar
                                   ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end mb-1 mr-1.5" />
