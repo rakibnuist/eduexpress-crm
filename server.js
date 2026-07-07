@@ -2703,7 +2703,7 @@ app.get('/api/events', (req, res) => {
 
   const id = Date.now() + Math.random();
   sseClients.set(id, { res, user: payload });
-  res.write(`data: ${JSON.stringify({ type: 'connected', id })}\n\n`);
+  res.write(`event: connected\ndata: ${JSON.stringify({ type: 'connected', id })}\n\n`);
   if (typeof res.flush === 'function') res.flush();
 
   const ping = setInterval(() => {

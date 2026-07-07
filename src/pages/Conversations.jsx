@@ -353,7 +353,9 @@ export default function Conversations({ user }) {
     let sseConnected = false;
     const MAX_DELAY = 30000;
     const POLL_INTERVAL = 5000;
-    const SSE_FAIL_THRESHOLD = 3;
+    const SSE_FAIL_THRESHOLD = 2;
+
+    const isSseDisabled = sessionStorage.getItem('disable_sse') === 'true';
 
     function handleNewMessageData(data) {
       const currConv = selectedConvRef.current;
@@ -413,10 +415,18 @@ export default function Conversations({ user }) {
     }
 
     function connect() {
+      if (isSseDisabled) {
+        startPolling();
+        return;
+      }
       if (es) { try { es.close(); } catch {} }
       try {
         es = new EventSource('/api/events', { withCredentials: true });
-      } catch { sseFailCount = SSE_FAIL_THRESHOLD; startPolling(); return; }
+      } catch { 
+        sessionStorage.setItem('disable_sse', 'true');
+        startPolling(); 
+        return; 
+      }
 
       es.addEventListener('connected', () => { retryDelay = 2000; sseFailCount = 0; sseConnected = true; stopPolling(); });
 
@@ -445,6 +455,7 @@ export default function Conversations({ user }) {
         sseConnected = false;
         sseFailCount++;
         if (sseFailCount >= SSE_FAIL_THRESHOLD) {
+          sessionStorage.setItem('disable_sse', 'true');
           startPolling();
         }
         if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -456,7 +467,7 @@ export default function Conversations({ user }) {
     }
 
     connect();
-    // Also start polling immediately as a safety net — SSE will stop it once connected
+    // Also start polling immediately as a safety net if SSE is not connected yet
     const initialPollDelay = setTimeout(() => { if (!sseConnected) startPolling(); }, 3000);
     return () => {
       clearTimeout(initialPollDelay);
