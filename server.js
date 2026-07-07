@@ -2689,6 +2689,37 @@ function runMigrations() {
 // Each SSE client = { res, user }. The user object lets us push only to admins,
 // or only to the consultant who owns a specific lead.
 const sseClients = new Map();
+const longPollClients = new Set();
+
+app.post('/api/messages/poll', (req, res) => {
+  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+
+  let isResolved = false;
+  const clientObj = {
+    user: payload,
+    send: (event) => {
+      if (isResolved) return;
+      isResolved = true;
+      longPollClients.delete(clientObj);
+      res.json(event);
+    }
+  };
+
+  longPollClients.add(clientObj);
+
+  const timeout = setTimeout(() => {
+    if (isResolved) return;
+    isResolved = true;
+    longPollClients.delete(clientObj);
+    res.json({ type: 'timeout' });
+  }, 20000);
+
+  req.on('close', () => {
+    clearTimeout(timeout);
+    longPollClients.delete(clientObj);
+  });
+});
 
 app.get('/api/events', (req, res) => {
   // Auth via cookie — EventSource always sends cookies, no extra setup needed.
@@ -2730,6 +2761,15 @@ function broadcast(type, data, filter = null) {
       if (typeof client.res.flush === 'function') client.res.flush();
     } catch {
       sseClients.delete(id);
+    }
+  });
+
+  longPollClients.forEach(client => {
+    if (filter && !filter(client.user)) return;
+    try {
+      client.send({ type, ...data });
+    } catch {
+      longPollClients.delete(client);
     }
   });
 }

@@ -407,6 +407,32 @@ export default function Conversations({ user }) {
       });
     }
 
+    let activeLongPoll = true;
+
+    async function startLongPolling() {
+      console.log('[sync] Running CDN-friendly long-polling loop…');
+      while (activeLongPoll) {
+        try {
+          const event = await api.pollMessages();
+          if (!activeLongPoll) break;
+          if (event && event.type === 'new_message') {
+            handleNewMessageData(event);
+          } else if (event && event.type === 'message_status') {
+            const data = event;
+            if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+          } else if (event && event.type === 'conversation_deleted') {
+            const data = event;
+            if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+            setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
+          }
+        } catch (err) {
+          if (!activeLongPoll) break;
+          console.warn('[sync] Long poll cycle failed, retrying in 5s:', err.message);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+    }
+
     // Polling fallback — refresh conversations and current messages
     function startPolling() {
       if (pollTimer) return;
@@ -441,7 +467,7 @@ export default function Conversations({ user }) {
 
     function connect() {
       if (isSseDisabled) {
-        startPolling();
+        startLongPolling();
         return;
       }
       if (es) { try { es.close(); } catch {} }
@@ -449,7 +475,7 @@ export default function Conversations({ user }) {
         es = new EventSource('/api/events', { withCredentials: true });
       } catch { 
         sessionStorage.setItem('disable_sse', 'true');
-        startPolling(); 
+        startLongPolling(); 
         return; 
       }
 
@@ -481,7 +507,7 @@ export default function Conversations({ user }) {
         sseFailCount++;
         if (sseFailCount >= SSE_FAIL_THRESHOLD) {
           sessionStorage.setItem('disable_sse', 'true');
-          startPolling();
+          startLongPolling();
         }
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
@@ -492,9 +518,10 @@ export default function Conversations({ user }) {
     }
 
     connect();
-    // Also start polling immediately as a safety net if SSE is not connected yet
-    const initialPollDelay = setTimeout(() => { if (!sseConnected) startPolling(); }, 3000);
+    // Also start long polling immediately as a safety net if SSE is not connected yet and is not disabled
+    const initialPollDelay = setTimeout(() => { if (!sseConnected && !isSseDisabled) startLongPolling(); }, 3000);
     return () => {
+      activeLongPoll = false;
       clearTimeout(initialPollDelay);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       stopPolling();
