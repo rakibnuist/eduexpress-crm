@@ -2699,6 +2699,7 @@ app.get('/api/events', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');   // disables nginx buffering
+  res.setHeader('X-LiteSpeed-Buffer', 'no');  // disables LiteSpeed buffering (Hostinger)
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.flushHeaders();
 
