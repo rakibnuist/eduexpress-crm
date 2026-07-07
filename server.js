@@ -2424,6 +2424,7 @@ function runMigrations() {
     }
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
+  }
   // Self-healing migration to assign lead L-00003 and others to Afsana Meme
   try {
     const afsanaEmp = db.prepare("SELECT id FROM employees WHERE name LIKE '%Afsana%'").get();
