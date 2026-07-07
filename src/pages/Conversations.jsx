@@ -15,7 +15,20 @@ import {
 import EmojiPicker from 'emoji-picker-react';
 import { timeAgo, initials, formatLastMessageTime, toDate, getDhakaDateParts } from '../lib/format';
 
-/* ── helpers ── */
+/* ── Country → flag emoji ── */
+const COUNTRY_EMOJIS = {
+  bangladesh: '🇧🇩', china: '🇨🇳', malta: '🇲🇹', hungary: '🇭🇺',
+  greece: '🇬🇷', estonia: '🇪🇪', georgia: '🇬🇪', malaysia: '🇲🇾',
+  thailand: '🇹🇭', cyprus: '🇨🇾', uk: '🇬🇧', usa: '🇺🇸',
+  canada: '🇨🇦', australia: '🇦🇺', germany: '🇩🇪', france: '🇫🇷',
+  india: '🇮🇳', pakistan: '🇵🇰', nepal: '🇳🇵', italy: '🇮🇹',
+};
+const getCountryEmoji = (dest) => {
+  if (!dest) return '';
+  return COUNTRY_EMOJIS[dest.toLowerCase().trim()] || '';
+};
+
+
 const getMediaUrl = (msg) => {
   if (!msg.media_url) return '';
   if (msg.media_url.startsWith('http') || msg.media_url.startsWith('/uploads')) return msg.media_url;
@@ -330,53 +343,81 @@ export default function Conversations({ user }) {
     }
   }, [replyText]);
 
+  // ── Auto-reconnect SSE on any error/close ──────────────────────────────
   useEffect(() => {
-    const es = new EventSource('/api/events', { withCredentials: true });
-    es.addEventListener('new_message', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const currConv = selectedConvRef.current;
-        if (currConv && data.conversation_id === currConv.id) {
-          setMessages(prev => {
-            if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
-            return [...prev, data];
-          });
-          api.markConversationAsRead(currConv.id).catch(() => {});
-          setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
-        }
-        setConversations(prev => {
-          const idx = prev.findIndex(c => c.id === data.conversation_id);
-          if (idx === -1) {
-            api.getConversation(data.conversation_id).then(conv => {
-              if (conv) setConversations(cur => cur.some(c => c.id === conv.id) ? cur : [conv, ...cur]);
-            }).catch(() => {});
-            return prev;
+    let es = null;
+    let reconnectTimer = null;
+    let retryDelay = 2000;
+    const MAX_DELAY = 30000;
+
+    function connect() {
+      if (es) { try { es.close(); } catch {} }
+      es = new EventSource('/api/events', { withCredentials: true });
+
+      es.addEventListener('connected', () => { retryDelay = 2000; });
+
+      es.addEventListener('new_message', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          const currConv = selectedConvRef.current;
+          if (currConv && data.conversation_id === currConv.id) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
+              return [...prev, data];
+            });
+            api.markConversationAsRead(currConv.id).catch(() => {});
+            setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
+          } else {
+            const meta = getChannelMeta(data.channel_type || 'whatsapp');
+            toast.info(`New ${meta.label} message`, { duration: 3000 });
           }
-          const updated = [...prev];
-          updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (currConv && currConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
-          return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
-        });
-        if (!currConv || currConv.id !== data.conversation_id) {
-          const meta = getChannelMeta(data.channel_type || 'whatsapp');
-          toast.info(`New ${meta.label} message`, { duration: 3000 });
-        }
-      } catch (err) { console.error('SSE new_message error:', err); }
-    });
-    es.addEventListener('message_status', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
-      } catch (err) { console.error('SSE message_status error:', err); }
-    });
-    es.addEventListener('conversation_deleted', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
-        setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
-      } catch (err) { console.error('SSE conversation_deleted error:', err); }
-    });
-    es.onerror = (err) => { console.error('SSE error:', err); };
-    return () => { es.close(); };
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === data.conversation_id);
+            if (idx === -1) {
+              api.getConversation(data.conversation_id).then(conv => {
+                if (conv) setConversations(cur => cur.some(c => c.id === conv.id) ? cur : [conv, ...cur]);
+              }).catch(() => {});
+              return prev;
+            }
+            const currConv2 = selectedConvRef.current;
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (currConv2 && currConv2.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
+            return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
+          });
+        } catch (err) { console.error('SSE new_message error:', err); }
+      });
+
+      es.addEventListener('message_status', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+        } catch (err) { console.error('SSE message_status error:', err); }
+      });
+
+      es.addEventListener('conversation_deleted', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+          setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
+        } catch (err) { console.error('SSE conversation_deleted error:', err); }
+      });
+
+      es.onerror = () => {
+        try { es.close(); } catch {}
+        es = null;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 1.5, MAX_DELAY);
+          connect();
+        }, retryDelay);
+      };
+    }
+
+    connect();
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (es) try { es.close(); } catch {}
+    };
   }, [toast]);
 
   useEffect(() => {
@@ -468,19 +509,21 @@ export default function Conversations({ user }) {
   };
 
   const handleMarkAsUnread = async (e, conv) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     try {
       await api.markConversationAsUnread(conv.id);
       setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 1 } : c));
+      if (selectedConv?.id === conv.id) setSelectedConv(prev => prev ? { ...prev, unread_count: 1 } : null);
       toast.success('Marked as unread');
     } catch (err) { toast.error('Failed: ' + err.message); }
   };
 
   const handleMarkAsRead = async (e, conv) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     try {
       await api.markConversationAsRead(conv.id);
       setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
+      if (selectedConv?.id === conv.id) setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
       toast.success('Marked as read');
     } catch (err) { toast.error('Failed: ' + err.message); }
   };
@@ -607,7 +650,23 @@ export default function Conversations({ user }) {
     }
   };
 
+  const handleMarkNegative = async () => {
+    if (!selectedConv?.lead_id) {
+      // No lead yet — create one first then mark negative? For now just show a toast.
+      toast.error('Please convert to a Lead first before marking as Negative.');
+      return;
+    }
+    if (!window.confirm('Mark this lead as Negative / Not Interested?')) return;
+    try {
+      await api.updateLead(selectedConv.lead_id, { stage: 'Negative', status: 'negative' });
+      toast.success('Marked as Negative / Not Interested');
+    } catch (err) {
+      toast.error('Failed: ' + err.message);
+    }
+  };
+
   const handleSelectTemplate = (t) => {
+
     setReplyText(t.content || '');
     setShowTemplatePicker(false);
     setTimeout(() => { textareaRef.current?.focus(); }, 0);
@@ -953,9 +1012,14 @@ export default function Conversations({ user }) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <p className={`text-xs flex items-center gap-1.5 truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
-                              {conv.unread_count > 0 && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 shadow-sm" title="Unread" />}
+                            <p className={`text-xs flex items-center gap-1 truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
+                              {conv.unread_count > 0 ? (
+                                <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 shadow-sm" title="Unread" />
+                              ) : (
+                                <span className="w-2 h-2 rounded-full bg-slate-200 flex-shrink-0" title="Read" />
+                              )}
                               <span className="truncate">{conv.contact_name || conv.contact_phone || 'Contact'}</span>
+                              {conv.lead_destination && <span className="flex-shrink-0 text-sm leading-none" title={conv.lead_destination}>{getCountryEmoji(conv.lead_destination)}</span>}
                             </p>
                             {conv.assigned_to && (
                               <span className="flex items-center gap-0.5 text-[9px] text-blue-700 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md font-bold flex-shrink-0 shadow-sm" title={`Assigned to: ${conv.assigned_to}`}>
@@ -1034,8 +1098,14 @@ export default function Conversations({ user }) {
                     {initials(selectedConv.contact_name || 'C')}
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-slate-800 text-sm truncate">{selectedConv.contact_name || 'Contact'}</h3>
+                      {/* Country flag emoji */}
+                      {selectedConv.lead_destination && (
+                        <span className="text-base leading-none flex-shrink-0" title={selectedConv.lead_destination}>
+                          {getCountryEmoji(selectedConv.lead_destination)}
+                        </span>
+                      )}
                       {selectedConv.is_priority && <Star size={13} className="text-amber-500 flex-shrink-0" fill="currentColor" />}
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md text-white flex-shrink-0 ${getChannelMeta(selectedConv.channel_type).bg}`}>
                         {getChannelMeta(selectedConv.channel_type).label}
@@ -1044,6 +1114,14 @@ export default function Conversations({ user }) {
                         <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 truncate max-w-[100px]">
                           <User size={9} className="inline mr-0.5" />{selectedConv.assigned_to}
                         </span>
+                      )}
+                      {/* Read / Unread badge */}
+                      {selectedConv.unread_count > 0 ? (
+                        <span className="text-[9px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
+                          {selectedConv.unread_count} unread
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">✓ Read</span>
                       )}
                     </div>
                     <p className="text-[10px] text-slate-400 flex items-center gap-1.5 font-medium">
@@ -1069,6 +1147,25 @@ export default function Conversations({ user }) {
                       <User size={13} />
                       <span>Lead #{selectedConv.lead_id}</span>
                     </Link>
+                  )}
+                  {/* Negative / Not Interested */}
+                  <button onClick={handleMarkNegative}
+                    title="Mark as Negative / Not Interested"
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs px-2.5 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] border border-rose-200">
+                    <X size={12} />
+                    <span className="hidden sm:inline">Negative</span>
+                  </button>
+                  {/* Read/Unread toggle */}
+                  {selectedConv.unread_count > 0 ? (
+                    <button onClick={(e) => handleMarkAsRead(e, selectedConv)} title="Mark as Read"
+                      className="p-2 rounded-lg transition-colors text-blue-600 bg-blue-50 hover:bg-blue-100">
+                      <CheckCircle size={15} />
+                    </button>
+                  ) : (
+                    <button onClick={(e) => handleMarkAsUnread(e, selectedConv)} title="Mark as Unread"
+                      className="p-2 rounded-lg transition-colors text-slate-400 hover:bg-slate-50 hover:text-slate-700">
+                      <MessageSquare size={15} />
+                    </button>
                   )}
                   <button onClick={handleTogglePriority} title={selectedConv.is_priority ? 'Remove priority' : 'Mark as priority'}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${selectedConv.is_priority ? 'bg-amber-50 text-amber-500' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
