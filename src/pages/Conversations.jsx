@@ -283,12 +283,10 @@ export default function Conversations({ user }) {
   const handleRefresh = useCallback(async () => {
     const curr = selectedConvRef.current;
     if (curr && curr.channel_id) {
-      toast.info('Syncing channel with Meta…');
-      try {
-        await api.syncChannel(curr.channel_id);
-      } catch (err) {
+      toast.info('Syncing with Meta in background…');
+      api.syncChannel(curr.channel_id).catch(err => {
         console.warn('Sync failed:', err.message);
-      }
+      });
     }
     await loadConversations();
   }, [loadConversations, toast]);
