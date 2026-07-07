@@ -15,22 +15,37 @@ export default function Login({ onSuccess }) {
     setError('');
     setLoading(true);
 
-    // Geo location is required for office-presence enforcement.
-    // If the user explicitly denies, bail early with a clear message.
-    let loc = null;
-    let locationDenied = false;
+    let geoError = null;
     if (navigator.geolocation) {
       loc = await new Promise(resolve => {
         navigator.geolocation.getCurrentPosition(
           p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          err => { if (err.code === 1) locationDenied = true; resolve(null); },
-          { timeout: 6000, maximumAge: 60000 }
+          err => {
+            console.error('Geolocation error:', err);
+            geoError = err;
+            resolve(null);
+          },
+          { timeout: 15000, maximumAge: 60000, enableHighAccuracy: true }
         );
       });
     }
 
-    if (locationDenied) {
-      setError('Location access is required to log in. Please allow location permission in your browser settings and try again.');
+    if (!loc) {
+      let msg = 'Location access is required to log in. ';
+      if (geoError) {
+        if (geoError.code === 1) {
+          msg += 'Please allow location permission in your browser settings and try again.';
+        } else if (geoError.code === 2) {
+          msg += 'Position unavailable. Windows was unable to determine your physical location. Check if Wi-Fi is enabled.';
+        } else if (geoError.code === 3) {
+          msg += 'Location request timed out. Please try again.';
+        } else {
+          msg += `Error: ${geoError.message || 'Unknown error'}`;
+        }
+      } else {
+        msg += 'Please ensure location is enabled and try again.';
+      }
+      setError(msg);
       setLoading(false);
       return;
     }
