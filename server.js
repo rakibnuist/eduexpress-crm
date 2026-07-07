@@ -2245,6 +2245,8 @@ function runMigrations() {
     `ALTER TABLE content_posts ADD COLUMN notes TEXT`,
     `ALTER TABLE content_posts ADD COLUMN tags TEXT`,
     `ALTER TABLE conversations ADD COLUMN assigned_to_id INTEGER`,
+    `DELETE FROM conversations WHERE id NOT IN (SELECT MAX(id) FROM conversations GROUP BY contact_id, channel_id)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_contact_channel ON conversations(contact_id, channel_id)`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -3054,17 +3056,24 @@ function upsertConversation(contactId, channelId, channelType) {
 
   let info;
   try {
-    info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to,assigned_to_id) VALUES (?,?,?, 'open', ?, ?)`)
+    info = db.prepare(`INSERT OR IGNORE INTO conversations (contact_id,channel_id,channel_type,status,assigned_to,assigned_to_id) VALUES (?,?,?, 'open', ?, ?)`)
       .run(contactId, channelId, channelType, assigned_to, assigned_to_id);
   } catch (err) {
     // Fallback: if assigned_to_id column is missing in production database
     try {
-      info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status,assigned_to) VALUES (?,?,?, 'open', ?)`)
+      info = db.prepare(`INSERT OR IGNORE INTO conversations (contact_id,channel_id,channel_type,status,assigned_to) VALUES (?,?,?, 'open', ?)`)
         .run(contactId, channelId, channelType, assigned_to);
     } catch (e2) {
-      info = db.prepare(`INSERT INTO conversations (contact_id,channel_id,channel_type,status) VALUES (?,?,?,'open')`)
-        .run(contactId, channelId, channelType);
+      try {
+        info = db.prepare(`INSERT OR IGNORE INTO conversations (contact_id,channel_id,channel_type,status) VALUES (?,?,?,'open')`)
+          .run(contactId, channelId, channelType);
+      } catch (e3) {}
     }
+  }
+
+  // If insert was ignored (meaning conversation already exists), fetch and return it
+  if (!info || info.changes === 0) {
+    return db.prepare("SELECT * FROM conversations WHERE contact_id=? AND channel_id=? AND status != 'resolved'").get(contactId, channelId);
   }
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
@@ -5736,6 +5745,14 @@ async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
 
       for (const fbConv of fbConvs) {
         if (imported + skipped >= MAX_MESSAGES || conversations >= maxConvs) { stop = true; break; }
+
+        if (fbConv.snippet) {
+          const s = fbConv.snippet.toLowerCase();
+          if (s.includes('commented on') || s.includes('কমেন্ট করেছেন') || s.includes('created this chat') || s.includes('চ্যাটটি তৈরি করেছে')) {
+            console.log(`[sync] Skipping comment-reply conversation: "${fbConv.snippet}"`);
+            continue;
+          }
+        }
 
         const updatedMs = fbConv.updated_time ? new Date(fbConv.updated_time).getTime() : 0;
         if (updatedMs && updatedMs < cutoffMs) { stop = true; break; }
