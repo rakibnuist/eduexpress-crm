@@ -892,7 +892,20 @@ export default function Conversations({ user }) {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {!selectedConv.lead_id ? (
+                    <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
+                      className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm">
+                      <User size={13} />
+                      <span>Add to Lead</span>
+                    </button>
+                  ) : (
+                    <Link to={`/leads/${selectedConv.lead_id}`}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm">
+                      <User size={13} />
+                      <span>Lead #{selectedConv.lead_id}</span>
+                    </Link>
+                  )}
                   <button onClick={handleTogglePriority} title={selectedConv.is_priority ? 'Remove priority' : 'Mark as priority'}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${selectedConv.is_priority ? 'bg-amber-50 text-amber-500' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
                     <Star size={16} />
