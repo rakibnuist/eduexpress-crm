@@ -185,6 +185,7 @@ app.get('/health', (_req, res) => {
 // Block all API calls until DB is ready, and return 503 cleanly if the WASM
 // instance died from OOM (the process is restarting itself in the background).
 app.use((req, res, next) => {
+  console.log('[request]', req.method, req.path);
   if (req.path.startsWith('/api')) {
     if (isDead()) {
       return res.status(503).json({ error: 'Server is restarting — please retry in a few seconds.' });
