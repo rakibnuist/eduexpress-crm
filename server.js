@@ -12,7 +12,7 @@ import { initDatabase, isDead } from './sqldb.js';
 const require = createRequire(import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || process.env.LSNODE_SOCKET || 3001;
 console.log('[startup] Port detected:', PORT, 'type:', typeof PORT);
 console.log('[startup] Env keys:', Object.keys(process.env).join(', '));
 
@@ -1202,6 +1202,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
+    /*
     // Trigger historical sync on startup in background for all active channels sequentially
     setTimeout(async () => {
       try {
@@ -1225,6 +1226,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
         console.error('[startup-sync] Error checking active channels for startup sync:', err.message);
       }
     }, 10000); // delay 10s to not interfere with main startup requests
+    */
   } catch (e) {
     console.error('[startup] DB init failed:', e.message);
     process.exit(1);
