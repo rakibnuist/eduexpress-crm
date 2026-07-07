@@ -2711,7 +2711,7 @@ app.get('/api/events', (req, res) => {
       res.write(`: ping\n\n`);
       if (typeof res.flush === 'function') res.flush();
     } catch { clearInterval(ping); sseClients.delete(id); }
-  }, 20000);
+  }, 5000);
 
   req.on('close', () => { clearInterval(ping); sseClients.delete(id); });
 });
