@@ -309,19 +309,51 @@ app.post('/api/auth/login', (req, res) => {
 app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
 
 app.get('/api/auth/me', (req, res) => {
-  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
-  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-  const user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  // Load multi-roles from user_roles table
-  const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+  console.log('[api/auth/me] Starting...');
+  const cookie = getCookie(req, AUTH_COOKIE);
+  console.log('[api/auth/me] Cookie retrieved:', cookie ? 'exists' : 'null');
+  let payload;
+  try {
+    payload = verifyToken(cookie);
+  } catch (err) {
+    console.error('[api/auth/me] Token verification crashed:', err.message);
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  console.log('[api/auth/me] Token verified. Payload:', payload);
+  if (!payload) {
+    console.log('[api/auth/me] Unauthorized (no payload)');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  console.log('[api/auth/me] Querying users for id:', payload.id);
+  let user;
+  try {
+    user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
+  } catch (err) {
+    console.error('[api/auth/me] User query crashed:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+  console.log('[api/auth/me] User query result:', user ? user.email : 'null');
+  if (!user) {
+    console.log('[api/auth/me] Unauthorized (user not found)');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  console.log('[api/auth/me] Querying roles for id:', user.id);
+  let roles;
+  try {
+    roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+  } catch (err) {
+    console.error('[api/auth/me] Roles query crashed:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+  console.log('[api/auth/me] Roles query result:', roles);
   if (roles.length === 0) {
-    // Fallback: map legacy role to new role
     const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
     roles.push(roleMap[user.role] || user.role || 'consultant');
   }
   user.roles = roles;
+  console.log('[api/auth/me] Sending user response...');
   res.json(user);
+  console.log('[api/auth/me] Done!');
 });
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
