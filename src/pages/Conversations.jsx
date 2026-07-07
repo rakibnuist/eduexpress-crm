@@ -222,9 +222,9 @@ export default function Conversations({ user }) {
       );
     }
     switch (statusFilter) {
-      case 'unread': list = list.filter(c => c.unread_count > 0); break;
+      case 'unread': list = list.filter(c => (c.unread_count || 0) > 0 || c.last_message_direction === 'in'); break;
       case 'priority': list = list.filter(c => c.is_priority); break;
-      case 'assigned_me': list = list.filter(c => c.assigned_to_id === user?.id); break;
+      case 'assigned_me': list = list.filter(c => c.assigned_to_id === user?.id || c.assigned_to === user?.name); break;
       case 'no_lead': list = list.filter(c => !c.lead_id); break;
       case 'new_leads': list = list.filter(c => c.lead_id && c.lead_status === 'New Lead'); break;
       case 'archived': list = list.filter(c => c.status === 'archived'); break;
@@ -880,9 +880,10 @@ export default function Conversations({ user }) {
 
                     {/* Avatar */}
                     <div className="relative flex-shrink-0 mt-0.5">
-                      <div className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-white font-bold text-[15px] bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
-                        {initials(conv.contact_name || 'C')}
-                      </div>
+                      {conv.contact_avatar
+                        ? <img src={conv.contact_avatar} alt={conv.contact_name || 'C'} className="w-[46px] h-[46px] rounded-full object-cover" />
+                        : <div className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-white font-bold text-[15px] bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>{initials(conv.contact_name || 'C')}</div>
+                      }
                       {/* Channel icon badge */}
                       <span className={`absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full flex items-center justify-center border-2 border-white text-[8px] font-black text-white ${meta.bg}`}>
                         {meta.icon}
@@ -954,9 +955,10 @@ export default function Conversations({ user }) {
                     <ArrowLeft size={18} />
                   </button>
                   <div className="relative flex-shrink-0">
-                    <div className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
-                      {initials(selectedConv.contact_name || 'C')}
-                    </div>
+                    {selectedConv.contact_avatar
+                      ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-[38px] h-[38px] rounded-full object-cover" />
+                      : <div className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>{initials(selectedConv.contact_name || 'C')}</div>
+                    }
                     <span className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border-[1.5px] border-white text-[7px] font-black text-white ${getChannelMeta(selectedConv.channel_type).bg}`}>
                       {getChannelMeta(selectedConv.channel_type).icon}
                     </span>
@@ -1053,9 +1055,9 @@ export default function Conversations({ user }) {
                           return (
                             <div key={msg.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5`}>
                               {!isOut && (
-                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0 self-end mb-1 mr-1.5 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
-                                  {initials(selectedConv.contact_name || 'C')}
-                                </div>
+                                selectedConv.contact_avatar
+                                  ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end mb-1 mr-1.5" />
+                                  : <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0 self-end mb-1 mr-1.5 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>{initials(selectedConv.contact_name || 'C')}</div>
                               )}
                               <div className={`max-w-[65%] ${isOut ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
                                 {/* Media */}
@@ -1077,11 +1079,11 @@ export default function Conversations({ user }) {
                                 )}
                                 {/* Text bubble */}
                                 {msg.content && (
-                                  <div className={`px-3 py-2 rounded-2xl text-[13.5px] leading-relaxed shadow-sm ${
+                                  <div className={`px-3.5 py-2.5 rounded-2xl text-[13.5px] leading-relaxed ${
                                     isOut
-                                      ? 'bg-[#1877f2] text-white rounded-br-sm'
-                                      : 'bg-white text-[#1c1e21] rounded-bl-sm border border-[#e4e6eb]'
-                                  }`}>
+                                      ? 'bg-[#1877f2] text-white rounded-br-sm shadow-md'
+                                      : 'bg-white text-[#050505] rounded-bl-sm shadow-[0_1px_4px_rgba(0,0,0,0.15)] border border-[#d8dadf]'
+                                  }`} style={{wordBreak:'break-word', whiteSpace:'pre-wrap'}}>
                                     {msg.content}
                                   </div>
                                 )}
@@ -1118,25 +1120,6 @@ export default function Conversations({ user }) {
                         </button>
                       ))}
                       <button onClick={() => setShowQuickReplyModal(true)}
-                        className="text-[11px] font-semibold text-[#8a8d91] hover:text-[#606770] px-2 py-1 rounded-full hover:bg-[#f0f2f5] transition-colors whitespace-nowrap">
-                        Manage
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Template bar */}
-                  {(showTemplatePicker || templates.length > 0) && (
-                    <div className="px-4 py-1.5 bg-white border-t border-[#e4e6eb] flex items-center gap-2 overflow-x-auto scrollbar-none flex-shrink-0">
-                      <span className="text-[11px] font-bold text-[#606770] whitespace-nowrap flex items-center gap-1">
-                        <LayoutTemplate size={11} /> Templates:
-                      </span>
-                      {templates.filter(t => (t.name || '').toLowerCase().includes(templateSearch.toLowerCase())).slice(0, 5).map(t => (
-                        <button key={t.id} onClick={() => handleSelectTemplate(t)} title={t.content}
-                          className="text-[12px] font-medium text-[#606770] bg-[#f0f2f5] hover:bg-[#e4e6eb] px-3 py-1 rounded-full whitespace-nowrap transition-colors">
-                          {t.name}
-                        </button>
-                      ))}
-                      <button onClick={() => setShowTemplateModal(true)}
                         className="text-[11px] font-semibold text-[#8a8d91] hover:text-[#606770] px-2 py-1 rounded-full hover:bg-[#f0f2f5] transition-colors whitespace-nowrap">
                         Manage
                       </button>
