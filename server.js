@@ -13,8 +13,6 @@ const require = createRequire(import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || process.env.LSNODE_SOCKET || 3001;
-console.log('[startup] Port detected:', PORT, 'type:', typeof PORT);
-console.log('[startup] Env keys:', Object.keys(process.env).join(', '));
 
 const PERSISTENT_HOME = '/home/u898266115';
 const LOCAL_DB_PATH = join(__dirname, 'crm.db');
@@ -33,6 +31,29 @@ if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
   }
 }
 const DB_DIR = dirname(DB_PATH);
+
+// Override console logging to log to a persistent file for diagnostics
+const LOG_PATH = join(DB_DIR, 'server.log');
+function logToFile(msg) {
+  try {
+    const time = new Date().toISOString();
+    appendFileSync(LOG_PATH, `[${time}] ${msg}\n`);
+  } catch {}
+}
+import { appendFileSync } from 'fs';
+const originalLog = console.log;
+const originalError = console.error;
+console.log = (...args) => {
+  originalLog(...args);
+  logToFile(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+};
+console.error = (...args) => {
+  originalError(...args);
+  logToFile('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+};
+
+console.log('[startup] Port detected:', PORT, 'type:', typeof PORT);
+console.log('[startup] Env keys:', Object.keys(process.env).join(', '));
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (e.g. Hostinger's reverse proxy)
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -305,6 +326,26 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
+
+app.get('/api/admin/logs', (req, res) => {
+  const apiKey = req.headers['x-api-key'] || req.query.key;
+  const cookie = getCookie(req, AUTH_COOKIE);
+  let payload = null;
+  try { payload = verifyToken(cookie); } catch {}
+  const isAdmin = payload && payload.role === 'admin';
+  if (apiKey !== 'eduexpress-n8n-2024' && !isAdmin) {
+    return res.status(401).send('Unauthorized');
+  }
+  try {
+    if (!existsSync(LOG_PATH)) return res.send('Log file is empty.');
+    const content = readFileSync(LOG_PATH, 'utf8');
+    const lines = content.split('\n').slice(-300).join('\n');
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(lines);
+  } catch (err) {
+    res.status(500).send('Error reading log file: ' + err.message);
+  }
+});
 
 app.get('/api/auth/me', (req, res) => {
   console.log('[api/auth/me] Starting...');
