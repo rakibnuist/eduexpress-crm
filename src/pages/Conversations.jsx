@@ -245,6 +245,22 @@ export default function Conversations({ user }) {
     return list;
   }, [conversations, channelTab, search, statusFilter, user?.id, isFullAccess, channels, isMyWhatsApp]);
 
+  const loadMessages = useCallback(async (conv) => {
+    if (!conv) return;
+    setLoadingMessages(true);
+    try {
+      const res = await api.messages(conv.id);
+      setMessages(res || []);
+      await api.markConversationAsRead(conv.id);
+      setConversations(prev => prev.map(c => c.id === conv.id && c.unread_count ? { ...c, unread_count: 0 } : c));
+      setSelectedConv(prev => prev && prev.id === conv.id && prev.unread_count ? { ...prev, unread_count: 0 } : prev);
+    } catch (err) {
+      toast.error('Could not load messages: ' + err.message);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [toast]);
+
   /* ── load helpers ── */
   const loadConversations = useCallback(async () => {
     setLoading(true);
@@ -252,12 +268,17 @@ export default function Conversations({ user }) {
       const p = { status: 'all', limit: 200, search: search.trim() || undefined };
       const res = await api.conversations(p);
       setConversations(res.conversations || []);
+      
+      const curr = selectedConvRef.current;
+      if (curr) {
+        loadMessages(curr);
+      }
     } catch (err) {
       toast.error('Could not load conversations: ' + err.message);
     } finally {
       setLoading(false);
     }
-  }, [search, toast]);
+  }, [search, toast, loadMessages]);
 
   const silentRefresh = useCallback(async () => {
     try {
@@ -277,22 +298,6 @@ export default function Conversations({ user }) {
       }
     } catch (err) { console.warn('Silent refresh failed:', err); }
   }, [search]);
-
-  const loadMessages = useCallback(async (conv) => {
-    if (!conv) return;
-    setLoadingMessages(true);
-    try {
-      const res = await api.messages(conv.id);
-      setMessages(res || []);
-      await api.markConversationAsRead(conv.id);
-      setConversations(prev => prev.map(c => c.id === conv.id && c.unread_count ? { ...c, unread_count: 0 } : c));
-      setSelectedConv(prev => prev && prev.id === conv.id && prev.unread_count ? { ...prev, unread_count: 0 } : prev);
-    } catch (err) {
-      toast.error('Could not load messages: ' + err.message);
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [toast]);
 
   const silentRefreshMessages = useCallback(async (conv) => {
     if (!conv) return;

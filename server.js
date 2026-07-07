@@ -3237,11 +3237,12 @@ async function sendMessenger(channel, recipientId, text, type = 'text', mediaUrl
     bodyObj.message = { text };
     bodyObj.messaging_type = 'RESPONSE';
   }
-  const token = channel.access_token || getConfig('page_access_token');
+  let token = channel.access_token || getConfig('page_access_token');
   if (!token) {
     console.error('[sendMessenger] No access token for channel', channel.name || channel.id);
     return { error: { message: 'No access token configured' } };
   }
+  token = await resolvePageAccessToken(channel.page_id, token);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
