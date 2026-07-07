@@ -783,7 +783,7 @@ export default function Conversations({ user }) {
           })}
 
           {/* Per-channel sub-items */}
-          {!sidebarCollapsed && channelGroups.map(group => (
+          {!sidebarCollapsed && groupedChannels.map(group => (
             <div key={group.type}>
               {group.channels.length > 1 && group.channels.map(ch => {
                 const isActive = channelTab === `channel_${ch.id}`;
@@ -1309,7 +1309,7 @@ export default function Conversations({ user }) {
                       {showTagPicker && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {allTags.filter(t => !contactTags.some(ct => ct.id === t.id)).map(tag => (
-                            <button key={tag.id} onClick={() => handleAddTag(tag)}
+                            <button key={tag.id} onClick={() => handleAddTag(tag.id)}
                               className="text-[11px] font-bold px-2 py-0.5 rounded-full text-white opacity-60 hover:opacity-100 transition-opacity"
                               style={{ backgroundColor: tag.color || '#64748b' }}>{tag.name}</button>
                           ))}
