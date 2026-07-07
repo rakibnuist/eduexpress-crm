@@ -2424,6 +2424,17 @@ function runMigrations() {
     }
   } catch (e) {
     console.error("[migration] Failed to apply new System User token:", e.message);
+  // Self-healing migration to assign lead L-00003 and others to Afsana Meme
+  try {
+    const afsanaEmp = db.prepare("SELECT id FROM employees WHERE name LIKE '%Afsana%'").get();
+    if (afsanaEmp) {
+      const info = db.prepare("UPDATE leads SET assigned_consultant = 'Afsana Meme', assigned_employee_id = ? WHERE lead_id = 'L-00003' OR client_name LIKE 'Sumi Iftin%'").run(afsanaEmp.id);
+      if (info.changes > 0) {
+        console.log(`[migration] Self-healed ${info.changes} leads and assigned them to Afsana Meme.`);
+      }
+    }
+  } catch (e) {
+    console.error("[migration] Failed to self-heal Afsana lead assignment:", e.message);
   }
 
     // Seed best time slots for Bangladesh market (EDT optimized)
@@ -2931,7 +2942,7 @@ function upsertConversation(contactId, channelId, channelType) {
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 
-function createLeadFromContact(contactId, source, initialMessage) {
+function createLeadFromContact(contactId, source, initialMessage, creatorUser) {
   try {
     const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
     if (!contact || contact.lead_id) return null;
@@ -2947,13 +2958,23 @@ function createLeadFromContact(contactId, source, initialMessage) {
     const phone = contact.phone || null;
     const email = contact.email || null;
 
-    // Find the channel consultant for this contact's conversation
+    // Find the channel consultant or assign to the converting consultant user
     let assigned_consultant = null;
-    const lastConv = db.prepare("SELECT channel_id FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1").get(contactId);
-    if (lastConv) {
-      const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(lastConv.channel_id);
-      if (chan) {
-        assigned_consultant = chan.consultant;
+    let assigned_employee_id = null;
+
+    if (creatorUser && creatorUser.roles?.includes('consultant')) {
+      assigned_consultant = creatorUser.consultant_name || creatorUser.name;
+      const emp = db.prepare("SELECT id FROM employees WHERE emp_id=?").get(creatorUser.emp_id);
+      if (emp) assigned_employee_id = emp.id;
+    } else {
+      const lastConv = db.prepare("SELECT channel_id FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1").get(contactId);
+      if (lastConv) {
+        const chan = db.prepare("SELECT consultant FROM channels WHERE id=?").get(lastConv.channel_id);
+        if (chan) {
+          assigned_consultant = chan.consultant;
+          const emp = db.prepare("SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))").get(chan.consultant);
+          if (emp) assigned_employee_id = emp.id;
+        }
       }
     }
 
@@ -2973,6 +2994,7 @@ function createLeadFromContact(contactId, source, initialMessage) {
       lead_source: leadSourceMap[source] || 'Chat',
       lead_status: 'New Lead',
       assigned_consultant,
+      assigned_employee_id,
       notes: initialMessage ? `Initial Inquiry: "${initialMessage}"` : `Auto-created from ${source} chat integration.`
     }, lead_id, 0);
 
@@ -5903,7 +5925,7 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
       }
     } else {
       // Create new lead
-      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message);
+      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user);
       if (!lead) return res.status(500).json({ error: 'Failed to create lead' });
     }
 
