@@ -280,6 +280,19 @@ export default function Conversations({ user }) {
     }
   }, [search, toast, loadMessages]);
 
+  const handleRefresh = useCallback(async () => {
+    const curr = selectedConvRef.current;
+    if (curr && curr.channel_id) {
+      toast.info('Syncing channel with Meta…');
+      try {
+        await api.syncChannel(curr.channel_id);
+      } catch (err) {
+        console.warn('Sync failed:', err.message);
+      }
+    }
+    await loadConversations();
+  }, [loadConversations, toast]);
+
   const silentRefresh = useCallback(async () => {
     try {
       const p = { status: 'all', limit: 200, search: search.trim() || undefined };
@@ -881,7 +894,7 @@ export default function Conversations({ user }) {
                 {channelTab === 'all' ? 'All messages' : getChannelMeta(channelTab.replace('channel_', '')).label || channelTab}
                 {totalUnread > 0 && <span className="ml-2 text-[13px] font-semibold text-[#1877f2]">{totalUnread}</span>}
               </h2>
-              <button onClick={loadConversations} title="Refresh" className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770] transition-colors">
+              <button onClick={handleRefresh} title="Refresh" className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770] transition-colors">
                 <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
               </button>
             </div>
