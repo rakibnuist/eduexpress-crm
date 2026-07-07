@@ -2203,6 +2203,7 @@ function runMigrations() {
     `ALTER TABLE content_posts ADD COLUMN priority TEXT CHECK(priority IN ('low','normal','high','urgent')) DEFAULT 'normal'`,
     `ALTER TABLE content_posts ADD COLUMN notes TEXT`,
     `ALTER TABLE content_posts ADD COLUMN tags TEXT`,
+    `ALTER TABLE conversations ADD COLUMN assigned_to_id INTEGER`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
