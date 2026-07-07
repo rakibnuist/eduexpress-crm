@@ -222,9 +222,15 @@ export default function Conversations({ user }) {
       );
     }
     switch (statusFilter) {
-      case 'unread': list = list.filter(c => (c.unread_count || 0) > 0 || c.last_message_direction === 'in'); break;
+      case 'unread': list = list.filter(c => Number(c.unread_count || 0) > 0); break;
       case 'priority': list = list.filter(c => c.is_priority); break;
-      case 'assigned_me': list = list.filter(c => c.assigned_to_id === user?.id || c.assigned_to === user?.name); break;
+      case 'assigned_me': 
+        list = list.filter(c => {
+          const myName = (user?.consultant_name || user?.name || '').trim().toLowerCase();
+          const assignedName = (c.assigned_to || '').trim().toLowerCase();
+          return myName && assignedName === myName;
+        }); 
+        break;
       case 'no_lead': list = list.filter(c => !c.lead_id); break;
       case 'new_leads': list = list.filter(c => c.lead_id && c.lead_status === 'New Lead'); break;
       case 'archived': list = list.filter(c => c.status === 'archived'); break;
@@ -928,7 +934,7 @@ export default function Conversations({ user }) {
               filteredConversations.map(conv => {
                 const isSel = selectedConv?.id === conv.id;
                 const meta = getChannelMeta(conv.channel_type);
-                const isUnread = (conv.unread_count || 0) > 0;
+                const isUnread = Number(conv.unread_count || 0) > 0;
                 const countryFlag = getCountryEmoji(conv.lead_destination);
                 return (
                   <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
