@@ -15,6 +15,7 @@ export default function Login({ onSuccess }) {
     setError('');
     setLoading(true);
 
+    let loc = null;
     let geoError = null;
     if (navigator.geolocation) {
       loc = await new Promise(resolve => {
