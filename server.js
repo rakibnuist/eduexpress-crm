@@ -1175,6 +1175,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
   try {
     console.log('[startup] Loading database...');
     db = await initDatabase(DB_PATH);
+    db.pauseSave(); // Pause disk writes during schema check and migrations to prevent RSS memory spike OOM
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     setupSchema();
@@ -1194,6 +1195,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
       if (missing.length) throw new Error(`Schema rebuild failed, still missing: ${missing.join(', ')}`);
     }
 
+    db.resumeSave(); // Resume and perform a single batched save
     // seedData(); // disabled — production environment, no dummy data
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
