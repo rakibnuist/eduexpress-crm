@@ -745,526 +745,357 @@ export default function Conversations({ user }) {
 
   /* ── render ── */
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-white overflow-hidden">
-      {/* ════════════════════════════════════════════════════════════
-          TOP HEADER BAR
-      ════════════════════════════════════════════════════════════ */}
-      <div className="h-14 border-b border-slate-200 bg-white flex items-center px-3 gap-3 flex-shrink-0 z-20">
-        {/* Mobile menu toggle + title */}
-        <div className="flex items-center gap-2 min-w-0">
-          <button onClick={() => setSidebarCollapsed(c => !c)} className="lg:hidden p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
-            <MenuIcon size={18} />
+    <div className="h-[calc(100vh-64px)] flex bg-white overflow-hidden" style={{ fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif" }}>
+
+      {/* ═══ LEFT: Channel Sidebar ═══ */}
+      <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} ${sidebarCollapsed ? 'w-14' : 'w-52'} bg-white border-r border-[#e4e6eb] flex-col flex-shrink-0 transition-all duration-200 z-10`}>
+        <div className="flex items-center justify-between px-3 py-3 flex-shrink-0">
+          {!sidebarCollapsed && <span className="text-[13px] font-bold text-[#1c1e21]">Inbox</span>}
+          <button onClick={() => setSidebarCollapsed(c => !c)} className="p-1.5 hover:bg-[#f0f2f5] rounded-lg text-[#606770] transition-colors ml-auto">
+            <MenuIcon size={15} />
           </button>
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm flex-shrink-0">
-            <Inbox size={14} />
-          </div>
-          <div className="min-w-0 hidden sm:block">
-            <p className="text-sm font-bold text-slate-800 leading-tight">Chat Inbox</p>
-            <p className="text-[10px] text-slate-400 font-medium">
-              {totalUnread > 0 ? <span className="text-blue-600 font-bold">{totalUnread} unread</span> : 'All caught up'}
-            </p>
-          </div>
         </div>
 
-        {/* Channel quick tabs (visible when no sidebar) */}
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 min-w-0">
+        {/* Channel nav items */}
+        <div className="flex-1 overflow-y-auto px-1.5 space-y-0.5">
           {[
-            { key: 'all', label: 'All', icon: Inbox, color: '#64748b' },
+            { key: 'all', label: 'All messages', icon: Inbox },
             { key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: '#25d366' },
             { key: 'messenger', label: 'Messenger', icon: MessageSquare, color: '#0084ff' },
             { key: 'instagram', label: 'Instagram', icon: Star, color: '#d62976' },
-            { key: 'tiktok', label: 'TikTok', icon: Music, color: '#000000' },
-          ].map(tab => {
-            const count = unreadCounts[tab.key] || 0;
-            const isActive = channelTab === tab.key;
+            { key: 'tiktok', label: 'TikTok', icon: Music, color: '#000' },
+          ].map(item => {
+            const isActive = channelTab === item.key;
+            const unread = item.key === 'all' ? unreadCounts.all : (unreadCounts[item.key] || 0);
             return (
-              <button key={tab.key} onClick={() => setChannelTab(tab.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0 border ${isActive ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}>
-                <tab.icon size={13} style={tab.key === 'all' ? {} : { color: isActive ? tab.color : undefined }} />
-                {tab.label}
-                {count > 0 && <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-4 text-center">{count}</span>}
+              <button key={item.key} onClick={() => setChannelTab(item.key)} title={item.label}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all ${isActive ? 'bg-[#e7f3ff] text-[#1877f2] font-semibold' : 'text-[#1c1e21] hover:bg-[#f0f2f5]'}`}>
+                <item.icon size={17} style={item.color ? { color: isActive ? item.color : '#606770' } : {}} className={isActive && !item.color ? 'text-[#1877f2]' : ''} />
+                {!sidebarCollapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
+                {!sidebarCollapsed && unread > 0 && (
+                  <span className="bg-[#1877f2] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{unread}</span>
+                )}
+                {sidebarCollapsed && unread > 0 && (
+                  <span className="absolute right-1 top-1 w-2 h-2 rounded-full bg-[#1877f2]" />
+                )}
               </button>
             );
           })}
-        </div>
 
-        {/* Search + Refresh */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="hidden md:block relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
-            <input type="text" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)}
-              className="w-48 bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/15 focus:border-blue-500 transition-all placeholder-slate-400" />
-          </div>
-          <button onClick={loadConversations} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors" title="Refresh">
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-          </button>
+          {/* Per-channel sub-items */}
+          {!sidebarCollapsed && channelGroups.map(group => (
+            <div key={group.type}>
+              {group.channels.length > 1 && group.channels.map(ch => {
+                const isActive = channelTab === `channel_${ch.id}`;
+                const unread = unreadCounts.byId?.[ch.id] || 0;
+                return (
+                  <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)} title={ch.name}
+                    className={`w-full flex items-center gap-2 px-6 py-1.5 rounded-lg text-[12px] transition-all ${isActive ? 'bg-[#e7f3ff] text-[#1877f2] font-semibold' : 'text-[#606770] hover:bg-[#f0f2f5]'}`}>
+                    <span className="flex-1 text-left truncate">{ch.name}</span>
+                    {unread > 0 && <span className="bg-[#1877f2] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{unread}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════════════════════
-          MAIN BODY: Sidebar + Conversation List + Chat + Contact Panel
-      ════════════════════════════════════════════════════════════ */}
+      {/* ═══ MIDDLE: Contact List + Chat ═══ */}
       <div className="flex-1 flex overflow-hidden">
 
-        {/* ── CHANNEL SIDEBAR ── */}
-        <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} ${sidebarCollapsed ? 'w-16' : 'w-56'} bg-slate-50 border-r border-slate-200 flex-shrink-0 flex flex-col transition-all duration-200 z-10`}>
-          {/* Sidebar header */}
-          <div className="h-11 flex items-center justify-between px-3 border-b border-slate-200/80 flex-shrink-0">
-            {!sidebarCollapsed && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Channels</p>}
-            <button onClick={() => setSidebarCollapsed(c => !c)} className="p-1 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600 transition-colors">
-              {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-            </button>
-          </div>
+        {/* Contact List */}
+        <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} w-full xl:w-[340px] flex-col border-r border-[#e4e6eb] bg-white flex-shrink-0`}>
 
-          <div className="flex-1 overflow-y-auto py-2 space-y-1">
-            {/* All Messages */}
-            <button onClick={() => setChannelTab('all')}
-              className={`mx-2 flex items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-all outline-none rounded-xl border ${channelTab === 'all' ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${channelTab === 'all' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'}`}>
-                <Inbox size={14} />
-              </div>
-              {!sidebarCollapsed && (
-                <span className="flex-1 text-left truncate">All Messages</span>
-              )}
-              {!sidebarCollapsed && unreadCounts.all > 0 && (
-                <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{unreadCounts.all}</span>
-              )}
-              {sidebarCollapsed && unreadCounts.all > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-500" />
-              )}
-            </button>
+          {/* List Header */}
+          <div className="px-4 pt-4 pb-2 flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-[18px] font-bold text-[#1c1e21]">
+                {channelTab === 'all' ? 'All messages' : getChannelMeta(channelTab.replace('channel_', '')).label || channelTab}
+                {totalUnread > 0 && <span className="ml-2 text-[13px] font-semibold text-[#1877f2]">{totalUnread}</span>}
+              </h2>
+              <button onClick={loadConversations} title="Refresh" className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770] transition-colors">
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
 
-            {/* WhatsApp Section */}
-            {whatsappChannels.length > 0 && (
-              <div className="mt-2">
-                <button onClick={() => toggleGroup('whatsapp')}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
-                  {sidebarCollapsed ? (
-                    <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                      <MessageSquare size={14} />
-                    </div>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-left">WhatsApp</span>
-                      {expandedGroups.whatsapp ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    </>
-                  )}
+            {/* Search */}
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a8d91]" size={14} />
+              <input type="text" placeholder="Search Inbox" value={search} onChange={e => setSearch(e.target.value)}
+                className="w-full bg-[#f0f2f5] border-0 rounded-full pl-9 pr-4 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20 placeholder-[#8a8d91]" />
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+              {FILTERS.slice(0, 4).map(f => (
+                <button key={f.key} onClick={() => setStatusFilter(f.key)}
+                  className={`px-3 py-1.5 rounded-full text-[12px] font-semibold whitespace-nowrap transition-all ${statusFilter === f.key ? 'bg-[#e7f3ff] text-[#1877f2]' : 'text-[#606770] hover:bg-[#f0f2f5]'}`}>
+                  {f.label}
                 </button>
-                {(expandedGroups.whatsapp || sidebarCollapsed) && (
-                  <div className="space-y-0.5 mt-0.5">
-                    {whatsappChannels.map(ch => {
-                      const isActive = channelTab === `channel_${ch.id}`;
-                      const unread = unreadCounts.byId?.[ch.id] || 0;
-                      return (
-                        <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
-                          title={ch.name || ch.consultant || 'WhatsApp'}
-                          className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
-                          {ch.avatar_url ? (
-                            <img src={ch.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
-                          ) : (
-                            <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0 ${ch.color ? '' : 'bg-emerald-500'}`}
-                              style={ch.color ? { backgroundColor: ch.color } : {}}>
-                              W
-                            </div>
-                          )}
-                          {!sidebarCollapsed && (
-                            <>
-                              <span className="flex-1 text-left truncate">{ch.name || ch.consultant || 'WhatsApp'}</span>
-                              {unread > 0 && (
-                                <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{unread}</span>
-                              )}
-                            </>
-                          )}
-                          {sidebarCollapsed && unread > 0 && (
-                            <span className="absolute top-0.5 right-1 w-2 h-2 rounded-full bg-blue-500" />
-                          )}
+              ))}
+              <div className="relative">
+                <button onClick={() => setFilterDropdownOpen(o => !o)} className={`p-1.5 rounded-full transition-all text-[#606770] hover:bg-[#f0f2f5]`}>
+                  <Filter size={14} />
+                </button>
+                {filterDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setFilterDropdownOpen(false)} />
+                    <div className="absolute left-0 top-full mt-1 bg-white border border-[#e4e6eb] rounded-xl shadow-xl z-20 min-w-[160px] py-1">
+                      {FILTERS.slice(4).map(f => (
+                        <button key={f.key} onClick={() => { setStatusFilter(f.key); setFilterDropdownOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-[13px] transition-colors ${statusFilter === f.key ? 'font-bold text-[#1877f2] bg-[#e7f3ff]' : 'text-[#1c1e21] hover:bg-[#f0f2f5]'}`}>
+                          {f.label}
                         </button>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
-            )}
-
-            {/* Other channel types (Messenger, Instagram, TikTok, etc.) */}
-            {groupedChannels.map(group => (
-              <div key={group.type} className="mt-2">
-                <button onClick={() => toggleGroup(group.type)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider hover:bg-slate-100 transition-colors">
-                  {sidebarCollapsed ? (
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: getChannelMeta(group.type).color + '15', color: getChannelMeta(group.type).color }}>
-                      <ChannelIcon type={group.type} size={14} />
-                    </div>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-left">{group.label}</span>
-                      {expandedGroups[group.type] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    </>
-                  )}
-                </button>
-                {(expandedGroups[group.type] || sidebarCollapsed) && (
-                  <div className="space-y-0.5 mt-0.5">
-                    {group.channels.map(ch => {
-                      const isActive = channelTab === `channel_${ch.id}` || channelTab === group.type;
-                      const unread = unreadCounts.byId?.[ch.id] || 0;
-                      return (
-                        <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)}
-                          title={ch.name || group.label}
-                          className={`mx-2 flex items-center gap-2 px-2.5 py-1.5 text-xs transition-all outline-none rounded-xl border relative ${isActive ? 'bg-blue-50/80 border-blue-100/50 text-blue-700 shadow-sm font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-100/70 hover:text-slate-800'}`}>
-                          {ch.avatar_url ? (
-                            <img src={ch.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
-                          ) : (
-                            <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white flex-shrink-0"
-                              style={{ backgroundColor: ch.color || getChannelMeta(group.type).color }}>
-                              {getChannelMeta(group.type).icon}
-                            </div>
-                          )}
-                          {!sidebarCollapsed && (
-                            <>
-                              <span className="flex-1 text-left truncate">{ch.name || group.label}</span>
-                              {unread > 0 && (
-                                <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{unread}</span>
-                              )}
-                            </>
-                          )}
-                          {sidebarCollapsed && unread > 0 && (
-                            <span className="absolute top-0.5 right-1 w-2 h-2 rounded-full bg-blue-500" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} w-full md:w-80 lg:w-88 flex-col bg-white border-r border-slate-200 flex-shrink-0`}>
-          {/* Mobile search */}
-          <div className="p-2 md:hidden">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
-              <input type="text" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/15 focus:border-blue-500 transition-all placeholder-slate-400" />
             </div>
           </div>
 
-          {/* Filter Tabs */}
-          <div className="px-3 pt-2 pb-2 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-shrink-0">
-            {FILTERS.slice(0, 4).map(f => (
-              <button key={f.key} onClick={() => setStatusFilter(f.key)}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${statusFilter === f.key ? 'bg-blue-100 text-blue-700 shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                {f.label}
-              </button>
-            ))}
-            <div className="relative">
-              <button onClick={() => setFilterDropdownOpen(o => !o)} className={`p-1.5 rounded-full transition-all flex items-center justify-center min-w-[28px] ${filterDropdownOpen ? 'bg-blue-100 text-blue-700 shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                <Filter size={13} />
-              </button>
-              {filterDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setFilterDropdownOpen(false)} />
-                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 min-w-[180px] py-1">
-                    {FILTERS.slice(4).map(f => (
-                      <button key={f.key} onClick={() => { setStatusFilter(f.key); setFilterDropdownOpen(false); }}
-                        className={`w-full text-left px-3 py-2 text-xs transition-colors ${statusFilter === f.key ? 'font-bold text-blue-700 bg-blue-50/50' : 'text-slate-600 hover:bg-slate-50'}`}>
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto py-2">
+          {/* Conversation List */}
+          <div className="flex-1 overflow-y-auto">
             {loading ? (
-              <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-400">
-                <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-xs font-medium">Loading conversations…</p>
+              <div className="flex flex-col items-center justify-center h-32 gap-2 text-[#8a8d91]">
+                <div className="w-5 h-5 border-2 border-[#1877f2] border-t-transparent rounded-full animate-spin" />
+                <p className="text-[12px]">Loading…</p>
               </div>
             ) : filteredConversations.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 gap-1 px-4 text-center">
-                <MessageSquare size={22} className="text-slate-200 mb-1" />
-                <p className="text-xs font-bold text-slate-500">No conversations</p>
-                <p className="text-[10px] text-slate-400">Adjust filters or search</p>
+                <MessageSquare size={24} className="text-[#e4e6eb] mb-1" />
+                <p className="text-[13px] font-semibold text-[#606770]">No conversations</p>
+                <p className="text-[11px] text-[#8a8d91]">Adjust filters or search</p>
               </div>
             ) : (
               filteredConversations.map(conv => {
                 const isSel = selectedConv?.id === conv.id;
                 const meta = getChannelMeta(conv.channel_type);
-                const sla = getSlaColor(conv.last_message_at);
+                const isUnread = (conv.unread_count || 0) > 0;
+                const countryFlag = getCountryEmoji(conv.lead_destination);
                 return (
-                    <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
-                      className={`group mx-2 my-1 px-3 py-3 flex gap-3 transition-all duration-150 outline-none rounded-xl border relative ${isSel ? 'bg-blue-50/85 border-blue-100/80 shadow-sm text-blue-900' : 'bg-white hover:bg-slate-50/60 border-transparent'}`}>
-                      <div className="relative flex-shrink-0">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
-                          {initials(conv.contact_name || 'C')}
-                        </div>
-                        <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-md flex items-center justify-center border-[1.5px] border-white text-[8px] font-black text-white shadow-sm ${meta.bg}`}>
-                          {meta.icon}
-                        </span>
-                        {conv.is_priority && (
-                          <span className="absolute -top-1 -right-1 text-amber-500"><Star size={10} fill="currentColor" /></span>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <p className={`text-xs flex items-center gap-1 truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
-                              {conv.unread_count > 0 ? (
-                                <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 shadow-sm" title="Unread" />
-                              ) : (
-                                <span className="w-2 h-2 rounded-full bg-slate-200 flex-shrink-0" title="Read" />
-                              )}
-                              <span className="truncate">{conv.contact_name || conv.contact_phone || 'Contact'}</span>
-                              {conv.lead_destination && <span className="flex-shrink-0 text-sm leading-none" title={conv.lead_destination}>{getCountryEmoji(conv.lead_destination)}</span>}
-                            </p>
-                            {conv.assigned_to && (
-                              <span className="flex items-center gap-0.5 text-[9px] text-blue-700 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md font-bold flex-shrink-0 shadow-sm" title={`Assigned to: ${conv.assigned_to}`}>
-                                <User size={9} className="text-blue-500" />
-                                <span className="truncate max-w-[50px]">{conv.assigned_to.split(' ')[0]}</span>
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <span className="text-[10px] text-slate-400 whitespace-nowrap">{formatLastMessageTime(conv.last_message_at)}</span>
-                            {conv.unread_count > 0 && (
-                              <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-4 text-center shadow-sm">
-                                {conv.unread_count}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 mt-0.5 pr-8">
-                          {conv.last_message_direction === 'out' && !conv.unread_count && (
-                            conv.last_message_status === 'read' ? <CheckCheck size={11} className="text-sky-400 flex-shrink-0" /> :
-                            conv.last_message_status === 'failed' ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" /> :
-                            <CheckCheck size={11} className="text-slate-300 flex-shrink-0" />
-                          )}
-                          <p className={`text-[11px] truncate ${conv.unread_count > 0 ? 'font-semibold text-slate-800' : 'text-slate-400'}`}>
-                            {conv.last_message || 'No messages yet'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-1 min-w-0">
-                          <span className="text-[9px] font-semibold text-slate-400 truncate">
-                            {conv.channel_name || meta.label}
-                          </span>
-                          {(conv.tags || []).slice(0, 2).map(tag => (
-                            <span key={tag.id} className="text-[8px] font-bold px-1.5 py-0.5 rounded-full text-white flex-shrink-0" style={{ backgroundColor: tag.color || '#64748b' }}>
-                              {tag.name}
-                            </span>
-                          ))}
-                          {(conv.tags || []).length > 2 && (
-                            <span className="text-[8px] text-slate-400 font-medium">+{(conv.tags || []).length - 2}</span>
-                          )}
-                        </div>
-                      </div>
+                  <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
+                    className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${isSel ? 'bg-[#e7f3ff]' : 'hover:bg-[#f0f2f5]'}`}>
 
-                      {/* Hover Quick Actions */}
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-white/95 shadow-sm border border-slate-200/60 rounded-xl px-1 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {conv.unread_count > 0 ? (
-                          <button onClick={(e) => handleMarkAsRead(e, conv)} title="Mark as Read" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors">
-                            <CheckCircle size={14} />
-                          </button>
-                        ) : (
-                          <button onClick={(e) => handleMarkAsUnread(e, conv)} title="Mark as Unread" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors">
-                            <MessageSquare size={14} />
-                          </button>
-                        )}
-                        <button onClick={(e) => handleToggleArchiveItem(e, conv)} title={conv.status === 'archived' ? 'Reopen' : 'Archive'} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-colors">
-                          <Archive size={14} />
-                        </button>
+                    {/* Avatar */}
+                    <div className="relative flex-shrink-0 mt-0.5">
+                      <div className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-white font-bold text-[15px] bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
+                        {initials(conv.contact_name || 'C')}
                       </div>
-                    </button>
+                      {/* Channel icon badge */}
+                      <span className={`absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full flex items-center justify-center border-2 border-white text-[8px] font-black text-white ${meta.bg}`}>
+                        {meta.icon}
+                      </span>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline justify-between gap-1">
+                        <span className={`text-[14px] truncate leading-tight ${isUnread ? 'font-bold text-[#1c1e21]' : 'font-semibold text-[#1c1e21]'}`}>
+                          {conv.contact_name || conv.contact_phone || 'Contact'}
+                          {countryFlag && <span className="ml-1 text-[13px]">{countryFlag}</span>}
+                        </span>
+                        <span className="text-[11px] text-[#8a8d91] whitespace-nowrap flex-shrink-0">{formatLastMessageTime(conv.last_message_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        {conv.last_message_direction === 'out' && (
+                          conv.last_message_status === 'read'
+                            ? <CheckCheck size={11} className="text-[#1877f2] flex-shrink-0" />
+                            : conv.last_message_status === 'failed'
+                              ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" />
+                              : <CheckCheck size={11} className="text-[#8a8d91] flex-shrink-0" />
+                        )}
+                        <p className={`text-[12px] truncate flex-1 ${isUnread ? 'font-semibold text-[#1c1e21]' : 'text-[#606770]'}`}>
+                          {conv.last_message || 'No messages yet'}
+                        </p>
+                        {isUnread && (
+                          <span className="w-[18px] h-[18px] rounded-full bg-[#1877f2] text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+                            {conv.unread_count}
+                          </span>
+                        )}
+                      </div>
+                      {/* Tags row */}
+                      {((conv.tags || []).length > 0 || conv.assigned_to) && (
+                        <div className="flex items-center gap-1 mt-1">
+                          {conv.assigned_to && (
+                            <span className="text-[10px] text-[#1877f2] bg-[#e7f3ff] px-1.5 py-0.5 rounded font-semibold">{conv.assigned_to.split(' ')[0]}</span>
+                          )}
+                          {(conv.tags || []).slice(0, 2).map(tag => (
+                            <span key={tag.id} className="text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: tag.color || '#64748b' }}>{tag.name}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Hover actions */}
+                    <div className="absolute right-3 top-3 flex gap-0.5 opacity-0 group-hover:opacity-100 bg-white border border-[#e4e6eb] rounded-lg shadow-sm px-0.5 py-0.5 transition-opacity">
+                      {isUnread
+                        ? <button onClick={e => handleMarkAsRead(e, conv)} title="Mark read" className="p-1 hover:bg-[#f0f2f5] rounded text-[#8a8d91] hover:text-[#1877f2] transition-colors"><CheckCircle size={13} /></button>
+                        : <button onClick={e => handleMarkAsUnread(e, conv)} title="Mark unread" className="p-1 hover:bg-[#f0f2f5] rounded text-[#8a8d91] hover:text-[#1877f2] transition-colors"><MessageSquare size={13} /></button>}
+                      <button onClick={e => handleToggleArchiveItem(e, conv)} title={conv.status === 'archived' ? 'Reopen' : 'Archive'} className="p-1 hover:bg-[#f0f2f5] rounded text-[#8a8d91] hover:text-[#606770] transition-colors"><Archive size={13} /></button>
+                    </div>
+                  </button>
                 );
               })
             )}
           </div>
         </div>
 
-        {/* ── CHAT THREAD ── */}
-        <div className={`${selectedConv ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-[360px] md:min-w-[400px] bg-[#f0f4f8]`}>
+        {/* ═══ CHAT THREAD ═══ */}
+        <div className={`${selectedConv ? 'flex' : 'hidden xl:flex'} flex-1 flex-col bg-[#f0f2f5] min-w-0`}>
           {selectedConv ? (
             <>
-              {/* Chat Header */}
-              <div className="h-14 px-4 bg-white flex items-center justify-between border-b border-slate-100 shadow-sm z-10 flex-shrink-0">
+              {/* Chat Header — Meta style */}
+              <div className="bg-white border-b border-[#e4e6eb] px-4 h-[60px] flex items-center justify-between flex-shrink-0 z-10">
+                {/* Left: back + avatar + name */}
                 <div className="flex items-center gap-3 min-w-0">
-                  <button onClick={() => setSelectedConv(null)} className="xl:hidden p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                  <button onClick={() => setSelectedConv(null)} className="xl:hidden p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770] transition-colors mr-1">
                     <ArrowLeft size={18} />
                   </button>
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
-                    {initials(selectedConv.contact_name || 'C')}
+                  <div className="relative flex-shrink-0">
+                    <div className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
+                      {initials(selectedConv.contact_name || 'C')}
+                    </div>
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border-[1.5px] border-white text-[7px] font-black text-white ${getChannelMeta(selectedConv.channel_type).bg}`}>
+                      {getChannelMeta(selectedConv.channel_type).icon}
+                    </span>
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-slate-800 text-sm truncate">{selectedConv.contact_name || 'Contact'}</h3>
-                      {/* Country flag emoji */}
-                      {selectedConv.lead_destination && (
-                        <span className="text-base leading-none flex-shrink-0" title={selectedConv.lead_destination}>
-                          {getCountryEmoji(selectedConv.lead_destination)}
-                        </span>
-                      )}
-                      {selectedConv.is_priority && <Star size={13} className="text-amber-500 flex-shrink-0" fill="currentColor" />}
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md text-white flex-shrink-0 ${getChannelMeta(selectedConv.channel_type).bg}`}>
-                        {getChannelMeta(selectedConv.channel_type).label}
-                      </span>
-                      {selectedConv.assigned_to && (
-                        <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 truncate max-w-[100px]">
-                          <User size={9} className="inline mr-0.5" />{selectedConv.assigned_to}
-                        </span>
-                      )}
-                      {/* Read / Unread badge */}
-                      {selectedConv.unread_count > 0 ? (
-                        <span className="text-[9px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">
-                          {selectedConv.unread_count} unread
-                        </span>
-                      ) : (
-                        <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">✓ Read</span>
-                      )}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-[14px] font-bold text-[#1c1e21] truncate">{selectedConv.contact_name || 'Contact'}</h3>
+                      {selectedConv.lead_destination && <span className="text-[13px]" title={selectedConv.lead_destination}>{getCountryEmoji(selectedConv.lead_destination)}</span>}
+                      {selectedConv.is_priority && <Star size={12} className="text-amber-500 flex-shrink-0" fill="currentColor" />}
+                      {/* Read/Unread badge */}
+                      {selectedConv.unread_count > 0
+                        ? <span className="text-[10px] bg-[#1877f2] text-white px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">{selectedConv.unread_count} unread</span>
+                        : <span className="text-[10px] text-[#1877f2] font-semibold flex-shrink-0">✓ Read</span>
+                      }
                     </div>
-                    <p className="text-[10px] text-slate-400 flex items-center gap-1.5 font-medium">
+                    <p className="text-[11px] text-[#8a8d91] flex items-center gap-1.5">
                       {selectedConv.contact_phone && <><Phone size={9} />{selectedConv.contact_phone}</>}
-                      {selectedConv.lead_id ? (
-                        <><span className="text-slate-300">·</span><Link to={`/leads/${selectedConv.lead_id}`} className="text-blue-600 hover:underline inline-flex items-center gap-0.5 font-semibold">Lead #{selectedConv.lead_id} <ExternalLink size={9} /></Link></>
-                      ) : (
-                        <><span className="text-slate-300">·</span><button onClick={handleOpenLeadModal} className="text-amber-600 hover:text-amber-700 font-semibold cursor-pointer">+ Convert to Lead</button></>
-                      )}
+                      {selectedConv.lead_id
+                        ? <><span className="text-[#e4e6eb]">·</span><Link to={`/leads/${selectedConv.lead_id}`} className="text-[#1877f2] hover:underline font-semibold inline-flex items-center gap-0.5">Lead #{selectedConv.lead_id} <ExternalLink size={9} /></Link></>
+                        : <><span className="text-[#e4e6eb]">·</span><button onClick={handleOpenLeadModal} className="text-amber-600 hover:text-amber-700 font-semibold">+ Convert to Lead</button></>
+                      }
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
+
+                {/* Right: action buttons — Meta style icon bar */}
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                  {/* Add to Lead / Lead button */}
                   {!selectedConv.lead_id ? (
                     <button onClick={handleOpenLeadModal}
-                      className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm">
-                      <User size={13} />
-                      <span>Add to Lead</span>
+                      className="bg-[#1877f2] hover:bg-[#166fe5] text-white font-semibold text-[12px] px-3 py-1.5 rounded-full flex items-center gap-1 transition-all mr-1">
+                      <User size={12} /><span>Add to Lead</span>
                     </button>
                   ) : (
                     <Link to={`/leads/${selectedConv.lead_id}`}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm">
-                      <User size={13} />
-                      <span>Lead #{selectedConv.lead_id}</span>
+                      className="bg-[#e7f3ff] hover:bg-[#d4e9ff] text-[#1877f2] font-semibold text-[12px] px-3 py-1.5 rounded-full flex items-center gap-1 transition-all mr-1">
+                      <User size={12} /><span>Lead #{selectedConv.lead_id}</span>
                     </Link>
                   )}
-                  {/* Negative / Not Interested */}
-                  <button onClick={handleMarkNegative}
-                    title="Mark as Negative / Not Interested"
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs px-2.5 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] border border-rose-200">
-                    <X size={12} />
-                    <span className="hidden sm:inline">Negative</span>
+
+                  {/* Negative button */}
+                  <button onClick={handleMarkNegative} title="Negative / Not Interested"
+                    className="bg-[#fff0f0] hover:bg-[#ffe0e0] text-rose-600 font-semibold text-[12px] px-2.5 py-1.5 rounded-full flex items-center gap-1 border border-rose-200 transition-all mr-1">
+                    <X size={11} /><span className="hidden sm:inline">Negative</span>
                   </button>
+
                   {/* Read/Unread toggle */}
-                  {selectedConv.unread_count > 0 ? (
-                    <button onClick={(e) => handleMarkAsRead(e, selectedConv)} title="Mark as Read"
-                      className="p-2 rounded-lg transition-colors text-blue-600 bg-blue-50 hover:bg-blue-100">
-                      <CheckCircle size={15} />
-                    </button>
-                  ) : (
-                    <button onClick={(e) => handleMarkAsUnread(e, selectedConv)} title="Mark as Unread"
-                      className="p-2 rounded-lg transition-colors text-slate-400 hover:bg-slate-50 hover:text-slate-700">
-                      <MessageSquare size={15} />
-                    </button>
-                  )}
-                  <button onClick={handleTogglePriority} title={selectedConv.is_priority ? 'Remove priority' : 'Mark as priority'}
-                    className={`p-2 rounded-lg transition-colors cursor-pointer ${selectedConv.is_priority ? 'bg-amber-50 text-amber-500' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
-                    <Star size={16} />
-                  </button>
-                  <button onClick={() => setShowContactPanel(p => !p)} title="Contact info"
-                    className={`hidden xl:flex p-2 rounded-lg transition-colors cursor-pointer ${showContactPanel ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
-                    <Info size={16} />
-                  </button>
+                  {selectedConv.unread_count > 0
+                    ? <button onClick={e => handleMarkAsRead(e, selectedConv)} title="Mark as Read" className="p-2 hover:bg-[#f0f2f5] rounded-full text-[#1877f2] transition-colors"><CheckCircle size={16} /></button>
+                    : <button onClick={e => handleMarkAsUnread(e, selectedConv)} title="Mark as Unread" className="p-2 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91] transition-colors"><MessageSquare size={16} /></button>
+                  }
+                  <button onClick={handleTogglePriority} title={selectedConv.is_priority ? 'Remove priority' : 'Priority'}
+                    className={`p-2 rounded-full transition-colors ${selectedConv.is_priority ? 'text-amber-500' : 'text-[#8a8d91] hover:bg-[#f0f2f5]'}`}><Star size={16} /></button>
+                  <button onClick={() => setShowContactPanel(p => !p)} title="Contact Info"
+                    className={`hidden xl:flex p-2 rounded-full transition-colors ${showContactPanel ? 'text-[#1877f2] bg-[#e7f3ff]' : 'text-[#8a8d91] hover:bg-[#f0f2f5]'}`}><Info size={16} /></button>
                   <button onClick={() => handleToggleArchive(selectedConv)} title={selectedConv.status === 'archived' ? 'Reopen' : 'Archive'}
-                    className="p-2 hover:bg-slate-50 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer">
-                    <Archive size={16} />
-                  </button>
+                    className="p-2 hover:bg-[#f0f2f5] text-[#8a8d91] hover:text-[#606770] rounded-full transition-colors"><Archive size={16} /></button>
                   <button onClick={() => handleDeleteConversation(selectedConv)} title="Delete"
-                    className="p-2 hover:bg-slate-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer">
-                    <Trash2 size={16} />
-                  </button>
+                    className="p-2 hover:bg-[#f0f2f5] text-[#8a8d91] hover:text-rose-600 rounded-full transition-colors"><Trash2 size={16} /></button>
                 </div>
               </div>
 
+              {/* Chat body */}
               <div className="flex-1 flex overflow-hidden">
-                {/* Messages Area */}
+                {/* Messages */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-4 scrollbar-thin"
-                    style={{ backgroundImage: `radial-gradient(rgba(148,163,184,0.08) 1px,transparent 1px)`, backgroundSize: '20px 20px' }}>
+                  <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 scrollbar-thin" style={{ background: '#f0f2f5' }}>
                     {loadingMessages ? (
-                      <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-400">
-                        <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                        <p className="text-xs font-medium">Loading messages…</p>
+                      <div className="flex flex-col items-center justify-center h-full gap-2 text-[#8a8d91]">
+                        <div className="w-5 h-5 border-2 border-[#1877f2] border-t-transparent rounded-full animate-spin" />
+                        <p className="text-[12px]">Loading messages…</p>
                       </div>
                     ) : messages.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full">
-                        <div className="bg-white/90 border border-slate-100 rounded-2xl px-8 py-6 text-center shadow-sm max-w-xs">
-                          <MessageSquare size={28} className="text-slate-300 mx-auto mb-3" />
-                          <p className="font-bold text-slate-700 text-sm">No messages yet</p>
-                          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">Use templates or type a message to start the conversation.</p>
+                        <div className="bg-white rounded-2xl px-8 py-6 text-center shadow-sm max-w-xs">
+                          <MessageSquare size={28} className="text-[#e4e6eb] mx-auto mb-3" />
+                          <p className="font-bold text-[#1c1e21] text-[14px]">No messages yet</p>
+                          <p className="text-[12px] text-[#8a8d91] mt-1">Send the first message to start the conversation.</p>
                         </div>
                       </div>
                     ) : (
                       <div className="flex flex-col gap-1">
                         {groupMessagesByDate(messages).map(item => {
                           if (item.type === 'separator') return (
-                            <div key={item.key} className="flex items-center gap-3 my-3">
-                              <div className="flex-1 h-px bg-slate-200/70" />
-                              <span className="text-[10px] font-bold text-slate-400 bg-white/80 border border-slate-200/60 px-2.5 py-0.5 rounded-full whitespace-nowrap shadow-sm">{item.label}</span>
-                              <div className="flex-1 h-px bg-slate-200/70" />
+                            <div key={item.label} className="flex items-center gap-3 my-3">
+                              <div className="flex-1 h-px bg-[#e4e6eb]" />
+                              <span className="text-[11px] text-[#8a8d91] font-semibold bg-[#f0f2f5] px-2">{item.label}</span>
+                              <div className="flex-1 h-px bg-[#e4e6eb]" />
                             </div>
                           );
-                          const m = item.msg;
-                          const isIn = m.direction === 'in' || m.direction === 'inbound';
-                          const timeStr = toDate(m.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
+                          const msg = item;
+                          const isOut = msg.direction === 'out' || msg.direction === 'outbound';
+                          const mediaUrl = getMediaUrl(msg);
                           return (
-                            <div key={item.key} className={`flex ${isIn ? 'justify-start' : 'justify-end'} mb-1.5`}>
-                              <div className={`max-w-[70%] lg:max-w-[60%] rounded-2xl px-3.5 py-2.5 border relative group flex flex-col gap-1 min-w-[150px] w-fit overflow-hidden
-                                ${m.is_internal_note ? 'bg-amber-50/70 text-amber-900 rounded-2xl rounded-tl-none border-amber-200/80 border-dashed shadow-xs' :
-                                  isIn ? 'bg-white text-slate-800 rounded-2xl rounded-tl-none border-slate-100 shadow-xs' : 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none border-transparent shadow-xs'}`}>
-                                {!isIn && m.sent_by && !m.is_internal_note && (
-                                  <p className="text-[9px] text-blue-200/90 font-extrabold tracking-wider uppercase mb-0.5">{m.sent_by}</p>
-                                )}
-                                {m.is_internal_note && (
-                                  <p className="text-[9px] text-amber-700/90 font-extrabold tracking-wider uppercase mb-0.5 flex items-center gap-1"><ClipboardList size={9} /> Internal Note</p>
-                                )}
-                                {m.type === 'image' && m.media_url && (
-                                  <div className="mb-1 overflow-hidden rounded-xl">
-                                    <img src={getMediaUrl(m)} alt="" className="max-w-full max-h-56 object-cover cursor-pointer rounded-xl hover:opacity-90 transition-opacity" onClick={() => setLightboxImage(getMediaUrl(m))} />
-                                    <div className="flex justify-between items-center pt-1.5">
-                                      <span className="text-[9px] text-slate-400 font-medium">Image</span>
-                                      <a href={getMediaUrl(m)} download={`img_${m.id}.jpg`} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 font-bold underline">Download</a>
-                                    </div>
-                                  </div>
-                                )}
-                                {m.type === 'document' && m.media_url && (
-                                  <div className={`mb-1 p-3 rounded-xl flex items-center gap-2.5 border ${isIn ? 'bg-slate-50 border-slate-100' : 'bg-white/10 border-white/10'}`}>
-                                    <FileText size={20} className={isIn ? 'text-slate-400' : 'text-sky-200'} />
-                                    <div>
-                                      <p className="text-xs font-bold truncate max-w-[160px]">{m.content || 'Document'}</p>
-                                      <a href={getMediaUrl(m)} download target="_blank" rel="noreferrer" className={`text-[10px] font-bold underline ${isIn ? 'text-blue-600' : 'text-sky-200'}`}>Download</a>
-                                    </div>
-                                  </div>
-                                )}
-                                {(m.type === 'audio' || m.type === 'voice') && (
-                                  <audio controls className="h-8 w-full max-w-[200px] mb-1" src={getMediaUrl(m)} />
-                                )}
-                                {m.type === 'video' && (
-                                  <video controls className="max-w-full max-h-56 rounded-xl mb-1" src={getMediaUrl(m)} />
-                                )}
-                                {(m.type === 'text' || !m.type || (!['image','document','audio','voice','video'].includes(m.type)) || (['image','video'].includes(m.type) && m.content && !['[Image]','[Video]'].includes(m.content) && m.content !== m.media_url)) && (
-                                  <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words font-normal">{m.content}</p>
-                                )}
-                                <div className={`flex items-center justify-end gap-1 text-[9px] font-semibold mt-0.5 ${isIn ? 'text-slate-400' : 'text-blue-200/80'}`}>
-                                  <span>{timeStr}</span>
-                                  {m.source && !m.is_internal_note && (<span className="text-[8px] bg-slate-100/50 px-1 rounded">{m.source}</span>)}
-                                  {!isIn && !m.is_internal_note && (m.status === 'read' ? <CheckCheck size={11} className="text-sky-300" /> : m.status === 'delivered' ? <CheckCheck size={11} className="text-white/60" /> : m.status === 'failed' ? <AlertCircle size={11} className="text-rose-300" /> : <Check size={11} className="text-white/60" />)}
+                            <div key={msg.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5`}>
+                              {!isOut && (
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0 self-end mb-1 mr-1.5 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
+                                  {initials(selectedConv.contact_name || 'C')}
                                 </div>
-                                {m.status === 'failed' && m.error_msg && (
-                                  <div className="absolute right-0 -bottom-7 bg-slate-800 text-white text-[9px] px-2 py-1 rounded-lg shadow pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
-                                    ⚠ {m.error_msg}
+                              )}
+                              <div className={`max-w-[65%] ${isOut ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
+                                {/* Media */}
+                                {mediaUrl && msg.type === 'image' && (
+                                  <button onClick={() => setLightboxImage(mediaUrl)} className="rounded-2xl overflow-hidden border border-[#e4e6eb] hover:opacity-90 transition-opacity shadow-sm">
+                                    <img src={mediaUrl} alt={msg.caption || 'Image'} className="max-w-[240px] max-h-[200px] object-cover block" />
+                                  </button>
+                                )}
+                                {mediaUrl && msg.type === 'audio' && (
+                                  <div className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl text-xs ${isOut ? 'bg-[#1877f2] text-white' : 'bg-white text-[#1c1e21]'}`}>
+                                    <Music size={14} /><audio controls src={mediaUrl} className="max-w-[180px] h-6" style={{ accentColor: isOut ? '#fff' : '#1877f2' }} />
                                   </div>
                                 )}
+                                {mediaUrl && (msg.type === 'document' || msg.type === 'file') && (
+                                  <a href={mediaUrl} target="_blank" rel="noreferrer"
+                                    className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl text-xs font-semibold shadow-sm border ${isOut ? 'bg-[#1877f2] text-white border-[#1877f2]' : 'bg-white text-[#1877f2] border-[#e4e6eb]'}`}>
+                                    <FileText size={14} />{msg.content || 'Document'}<ExternalLink size={10} />
+                                  </a>
+                                )}
+                                {/* Text bubble */}
+                                {msg.content && (
+                                  <div className={`px-3 py-2 rounded-2xl text-[13.5px] leading-relaxed shadow-sm ${
+                                    isOut
+                                      ? 'bg-[#1877f2] text-white rounded-br-sm'
+                                      : 'bg-white text-[#1c1e21] rounded-bl-sm border border-[#e4e6eb]'
+                                  }`}>
+                                    {msg.content}
+                                  </div>
+                                )}
+                                {/* Meta: time + status */}
+                                <div className={`flex items-center gap-1 px-1 ${isOut ? 'justify-end' : ''}`}>
+                                  <span className="text-[10px] text-[#8a8d91]">
+                                    {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </span>
+                                  {isOut && (
+                                    msg.status === 'read' ? <CheckCheck size={11} className="text-[#1877f2]" />
+                                    : msg.status === 'failed' ? <AlertCircle size={11} className="text-rose-400" />
+                                    : <CheckCheck size={11} className="text-[#8a8d91]" />
+                                  )}
+                                </div>
                               </div>
                             </div>
                           );
@@ -1274,141 +1105,145 @@ export default function Conversations({ user }) {
                     )}
                   </div>
 
-                  {/* Templates */}
-                  {/* Quick Replies & Templates */}
-                  <div className="px-4 py-2 bg-white/80 border-t border-slate-100 flex items-center gap-4 overflow-x-auto scrollbar-none">
-                    {/* Quick Replies */}
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setShowQuickReplyPicker(o => !o)} className="text-[10px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors shadow-sm">
-                        <Zap size={12} className="fill-amber-500 text-amber-500" /> Quick Replies
+                  {/* Suggested/Quick replies bar */}
+                  {(showQuickReplyPicker || quickReplies.length > 0) && (
+                    <div className="px-4 py-2 bg-white border-t border-[#e4e6eb] flex items-center gap-2 overflow-x-auto scrollbar-none flex-shrink-0">
+                      <span className="text-[11px] font-bold text-[#606770] whitespace-nowrap flex items-center gap-1">
+                        <Zap size={11} className="text-amber-500" /> Quick:
+                      </span>
+                      {quickReplies.filter(q => (q.title || '').toLowerCase().includes(quickReplySearch.toLowerCase())).slice(0, 6).map(q => (
+                        <button key={q.id} onClick={() => handleSelectQuickReply(q)} title={q.content}
+                          className="text-[12px] font-medium text-[#1877f2] bg-[#e7f3ff] hover:bg-[#d4e9ff] px-3 py-1 rounded-full whitespace-nowrap transition-colors">
+                          {q.title}
+                        </button>
+                      ))}
+                      <button onClick={() => setShowQuickReplyModal(true)}
+                        className="text-[11px] font-semibold text-[#8a8d91] hover:text-[#606770] px-2 py-1 rounded-full hover:bg-[#f0f2f5] transition-colors whitespace-nowrap">
+                        Manage
                       </button>
-                      {showQuickReplyPicker && (
-                        <div className="relative flex items-center gap-2">
-                          <input type="text" placeholder="Search replies…" value={quickReplySearch} onChange={e => setQuickReplySearch(e.target.value)}
-                            className="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500/20" />
-                          <button onClick={() => { setShowQuickReplyPicker(false); setShowQuickReplyModal(true); }}
-                            className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-amber-500 hover:text-amber-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
-                            Manage
-                          </button>
-                          {quickReplies.filter(q => (q.title || '').toLowerCase().includes(quickReplySearch.toLowerCase())).slice(0, 5).map(q => (
-                            <button key={q.id} onClick={() => handleSelectQuickReply(q)} title={q.content}
-                              className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-amber-500 hover:text-amber-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
-                              {q.title}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
+                  )}
 
-                    {/* Templates */}
-                    <div className="flex items-center gap-2 pl-4 border-l border-slate-200">
-                      <button onClick={() => setShowTemplatePicker(o => !o)} className="text-[10px] font-bold text-slate-400 flex items-center gap-1 whitespace-nowrap hover:text-blue-600 transition-colors">
-                        <LayoutTemplate size={11} /> Templates
+                  {/* Template bar */}
+                  {(showTemplatePicker || templates.length > 0) && (
+                    <div className="px-4 py-1.5 bg-white border-t border-[#e4e6eb] flex items-center gap-2 overflow-x-auto scrollbar-none flex-shrink-0">
+                      <span className="text-[11px] font-bold text-[#606770] whitespace-nowrap flex items-center gap-1">
+                        <LayoutTemplate size={11} /> Templates:
+                      </span>
+                      {templates.filter(t => (t.name || '').toLowerCase().includes(templateSearch.toLowerCase())).slice(0, 5).map(t => (
+                        <button key={t.id} onClick={() => handleSelectTemplate(t)} title={t.content}
+                          className="text-[12px] font-medium text-[#606770] bg-[#f0f2f5] hover:bg-[#e4e6eb] px-3 py-1 rounded-full whitespace-nowrap transition-colors">
+                          {t.name}
+                        </button>
+                      ))}
+                      <button onClick={() => setShowTemplateModal(true)}
+                        className="text-[11px] font-semibold text-[#8a8d91] hover:text-[#606770] px-2 py-1 rounded-full hover:bg-[#f0f2f5] transition-colors whitespace-nowrap">
+                        Manage
                       </button>
-                      {showTemplatePicker && (
-                        <div className="relative flex items-center gap-2">
-                          <input type="text" placeholder="Search templates…" value={templateSearch} onChange={e => setTemplateSearch(e.target.value)}
-                            className="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500/20" />
-                          <button onClick={() => { setShowTemplatePicker(false); setShowTemplateModal(true); }}
-                            className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-blue-500 hover:text-blue-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
-                            Manage
-                          </button>
-                          {templates.filter(t => (t.name || '').toLowerCase().includes(templateSearch.toLowerCase())).slice(0, 5).map(t => (
-                            <button key={t.id} onClick={() => handleSelectTemplate(t)} title={t.content}
-                              className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-blue-500 hover:text-blue-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
-                              {t.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  </div>
+                  )}
 
                   {/* Attachment preview */}
                   {selectedFile && (
-                    <div className="px-4 py-2.5 bg-white border-t border-slate-100 flex items-center justify-between">
+                    <div className="px-4 py-2 bg-white border-t border-[#e4e6eb] flex items-center justify-between flex-shrink-0">
                       <div className="flex items-center gap-2.5">
                         {selectedFile.type === 'image'
-                          ? <img src={selectedFile.previewUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
-                          : <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><FileText size={20} /></div>}
+                          ? <img src={selectedFile.previewUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-[#e4e6eb]" />
+                          : <div className="w-10 h-10 rounded-lg bg-[#e7f3ff] text-[#1877f2] flex items-center justify-center"><FileText size={20} /></div>}
                         <div>
-                          <p className="text-xs font-bold text-slate-700 truncate max-w-[220px]">{selectedFile.name}</p>
-                          <p className="text-[10px] text-blue-500 font-semibold">Ready to send</p>
+                          <p className="text-[12px] font-bold text-[#1c1e21] truncate max-w-[220px]">{selectedFile.name}</p>
+                          <p className="text-[11px] text-[#1877f2] font-semibold">Ready to send</p>
                         </div>
                       </div>
-                      <button onClick={() => setSelectedFile(null)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"><X size={14} /></button>
+                      <button onClick={() => setSelectedFile(null)} className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91] transition-colors"><X size={14} /></button>
                     </div>
                   )}
                   {uploading && (
-                    <div className="px-4 py-2 bg-white border-t border-slate-100 flex items-center gap-2 text-slate-400">
-                      <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-[11px] font-medium">Uploading…</span>
+                    <div className="px-4 py-2 bg-white border-t border-[#e4e6eb] flex items-center gap-2 text-[#8a8d91] flex-shrink-0">
+                      <div className="w-3 h-3 border-2 border-[#1877f2] border-t-transparent rounded-full animate-spin" />
+                      <span className="text-[12px]">Uploading…</span>
                     </div>
                   )}
 
-                  {/* Composer */}
-                  <form onSubmit={handleSend} className="px-4 py-3 bg-white border-t border-slate-100 flex items-end gap-2">
+                  {/* Composer — Meta style */}
+                  <form onSubmit={handleSend} className="bg-white border-t border-[#e4e6eb] px-3 py-2.5 flex items-end gap-2 flex-shrink-0">
                     <input type="file" ref={fileInputRef} className="hidden"
                       accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                       onChange={handleFileChange} />
+
                     <button type="button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploading}
-                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0" aria-label="Attach file">
-                      <Paperclip size={17} />
+                      className="p-2 text-[#8a8d91] hover:text-[#1877f2] hover:bg-[#e7f3ff] rounded-full transition-colors flex-shrink-0">
+                      <Paperclip size={18} />
                     </button>
+
                     <div className="relative flex-shrink-0">
                       <button type="button" onClick={() => setShowEmojiPicker(p => !p)} disabled={sending}
-                        className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors flex items-center justify-center" aria-label="Add emoji">
-                        <Smile size={17} />
+                        className="p-2 text-[#8a8d91] hover:text-amber-500 hover:bg-amber-50 rounded-full transition-colors flex items-center justify-center">
+                        <Smile size={18} />
                       </button>
                       {showEmojiPicker && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setShowEmojiPicker(false)} />
-                          <div className="absolute bottom-full left-0 mb-2 z-50 shadow-2xl rounded-2xl overflow-hidden border border-slate-200">
-                            <EmojiPicker onEmojiClick={(emojiData) => {
-                              setReplyText(p => p + emojiData.emoji);
-                              setShowEmojiPicker(false);
-                              textareaRef.current?.focus();
-                            }} width={300} height={350} searchDisabled={false} skinTonesDisabled />
+                          <div className="absolute bottom-full left-0 mb-2 z-50 shadow-2xl rounded-2xl overflow-hidden border border-[#e4e6eb]">
+                            <EmojiPicker onEmojiClick={(emojiData) => { setReplyText(p => p + emojiData.emoji); setShowEmojiPicker(false); textareaRef.current?.focus(); }} width={300} height={350} searchDisabled={false} skinTonesDisabled />
                           </div>
                         </>
                       )}
                     </div>
-                    <textarea ref={textareaRef} value={replyText} onChange={e => setReplyText(e.target.value)}
-                      placeholder={selectedFile ? 'Add a caption…' : 'Type a message…'}
-                      rows={1}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                      className="flex-1 bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/60 resize-none max-h-28 scrollbar-thin placeholder-slate-400" />
+
+                    {/* Quick replies toggle */}
+                    <button type="button" onClick={() => setShowQuickReplyPicker(o => !o)}
+                      className={`p-2 rounded-full transition-colors flex-shrink-0 ${showQuickReplyPicker ? 'text-amber-500 bg-amber-50' : 'text-[#8a8d91] hover:text-amber-500 hover:bg-amber-50'}`}>
+                      <Zap size={17} />
+                    </button>
+
+                    {/* Templates toggle */}
+                    <button type="button" onClick={() => setShowTemplatePicker(o => !o)}
+                      className={`p-2 rounded-full transition-colors flex-shrink-0 ${showTemplatePicker ? 'text-[#1877f2] bg-[#e7f3ff]' : 'text-[#8a8d91] hover:text-[#1877f2] hover:bg-[#e7f3ff]'}`}>
+                      <LayoutTemplate size={17} />
+                    </button>
+
+                    {/* Text input */}
+                    <div className="flex-1 bg-[#f0f2f5] rounded-2xl px-4 py-2">
+                      <textarea ref={textareaRef} value={replyText} onChange={e => setReplyText(e.target.value)}
+                        placeholder={`Reply in ${getChannelMeta(selectedConv.channel_type).label}…`}
+                        rows={1}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                        className="w-full bg-transparent text-[13.5px] text-[#1c1e21] placeholder-[#8a8d91] resize-none focus:outline-none max-h-28 scrollbar-thin" />
+                    </div>
+
+                    {/* Send */}
                     <button type="submit" disabled={sending || uploading || (!replyText.trim() && !selectedFile)}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white p-2.5 rounded-xl shadow-md shadow-blue-500/15 transition-all flex-shrink-0 flex items-center justify-center active:scale-95" aria-label="Send message">
-                      <Send size={15} />
+                      className="bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-40 text-white p-2.5 rounded-full shadow-sm transition-all flex-shrink-0 flex items-center justify-center active:scale-95">
+                      {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                     </button>
                   </form>
                 </div>
 
                 {/* Right Panel — Contact Info */}
                 {showContactPanel && (
-                  <div className="hidden xl:flex w-72 border-l border-slate-200/80 bg-white flex-col overflow-y-auto scrollbar-thin flex-shrink-0">
-                    <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                      <p className="text-xs font-bold text-slate-700">Contact Details</p>
-                      <button onClick={() => setShowContactPanel(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={13} /></button>
+                  <div className="hidden xl:flex w-[300px] border-l border-[#e4e6eb] bg-white flex-col overflow-y-auto scrollbar-thin flex-shrink-0">
+                    <div className="p-4 border-b border-[#e4e6eb] flex items-center justify-between">
+                      <p className="text-[14px] font-bold text-[#1c1e21]">About</p>
+                      <button onClick={() => setShowContactPanel(false)} className="p-1 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91] transition-colors"><X size={14} /></button>
                     </div>
-                    <div className="p-4 border-b border-slate-100 flex flex-col items-center">
-                      <div className="w-full bg-slate-50/70 border border-slate-100 rounded-2xl p-4 flex flex-col items-center gap-2.5 shadow-sm">
-                        <div className="relative">
-                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl shadow-md bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
-                            {initials(selectedConv.contact_name || 'C')}
-                          </div>
-                          <span className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-lg flex items-center justify-center border-[2px] border-white text-[10px] font-black text-white shadow-sm ${getChannelMeta(selectedConv.channel_type).bg}`}>
-                            {getChannelMeta(selectedConv.channel_type).icon}
-                          </span>
+                    <div className="p-4 border-b border-[#e4e6eb] flex flex-col items-center gap-3">
+                      <div className="relative">
+                        <div className={`w-[64px] h-[64px] rounded-full flex items-center justify-center text-white font-extrabold text-xl bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
+                          {initials(selectedConv.contact_name || 'C')}
                         </div>
-                        <p className="text-sm font-bold text-slate-800 text-center tracking-tight">{selectedConv.contact_name || 'Unknown Contact'}</p>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[9px] font-extrabold px-2.5 py-0.5 rounded-full text-white ${selectedConv.status === 'open' ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-                            {selectedConv.status === 'open' ? '● Open' : '● Archived'}
+                        <span className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-white text-[10px] font-black text-white ${getChannelMeta(selectedConv.channel_type).bg}`}>
+                          {getChannelMeta(selectedConv.channel_type).icon}
+                        </span>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[15px] font-bold text-[#1c1e21]">{selectedConv.contact_name || 'Unknown Contact'}</p>
+                        <div className="flex items-center gap-1.5 mt-1 justify-center">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${selectedConv.status === 'open' ? 'bg-emerald-500' : 'bg-[#8a8d91]'}`}>
+                            {selectedConv.status === 'open' ? 'Open' : 'Archived'}
                           </span>
                           {selectedConv.is_priority && (
-                            <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-700 flex items-center gap-1">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 flex items-center gap-0.5">
                               <Star size={9} fill="currentColor" /> Priority
                             </span>
                           )}
@@ -1417,390 +1252,267 @@ export default function Conversations({ user }) {
                     </div>
 
                     {/* Info rows */}
-                    <div className="p-4 space-y-3.5">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Contact Information</p>
-                      <div className="bg-slate-50/50 border border-slate-100 rounded-2xl p-3.5 space-y-3.5 shadow-xs">
-                        {selectedConv.contact_phone && (
-                          <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Phone size={12} className="text-slate-500" /></div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Phone</p>
-                              <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.contact_phone}</p>
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex items-start gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Hash size={12} className="text-slate-500" /></div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Channel</p>
-                            <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.channel_name || getChannelMeta(selectedConv.channel_type).label}</p>
-                            <p className="text-[10px] text-slate-400/80 capitalize font-medium">{selectedConv.channel_type}</p>
+                    <div className="p-4 space-y-3 border-b border-[#e4e6eb]">
+                      <p className="text-[11px] font-bold text-[#8a8d91] uppercase tracking-wider">Contact Info</p>
+                      {[
+                        { icon: Hash, label: 'Channel', val: selectedConv.channel_name || getChannelMeta(selectedConv.channel_type).label },
+                        { icon: Phone, label: 'Phone', val: selectedConv.contact_phone },
+                        { icon: Calendar, label: 'Last Active', val: selectedConv.last_message_at ? timeAgo(selectedConv.last_message_at) : '—' },
+                        { icon: User, label: 'Assigned', val: selectedConv.assigned_to || '—' },
+                      ].map(row => row.val && (
+                        <div key={row.label} className="flex items-start gap-2.5">
+                          <row.icon size={14} className="text-[#8a8d91] flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-[10px] text-[#8a8d91]">{row.label}</p>
+                            <p className="text-[12px] font-semibold text-[#1c1e21]">{row.val}</p>
                           </div>
                         </div>
-                        <div className="flex items-start gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center flex-shrink-0"><Calendar size={12} className="text-slate-500" /></div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Last Message</p>
-                            <p className="text-xs font-bold text-slate-700 mt-0.5">{selectedConv.last_message_at ? toDate(selectedConv.last_message_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Dhaka' }) : 'N/A'}</p>
+                      ))}
+                      {selectedConv.lead_destination && (
+                        <div className="flex items-start gap-2.5">
+                          <span className="text-[16px] mt-0.5">{getCountryEmoji(selectedConv.lead_destination)}</span>
+                          <div>
+                            <p className="text-[10px] text-[#8a8d91]">Destination</p>
+                            <p className="text-[12px] font-semibold text-[#1c1e21]">{selectedConv.lead_destination}</p>
                           </div>
-                        </div>
-                        {selectedConv.assigned_to && (
-                          <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-blue-50/50 border border-blue-100/30 flex items-center justify-center flex-shrink-0"><UserPlus size={12} className="text-blue-500" /></div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">Assigned To</p>
-                              <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{selectedConv.assigned_to}</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Lead Status */}
-                    <div className="p-4 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Lead Status</p>
-                      {selectedConv.lead_id ? (
-                        <div className="bg-emerald-50/30 border border-emerald-100/50 rounded-2xl p-3.5 space-y-2.5 shadow-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/70 px-2.5 py-0.5 rounded-full border border-emerald-200/55">{selectedConv.lead_status || 'Lead'}</span>
-                            <Link to={`/leads/${selectedConv.lead_id}`} className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-0.5 transition-colors">
-                              View Profile <ExternalLink size={10} />
-                            </Link>
-                          </div>
-                          {(selectedConv.lead_employee_name || selectedConv.lead_assigned_consultant) && (
-                            <div className="text-[10px] text-slate-500 leading-normal space-y-0.5">
-                              <p>Consultant: <span className="font-bold text-slate-700">{selectedConv.lead_employee_name || selectedConv.lead_assigned_consultant}</span></p>
-                              {selectedConv.lead_destination && <p>Destination: <span className="font-bold text-slate-700">{selectedConv.lead_destination}</span></p>}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="bg-amber-50/35 border border-amber-100/50 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-amber-800 bg-amber-100/60 px-2.5 py-0.5 rounded-full border border-amber-200/50">New Prospect</span>
-                          </div>
-                          <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
-                            className="w-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-2 rounded-xl transition-all duration-150 shadow-sm active:scale-95 cursor-pointer">
-                            Convert to Lead
-                          </button>
                         </div>
                       )}
                     </div>
 
+                    {/* Lead status */}
+                    {selectedConv.lead_id && (
+                      <div className="p-4 border-b border-[#e4e6eb]">
+                        <p className="text-[11px] font-bold text-[#8a8d91] uppercase tracking-wider mb-2">Lead Status</p>
+                        <Link to={`/leads/${selectedConv.lead_id}`} className="flex items-center gap-2 p-2.5 bg-[#e7f3ff] hover:bg-[#d4e9ff] rounded-xl transition-colors">
+                          <ClipboardList size={14} className="text-[#1877f2]" />
+                          <span className="text-[12px] font-bold text-[#1877f2]">Lead #{selectedConv.lead_id}</span>
+                          <ExternalLink size={11} className="text-[#1877f2] ml-auto" />
+                        </Link>
+                        {selectedConv.lead_status && (
+                          <p className="text-[11px] text-[#8a8d91] mt-1.5 px-1">Status: <span className="font-semibold text-[#606770]">{selectedConv.lead_status}</span></p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Tags */}
-                    <div className="p-4 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2.5">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tags</p>
-                        <button onClick={() => setShowTagPicker(p => !p)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-blue-600 transition-all cursor-pointer"><Plus size={12} /></button>
+                    <div className="p-4 border-b border-[#e4e6eb]">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-bold text-[#8a8d91] uppercase tracking-wider">Tags</p>
+                        <button onClick={() => setShowTagPicker(p => !p)} className="p-1 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91] transition-colors"><Plus size={13} /></button>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {contactTags.length === 0 && (<p className="text-[10px] text-slate-400 italic">No tags</p>)}
+                        {contactTags.length === 0 && <p className="text-[12px] text-[#8a8d91]">No tags</p>}
                         {contactTags.map(tag => (
-                          <span key={tag.id} className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full text-white" style={{ backgroundColor: tag.color || '#64748b' }}>
-                            {tag.name}
-                            <button onClick={() => handleRemoveTag(tag.id)} className="hover:bg-white/20 rounded-full p-0.5 transition-colors"><X size={9} /></button>
-                          </span>
+                          <span key={tag.id} className="text-[11px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: tag.color || '#64748b' }}>{tag.name}</span>
                         ))}
                       </div>
                       {showTagPicker && (
-                        <div className="mt-2 bg-slate-50 rounded-xl border border-slate-200 p-2 max-h-32 overflow-y-auto">
-                          <p className="text-[10px] text-slate-400 font-medium mb-1">Click to add:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {allTags.filter(t => !contactTags.some(ct => String(ct.id) === String(t.id))).map(tag => (
-                              <button key={tag.id} onClick={() => handleAddTag(tag.id)}
-                                className="text-[10px] font-bold px-2 py-1 rounded-full text-white hover:opacity-80 transition-opacity" style={{ backgroundColor: tag.color || '#64748b' }}>
-                                {tag.name}
-                              </button>
-                            ))}
-                            {allTags.filter(t => !contactTags.some(ct => String(ct.id) === String(t.id))).length === 0 && (
-                              <p className="text-[10px] text-slate-400">All tags applied</p>
-                            )}
-                          </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {allTags.filter(t => !contactTags.some(ct => ct.id === t.id)).map(tag => (
+                            <button key={tag.id} onClick={() => handleAddTag(tag)}
+                              className="text-[11px] font-bold px-2 py-0.5 rounded-full text-white opacity-60 hover:opacity-100 transition-opacity"
+                              style={{ backgroundColor: tag.color || '#64748b' }}>{tag.name}</button>
+                          ))}
                         </div>
                       )}
                     </div>
 
-                    {/* Internal Notes */}
-                    <div className="p-4 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Internal Notes</p>
-                      <div className="space-y-2 max-h-40 overflow-y-auto mb-2.5">
-                        {contactNotes.length === 0 ? (
-                          <p className="text-[10px] text-slate-400 italic">No notes yet</p>
-                        ) : contactNotes.map(note => (
-                          <div key={note.id} className="bg-amber-50/60 border border-amber-100/60 rounded-xl p-2.5">
-                            <p className="text-[11px] text-slate-700 leading-relaxed font-medium">{note.text}</p>
-                            <div className="flex items-center gap-1.5 mt-1.5">
-                              <span className="text-[9px] text-amber-600 font-bold">{note.author || 'Team'}</span>
-                              <span className="text-[9px] text-slate-400">·</span>
-                              <span className="text-[9px] text-slate-400">{toDate(note.created_at).toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka' })}</span>
-                            </div>
+                    {/* Notes */}
+                    <div className="p-4">
+                      <p className="text-[11px] font-bold text-[#8a8d91] uppercase tracking-wider mb-2">Notes</p>
+                      <div className="space-y-2 mb-3">
+                        {contactNotes.map(note => (
+                          <div key={note.id} className="bg-[#f0f2f5] rounded-xl px-3 py-2">
+                            <p className="text-[12px] text-[#1c1e21]">{note.text}</p>
+                            <p className="text-[10px] text-[#8a8d91] mt-0.5">{timeAgo(note.created_at)}</p>
                           </div>
                         ))}
                       </div>
-                      <div className="flex items-end gap-2">
-                        <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={2}
-                          placeholder="Add a note…"
-                          className="flex-1 bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/60 resize-none placeholder-slate-400 transition-all" />
+                      <div className="flex gap-2">
+                        <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Add a note…"
+                          onKeyDown={e => { if (e.key === 'Enter') handleAddNote(); }}
+                          className="flex-1 bg-[#f0f2f5] rounded-full px-3 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20 placeholder-[#8a8d91]" />
                         <button onClick={handleAddNote} disabled={addingNote || !newNote.trim()}
-                          className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white p-2 rounded-xl shadow-sm transition-all flex-shrink-0 cursor-pointer">
-                          {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                          className="bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-40 text-white p-1.5 rounded-full transition-colors">
+                          {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                         </button>
                       </div>
-                    </div>
-
-                    {/* Quick Actions */}
-                    <div className="p-4 pb-6 flex flex-col gap-2 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Quick Actions</p>
-                      <button onClick={handleAssignToMe} disabled={updatingConv}
-                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-blue-50/80 hover:text-blue-700 transition-all duration-150 border border-slate-100/70 disabled:opacity-50 active:scale-98 cursor-pointer">
-                        <UserPlus size={13} className="text-blue-500 flex-shrink-0" />
-                        <span>Assign to Me</span>
-                      </button>
-                      <button onClick={handleTogglePriority} disabled={updatingConv}
-                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-amber-50/80 hover:text-amber-700 transition-all duration-150 border border-slate-100/70 disabled:opacity-50 active:scale-98 cursor-pointer">
-                        <Star size={13} className="text-amber-500 flex-shrink-0" fill={selectedConv.is_priority ? "currentColor" : "none"} />
-                        <span>{selectedConv.is_priority ? 'Remove Priority' : 'Mark as Priority'}</span>
-                      </button>
-                      <button onClick={() => handleToggleArchive(selectedConv)}
-                        className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 hover:text-slate-900 transition-all duration-150 border border-slate-100/70 active:scale-98 cursor-pointer">
-                        <Archive size={13} className="text-slate-500 flex-shrink-0" />
-                        <span>{selectedConv.status === 'archived' ? 'Reopen' : 'Archive'}</span>
-                      </button>
-                      {!selectedConv.lead_id && (
-                        <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
-                          className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-emerald-50/85 hover:text-emerald-700 transition-all duration-150 border border-slate-100/70 active:scale-98 cursor-pointer">
-                          <UserPlus size={13} className="text-emerald-500 flex-shrink-0" />
-                          <span>Move to Lead</span>
-                        </button>
-                      )}
                     </div>
                   </div>
                 )}
               </div>
             </>
           ) : (
-            /* Empty State */
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/40">
-              <div className="max-w-sm w-full flex flex-col items-center">
-                <div className="grid grid-cols-3 gap-3.5 w-full mb-8">
-                  {[
-                    { icon: CheckCircle, label: 'Webhooks', sub: 'Connected', iconColor: 'text-emerald-500', bg: 'bg-emerald-50' },
-                    { icon: MessageSquare, label: 'Channels', sub: `${channels.length || 3} Active`, iconColor: 'text-blue-500', bg: 'bg-blue-50' },
-                    { icon: Bell, label: 'Real-time', sub: 'Active', iconColor: 'text-indigo-500', bg: 'bg-indigo-50' },
-                  ].map(({ icon: Icon, label, sub, iconColor, bg }) => (
-                    <div key={label} className="bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200/50 p-4 flex flex-col items-center gap-2 shadow-xs transition-all hover:shadow-md hover:-translate-y-0.5 duration-300">
-                      <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center`}>
-                        <Icon size={18} className={iconColor} />
-                      </div>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">{label}</p>
-                      <p className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />{sub}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center mb-4 shadow-lg shadow-blue-500/15">
-                  <Inbox size={24} className="text-white" />
-                </div>
-                <h2 className="text-base font-bold text-slate-800">Unified Inbox</h2>
-                <p className="text-slate-400 text-xs mt-2 leading-relaxed max-w-[280px]">Select a conversation to start chatting. Manage WhatsApp, Messenger, and Instagram in one place.</p>
-                <div className="mt-6 text-slate-400 text-[10px] font-semibold bg-white/80 px-4 py-1.5 rounded-full border border-slate-200/50 shadow-sm">
-                  EduExpress CRM · Unified Inbox v4.0
-                </div>
+            /* No conversation selected */
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[#8a8d91] bg-[#f0f2f5]">
+              <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-sm">
+                <MessageSquare size={28} className="text-[#1877f2]" />
+              </div>
+              <div className="text-center">
+                <p className="font-bold text-[15px] text-[#1c1e21]">Select a conversation</p>
+                <p className="text-[13px] text-[#8a8d91] mt-1">Choose from the list to start messaging</p>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Lightbox */}
+      {/* ══ Lightbox ══ */}
       {lightboxImage && (
-        <div className="fixed inset-0 bg-slate-900/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setLightboxImage(null)}>
-          <button onClick={() => setLightboxImage(null)} className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl transition-colors"><X size={20} /></button>
-          <img src={lightboxImage} alt="Preview" className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl" />
+        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4" onClick={() => setLightboxImage(null)}>
+          <button className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors" onClick={() => setLightboxImage(null)}><X size={20} /></button>
+          <img src={lightboxImage} alt="" className="max-w-full max-h-full rounded-xl shadow-2xl object-contain" onClick={e => e.stopPropagation()} />
         </div>
       )}
 
-      {/* Quick Reply Modal */}
-      {showQuickReplyModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 border border-slate-100 max-h-[80vh] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Zap size={16} className="text-amber-500" /> Manage Quick Replies</h3>
-              <button onClick={() => setShowQuickReplyModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={16} /></button>
+      {/* ══ Convert to Lead Modal ══ */}
+      {showLeadModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setShowLeadModal(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-[#e4e6eb] overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e4e6eb]">
+              <h3 className="font-bold text-[15px] text-[#1c1e21]">Convert to Lead</h3>
+              <button onClick={() => setShowLeadModal(false)} className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91] transition-colors"><X size={16} /></button>
             </div>
-            
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-              {quickReplies.map(qr => (
-                <div key={qr.id} className="border border-slate-200 rounded-xl p-3 flex gap-4 hover:border-slate-300 transition-colors group">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-700 text-xs mb-1">{qr.title}</p>
-                    <p className="text-slate-500 text-[11px] whitespace-pre-wrap">{qr.content}</p>
-                  </div>
-                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => setQuickReplyForm(qr)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={14} /></button>
-                    <button onClick={() => handleDeleteQuickReply(qr.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                  </div>
-                </div>
-              ))}
-              {quickReplies.length === 0 && (
-                <div className="text-center py-8 text-slate-400 text-xs font-semibold">No quick replies yet. Create one below!</div>
-              )}
-            </div>
-
-            <form onSubmit={handleSaveQuickReply} className="pt-4 border-t border-slate-100 flex flex-col gap-3">
-              <h4 className="font-bold text-slate-700 text-xs">{quickReplyForm.id ? 'Edit Quick Reply' : 'Add New Quick Reply'}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <input type="text" placeholder="Title (e.g. Greeting)" required value={quickReplyForm.title} onChange={e => setQuickReplyForm(f => ({...f, title: e.target.value}))}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
-                <input type="text" placeholder="Category (optional)" value={quickReplyForm.category || ''} onChange={e => setQuickReplyForm(f => ({...f, category: e.target.value}))}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
+            <div className="p-5 space-y-4">
+              <div className="flex gap-2 mb-2">
+                <button onClick={() => setLeadTab('new')} className={`flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all ${leadTab === 'new' ? 'bg-[#1877f2] text-white' : 'bg-[#f0f2f5] text-[#606770]'}`}>Create New</button>
+                <button onClick={() => setLeadTab('link')} className={`flex-1 py-2 rounded-lg text-[13px] font-semibold transition-all ${leadTab === 'link' ? 'bg-[#1877f2] text-white' : 'bg-[#f0f2f5] text-[#606770]'}`}>Link Existing</button>
               </div>
-              <textarea placeholder="Message content..." required value={quickReplyForm.content} onChange={e => setQuickReplyForm(f => ({...f, content: e.target.value}))} rows={3}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-none" />
-              <div className="flex justify-end gap-2">
-                {quickReplyForm.id && (
-                  <button type="button" onClick={() => setQuickReplyForm({ id: null, title: '', content: '', category: '' })} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Cancel Edit</button>
-                )}
-                <button type="submit" disabled={savingQuickReply} className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors disabled:opacity-50">
-                  {savingQuickReply ? 'Saving...' : (quickReplyForm.id ? 'Update Reply' : 'Add Reply')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Templates Modal */}
-      {showTemplateModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 border border-slate-100 max-h-[80vh] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><LayoutTemplate size={16} className="text-blue-600" /> Manage Templates</h3>
-              <button onClick={() => setShowTemplateModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={16} /></button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-              {templates.map(t => (
-                <div key={t.id} className="border border-slate-200 rounded-xl p-3 flex gap-4 hover:border-slate-300 transition-colors group">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="font-bold text-slate-700 text-xs">{t.name}</p>
-                      <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium">{t.category}</span>
-                    </div>
-                    <p className="text-slate-500 text-[11px] whitespace-pre-wrap">{t.content}</p>
-                  </div>
-                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => setTemplateForm(t)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={14} /></button>
-                    <button onClick={() => handleDeleteTemplate(t.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                  </div>
-                </div>
-              ))}
-              {templates.length === 0 && (
-                <div className="text-center py-8 text-slate-400 text-xs font-semibold">No templates yet. Create one below!</div>
-              )}
-            </div>
-
-            <form onSubmit={handleSaveTemplate} className="pt-4 border-t border-slate-100 flex flex-col gap-3">
-              <h4 className="font-bold text-slate-700 text-xs">{templateForm.id ? 'Edit Template' : 'Add New Template'}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <input type="text" placeholder="Template Name (e.g. Follow-up)" required value={templateForm.name} onChange={e => setTemplateForm(f => ({...f, name: e.target.value}))}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-                <input type="text" placeholder="Category (e.g. general)" value={templateForm.category || ''} onChange={e => setTemplateForm(f => ({...f, category: e.target.value}))}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-              </div>
-              <textarea placeholder="Template content..." required value={templateForm.content} onChange={e => setTemplateForm(f => ({...f, content: e.target.value}))} rows={3}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none" />
-              <div className="flex justify-end gap-2">
-                {templateForm.id && (
-                  <button type="button" onClick={() => setTemplateForm({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] })} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Cancel Edit</button>
-                )}
-                <button type="submit" disabled={savingTemplate} className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors disabled:opacity-50">
-                  {savingTemplate ? 'Saving...' : (templateForm.id ? 'Update Template' : 'Add Template')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Convert to Lead Modal */}
-      {showLeadModal && selectedConv && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4 border border-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><User size={16} className="text-blue-600" /> Convert to Lead</h3>
-              <button onClick={() => { setShowLeadModal(false); setSelectedExistingLead(null); setLeadSearch(''); }} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={16} /></button>
-            </div>
-            <div className="flex bg-slate-100/80 p-1 rounded-xl">
-              {[{ id: 'new', label: 'Create New' }, { id: 'link', label: 'Link Existing' }].map(t => (
-                <button key={t.id} type="button" onClick={() => setLeadTab(t.id)}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${leadTab === t.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            {leadTab === 'new' ? (
-              <div className="flex flex-col gap-3.5">
-                <p className="text-xs text-slate-500">Create a new CRM lead for <strong className="text-slate-700">{selectedConv.contact_name || 'this contact'}</strong> via {selectedConv.channel_type}.</p>
-                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 flex flex-col gap-3 text-xs">
-                  <div className="flex justify-between items-center"><span className="text-slate-400">Name</span> <span className="font-bold text-slate-700">{selectedConv.contact_name || 'N/A'}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-slate-400">Phone</span> <span className="font-bold text-slate-700">{selectedConv.contact_phone || 'N/A'}</span></div>
-                  
-                  {/* Destination Selection */}
-                  <div className="pt-2 border-t border-slate-200/60 mt-1 flex flex-col gap-1.5">
-                    <label className="text-slate-500 font-medium">Destination</label>
+              {leadTab === 'new' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Destination Country</label>
                     <select value={newLeadDestination} onChange={e => setNewLeadDestination(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-blue-500 font-semibold text-slate-800">
-                      {['Bangladesh', 'China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand', 'Cyprus'].map(d => (
-                        <option key={d} value={d}>{d}</option>
+                      className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20">
+                      {['Bangladesh','China','Malta','Hungary','Greece','Estonia','Georgia','Malaysia','Thailand','Cyprus','UK','USA','Canada','Australia','Germany','France','India','Pakistan','Nepal','Italy'].map(d => (
+                        <option key={d}>{d}</option>
                       ))}
                     </select>
                   </div>
+                  <button disabled={convertingLead} onClick={handleConvertLead}
+                    className="w-full bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-[13px] flex items-center justify-center gap-2 transition-colors">
+                    {convertingLead ? <><Loader2 size={15} className="animate-spin" /> Creating…</> : <><UserPlus size={14} /> Create Lead</>}
+                  </button>
                 </div>
-                <button type="button" disabled={convertingLead} onClick={handleConvertLead}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 transition-colors">
-                  {convertingLead ? 'Creating…' : 'Create Lead'}
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3.5">
-                <p className="text-xs text-slate-500">Link this conversation to an existing lead.</p>
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 text-slate-400" size={13} />
-                  <input type="text" placeholder="Search name, phone…" value={leadSearch} onChange={e => { setLeadSearch(e.target.value); setSelectedExistingLead(null); }}
-                    className="w-full bg-slate-50 border border-slate-200/70 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/15 focus:border-blue-500 placeholder-slate-400" />
+              ) : (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-2.5 text-[#8a8d91]" size={13} />
+                    <input type="text" placeholder="Search leads…" value={leadSearch} onChange={e => { setLeadSearch(e.target.value); setSelectedExistingLead(null); }}
+                      className="w-full bg-[#f0f2f5] border-0 rounded-xl pl-9 pr-4 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20 placeholder-[#8a8d91]" />
+                  </div>
+                  {leadSearchResults.length > 0 && (
+                    <div className="border border-[#e4e6eb] rounded-xl max-h-36 overflow-y-auto divide-y divide-[#f0f2f5]">
+                      {leadSearchResults.map(lead => (
+                        <button key={lead.id} onClick={() => setSelectedExistingLead(lead)}
+                          className={`w-full text-left px-3 py-2.5 text-[13px] flex items-center justify-between hover:bg-[#f0f2f5] transition-colors ${selectedExistingLead?.id === lead.id ? 'bg-[#e7f3ff] border-l-2 border-[#1877f2]' : ''}`}>
+                          <div>
+                            <p className="font-bold text-[#1c1e21]">{lead.client_name}</p>
+                            <p className="text-[11px] text-[#8a8d91]">#{lead.lead_id} · {lead.phone || 'No phone'}</p>
+                          </div>
+                          <span className="text-[10px] bg-[#f0f2f5] px-2 py-0.5 rounded font-semibold text-[#606770]">{lead.employee_name || lead.assigned_consultant || '—'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {leadSearch.length >= 2 && !leadSearchResults.length && <p className="text-center text-[12px] text-[#8a8d91] py-2">No leads found</p>}
+                  <button disabled={convertingLead || !selectedExistingLead} onClick={handleConvertLead}
+                    className="w-full bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-[13px] flex items-center justify-center transition-colors">
+                    {convertingLead ? 'Linking…' : 'Link to Lead'}
+                  </button>
                 </div>
-                {leadSearchResults.length > 0 && (
-                  <div className="border border-slate-100 rounded-xl max-h-36 overflow-y-auto divide-y divide-slate-50 bg-white scrollbar-thin">
-                    {leadSearchResults.map(lead => (
-                      <button type="button" key={lead.id} onClick={() => setSelectedExistingLead(lead)}
-                        className={`w-full text-left px-3 py-2.5 text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${selectedExistingLead?.id === lead.id ? 'bg-blue-50 border-l-2 border-l-blue-600' : ''}`}>
-                        <div>
-                          <p className="font-bold text-slate-800">{lead.client_name}</p>
-                          <p className="text-[10px] text-slate-400">#{lead.lead_id} · {lead.phone || 'No phone'}</p>
-                        </div>
-                        <span className="text-[9px] bg-slate-100 px-2 py-0.5 rounded font-semibold text-slate-500">{lead.employee_name || lead.assigned_consultant || '—'}</span>
-                      </button>
-                    ))}
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Quick Reply Manager Modal ══ */}
+      {showQuickReplyModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setShowQuickReplyModal(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-[#e4e6eb] overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e4e6eb] flex-shrink-0">
+              <h3 className="font-bold text-[15px] text-[#1c1e21]">Quick Replies</h3>
+              <button onClick={() => { setShowQuickReplyModal(false); setQuickReplyForm({ id: null, title: '', content: '', category: '' }); }} className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91]"><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <form onSubmit={handleSaveQuickReply} className="bg-[#f0f2f5] rounded-xl p-4 space-y-3">
+                <p className="text-[12px] font-bold text-[#606770]">{quickReplyForm.id ? 'Edit' : 'New'} Quick Reply</p>
+                <input value={quickReplyForm.title} onChange={e => setQuickReplyForm(f => ({ ...f, title: e.target.value }))} placeholder="Title / shortcut…" required
+                  className="w-full bg-white border border-[#e4e6eb] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20" />
+                <textarea value={quickReplyForm.content} onChange={e => setQuickReplyForm(f => ({ ...f, content: e.target.value }))} placeholder="Reply content…" rows={3} required
+                  className="w-full bg-white border border-[#e4e6eb] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20 resize-none" />
+                <div className="flex gap-2">
+                  <button type="submit" disabled={savingQuickReply}
+                    className="flex-1 bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-50 text-white font-bold py-2 rounded-lg text-[13px] transition-colors">
+                    {savingQuickReply ? 'Saving…' : quickReplyForm.id ? 'Update' : 'Add Reply'}
+                  </button>
+                  {quickReplyForm.id && <button type="button" onClick={() => setQuickReplyForm({ id: null, title: '', content: '', category: '' })} className="px-4 py-2 bg-[#f0f2f5] hover:bg-[#e4e6eb] text-[#606770] font-semibold rounded-lg text-[13px] transition-colors">Cancel</button>}
+                </div>
+              </form>
+              <div className="space-y-2">
+                {quickReplies.map(qr => (
+                  <div key={qr.id} className="flex items-start gap-3 p-3 bg-[#f0f2f5] rounded-xl">
+                    <Zap size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-bold text-[#1c1e21]">{qr.title}</p>
+                      <p className="text-[12px] text-[#606770] truncate">{qr.content}</p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => setQuickReplyForm({ id: qr.id, title: qr.title, content: qr.content, category: qr.category || '' })} className="p-1.5 hover:bg-white rounded-lg text-[#8a8d91] transition-colors"><Edit2 size={13} /></button>
+                      <button onClick={() => handleDeleteQuickReply(qr.id)} className="p-1.5 hover:bg-rose-50 rounded-lg text-[#8a8d91] hover:text-rose-500 transition-colors"><Trash2 size={13} /></button>
+                    </div>
                   </div>
-                )}
-                {leadSearch.length >= 2 && !leadSearchResults.length && <p className="text-center text-xs text-slate-400 py-2">No leads found</p>}
-                {selectedExistingLead && (
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs">
-                    <p className="font-bold text-blue-700 mb-1">Selected: {selectedExistingLead.client_name}</p>
-                    <p className="text-slate-600">Lead #{selectedExistingLead.lead_id} · {selectedExistingLead.employee_name || selectedExistingLead.assigned_consultant || 'Unassigned'}</p>
-                  </div>
-                )}
-                <button type="button" disabled={convertingLead || !selectedExistingLead} onClick={handleConvertLead}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center disabled:opacity-50 transition-colors">
-                  {convertingLead ? 'Linking…' : 'Link to Lead'}
-                </button>
+                ))}
               </div>
-            )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Template Manager Modal ══ */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setShowTemplateModal(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-[#e4e6eb] overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e4e6eb] flex-shrink-0">
+              <h3 className="font-bold text-[15px] text-[#1c1e21]">Message Templates</h3>
+              <button onClick={() => { setShowTemplateModal(false); setTemplateForm({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] }); }} className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#8a8d91]"><X size={16} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <form onSubmit={handleSaveTemplate} className="bg-[#f0f2f5] rounded-xl p-4 space-y-3">
+                <p className="text-[12px] font-bold text-[#606770]">{templateForm.id ? 'Edit' : 'New'} Template</p>
+                <input value={templateForm.name} onChange={e => setTemplateForm(f => ({ ...f, name: e.target.value }))} placeholder="Template name…" required
+                  className="w-full bg-white border border-[#e4e6eb] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20" />
+                <textarea value={templateForm.content} onChange={e => setTemplateForm(f => ({ ...f, content: e.target.value }))} placeholder="Template content…" rows={4} required
+                  className="w-full bg-white border border-[#e4e6eb] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20 resize-none" />
+                <div className="flex gap-2">
+                  <button type="submit" disabled={savingTemplate}
+                    className="flex-1 bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-50 text-white font-bold py-2 rounded-lg text-[13px] transition-colors">
+                    {savingTemplate ? 'Saving…' : templateForm.id ? 'Update' : 'Add Template'}
+                  </button>
+                  {templateForm.id && <button type="button" onClick={() => setTemplateForm({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] })} className="px-4 py-2 bg-[#f0f2f5] hover:bg-[#e4e6eb] text-[#606770] font-semibold rounded-lg text-[13px] transition-colors">Cancel</button>}
+                </div>
+              </form>
+              <div className="space-y-2">
+                {templates.map(t => (
+                  <div key={t.id} className="flex items-start gap-3 p-3 bg-[#f0f2f5] rounded-xl">
+                    <LayoutTemplate size={14} className="text-[#1877f2] flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-bold text-[#1c1e21]">{t.name}</p>
+                      <p className="text-[12px] text-[#606770] truncate">{t.content}</p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => setTemplateForm({ id: t.id, name: t.name, content: t.content, category: t.category || 'general', language: t.language || 'en', variables: t.variables || [] })} className="p-1.5 hover:bg-white rounded-lg text-[#8a8d91] transition-colors"><Edit2 size={13} /></button>
+                      <button onClick={() => handleDeleteTemplate(t.id)} className="p-1.5 hover:bg-rose-50 rounded-lg text-[#8a8d91] hover:text-rose-500 transition-colors"><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
+

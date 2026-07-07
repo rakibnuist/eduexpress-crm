@@ -2718,8 +2718,9 @@ app.get('/api/events', (req, res) => {
 
 // Broadcast to every connected client. Optional `filter(user)` decides whether
 // to send to a given client — used to scope notifications by role/consultant.
+// IMPORTANT: We send `event: <type>` so browser EventSource named listeners fire.
 function broadcast(type, data, filter = null) {
-  const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
+  const msg = `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
   sseClients.forEach((client, id) => {
     if (filter && !filter(client.user)) return;
     try {
