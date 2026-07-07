@@ -280,6 +280,36 @@ export default function Conversations({ user }) {
     }
   }, [search, toast, loadMessages]);
 
+  const refreshConversationsBackground = useCallback(async () => {
+    try {
+      const p = { status: 'all', limit: 200, search: search.trim() || undefined };
+      const res = await api.conversations(p);
+      if (res?.conversations) {
+        setConversations(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(res.conversations)) return prev;
+          return res.conversations;
+        });
+      }
+      const curr = selectedConvRef.current;
+      if (curr) {
+        const msgs = await api.messages(curr.id);
+        if (msgs) {
+          setMessages(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(msgs)) return prev;
+            return msgs;
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Background refresh error:', err);
+    }
+  }, [search]);
+
+  const refreshBgRef = useRef(refreshConversationsBackground);
+  useEffect(() => {
+    refreshBgRef.current = refreshConversationsBackground;
+  }, [refreshConversationsBackground]);
+
   const handleRefresh = useCallback(async () => {
     const curr = selectedConvRef.current;
     if (curr && curr.channel_id) {
@@ -423,7 +453,7 @@ export default function Conversations({ user }) {
             if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
             setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
           } else if (event && event.type === 'sync_done') {
-            loadConversations();
+            refreshBgRef.current();
           }
         } catch (err) {
           if (!activeLongPoll) break;
