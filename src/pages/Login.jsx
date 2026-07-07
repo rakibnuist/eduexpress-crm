@@ -18,17 +18,24 @@ export default function Login({ onSuccess }) {
     let loc = null;
     let geoError = null;
     if (navigator.geolocation) {
-      loc = await new Promise(resolve => {
-        navigator.geolocation.getCurrentPosition(
-          p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          err => {
-            console.error('Geolocation error:', err);
-            geoError = err;
-            resolve(null);
-          },
-          { timeout: 15000, maximumAge: 60000, enableHighAccuracy: true }
-        );
+      const getPosition = (opts) => new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, opts);
       });
+      try {
+        // Try high accuracy first with a shorter 6-second timeout
+        const pos = await getPosition({ timeout: 6000, maximumAge: 60000, enableHighAccuracy: true });
+        loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      } catch (err) {
+        console.warn('[geolocation] High accuracy failed, retrying with low accuracy:', err.message || err);
+        try {
+          // Fallback to low accuracy (uses IP-lookup and is much more reliable on desktops/laptops)
+          const pos = await getPosition({ timeout: 10000, maximumAge: 60000, enableHighAccuracy: false });
+          loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        } catch (err2) {
+          console.error('[geolocation] Low accuracy fallback failed:', err2.message || err2);
+          geoError = err2;
+        }
+      }
     }
 
     if (!loc) {
