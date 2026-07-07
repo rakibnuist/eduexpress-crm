@@ -212,11 +212,15 @@ export const api = {
   getConversation: (id)      => req(`/conversations/${id}`),
   updateConversation:(id, d) => req(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   markConversationAsRead:(id) => req(`/conversations/${id}/read`, { method: 'POST' }),
+  markConversationAsUnread:(id) => req(`/conversations/${id}/unread`, { method: 'POST' }),
   createConversation:(d)     => req('/conversations', { method: 'POST', body: JSON.stringify(d) }),
   deleteConversation:(id)    => req(`/conversations/${id}`, { method: 'DELETE' }),
   messages:        (convId)  => req(`/conversations/${convId}/messages`),
   sendMessage:     (convId, d)=> req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
   quickReplies:    ()        => req('/quick-replies'),
+  createQuickReply:(d)       => req('/quick-replies', { method: 'POST', body: JSON.stringify(d) }),
+  updateQuickReply:(id, d)   => req(`/quick-replies/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteQuickReply:(id)      => req(`/quick-replies/${id}`, { method: 'DELETE' }),
   convertLead:     (convId, d)=> req(`/conversations/${convId}/convert-lead`, { method: 'POST', body: JSON.stringify(d) }),
 
   // Marketing / social automation

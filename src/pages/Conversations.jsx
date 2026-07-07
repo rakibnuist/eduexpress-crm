@@ -10,8 +10,9 @@ import {
   Paperclip, Smile, FileText, X, ChevronRight, Info, Hash, Calendar, Inbox,
   Star, Tag, Plus, ClipboardList, UserPlus, Loader2, Music, Clock,
   Filter, ArrowLeft, Bell, LayoutTemplate,
-  ChevronDown, Menu as MenuIcon
+  ChevronDown, Menu as MenuIcon, Zap, Edit2
 } from 'lucide-react';
+import EmojiPicker from 'emoji-picker-react';
 import { timeAgo, initials, formatLastMessageTime, toDate, getDhakaDateParts } from '../lib/format';
 
 /* ── helpers ── */
@@ -72,6 +73,15 @@ export default function Conversations({ user }) {
   const [messages, setMessages] = useState([]);
   const [channels, setChannels] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [showQuickReplyPicker, setShowQuickReplyPicker] = useState(false);
+  const [quickReplySearch, setQuickReplySearch] = useState('');
+  const [showQuickReplyModal, setShowQuickReplyModal] = useState(false);
+  const [quickReplyForm, setQuickReplyForm] = useState({ id: null, title: '', content: '', category: '' });
+  const [savingQuickReply, setSavingQuickReply] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [templateForm, setTemplateForm] = useState({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] });
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [allTags, setAllTags] = useState([]);
 
@@ -91,6 +101,7 @@ export default function Conversations({ user }) {
   const [lightboxImage, setLightboxImage] = useState(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const [showContactPanel, setShowContactPanel] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -100,6 +111,12 @@ export default function Conversations({ user }) {
   const [contactTags, setContactTags] = useState([]);
   const [newNote, setNewNote] = useState('');
   const [showTagPicker, setShowTagPicker] = useState(false);
+  const [newLeadDestination, setNewLeadDestination] = useState('Bangladesh');
+
+  const selectedConvRef = useRef(null);
+  useEffect(() => {
+    selectedConvRef.current = selectedConv;
+  }, [selectedConv]);
   const [addingNote, setAddingNote] = useState(false);
 
   const [showMobileDrawer, setShowMobileDrawer] = useState(false);
@@ -292,6 +309,7 @@ export default function Conversations({ user }) {
   useEffect(() => {
     api.channels().then(setChannels).catch(() => {});
     api.templates().then(setTemplates).catch(() => {});
+    api.quickReplies().then(setQuickReplies).catch(() => {});
     api.employees().then(setEmployees).catch(() => {});
   }, []);
   useEffect(() => { loadConversations(); }, [loadConversations]);
@@ -306,16 +324,24 @@ export default function Conversations({ user }) {
   }, [selectedConv, silentRefresh, silentRefreshMessages]);
 
   useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 112)}px`;
+    }
+  }, [replyText]);
+
+  useEffect(() => {
     const es = new EventSource('/api/events', { withCredentials: true });
     es.addEventListener('new_message', (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (selectedConv && data.conversation_id === selectedConv.id) {
+        const currConv = selectedConvRef.current;
+        if (currConv && data.conversation_id === currConv.id) {
           setMessages(prev => {
             if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
             return [...prev, data];
           });
-          api.markConversationAsRead(selectedConv.id).catch(() => {});
+          api.markConversationAsRead(currConv.id).catch(() => {});
           setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
         }
         setConversations(prev => {
@@ -327,10 +353,10 @@ export default function Conversations({ user }) {
             return prev;
           }
           const updated = [...prev];
-          updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (selectedConv && selectedConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
+          updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (currConv && currConv.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
           return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
         });
-        if (!selectedConv || selectedConv.id !== data.conversation_id) {
+        if (!currConv || currConv.id !== data.conversation_id) {
           const meta = getChannelMeta(data.channel_type || 'whatsapp');
           toast.info(`New ${meta.label} message`, { duration: 3000 });
         }
@@ -339,19 +365,19 @@ export default function Conversations({ user }) {
     es.addEventListener('message_status', (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (selectedConv) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+        if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
       } catch (err) { console.error('SSE message_status error:', err); }
     });
     es.addEventListener('conversation_deleted', (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (selectedConv && selectedConv.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+        if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
         setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
       } catch (err) { console.error('SSE conversation_deleted error:', err); }
     });
     es.onerror = (err) => { console.error('SSE error:', err); };
     return () => { es.close(); };
-  }, [selectedConv, toast]);
+  }, [toast]);
 
   useEffect(() => {
     if (leadTab === 'link' && leadSearch.trim().length >= 2) {
@@ -441,6 +467,37 @@ export default function Conversations({ user }) {
     catch (err) { toast.error('Failed: ' + err.message); } finally { setUpdatingConv(false); }
   };
 
+  const handleMarkAsUnread = async (e, conv) => {
+    e.stopPropagation();
+    try {
+      await api.markConversationAsUnread(conv.id);
+      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 1 } : c));
+      toast.success('Marked as unread');
+    } catch (err) { toast.error('Failed: ' + err.message); }
+  };
+
+  const handleMarkAsRead = async (e, conv) => {
+    e.stopPropagation();
+    try {
+      await api.markConversationAsRead(conv.id);
+      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, unread_count: 0 } : c));
+      toast.success('Marked as read');
+    } catch (err) { toast.error('Failed: ' + err.message); }
+  };
+
+  const handleToggleArchiveItem = async (e, conv) => {
+    e.stopPropagation();
+    const nextStatus = conv.status === 'archived' ? 'open' : 'archived';
+    try {
+      await api.updateConversation(conv.id, { status: nextStatus });
+      toast.success(`Conversation ${nextStatus === 'archived' ? 'archived' : 'reopened'}`);
+      setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, status: nextStatus } : c));
+      if (selectedConv?.id === conv.id && nextStatus === 'archived') {
+        setSelectedConv(null);
+      }
+    } catch (err) { toast.error('Failed: ' + err.message); }
+  };
+
   const handleAddNote = async () => {
     if (!newNote.trim() || !selectedConv) return;
     setAddingNote(true);
@@ -460,14 +517,94 @@ export default function Conversations({ user }) {
     catch (err) { toast.error('Failed: ' + err.message); }
   };
 
+  const handleOpenLeadModal = () => {
+    setLeadTab('new');
+    if (selectedConv?.channel_name?.toLowerCase().includes('china')) {
+      setNewLeadDestination('China');
+    } else {
+      setNewLeadDestination('Bangladesh');
+    }
+    setShowLeadModal(true);
+  };
+
   const handleConvertLead = async () => {
     if (!selectedConv) return;
     setConvertingLead(true);
     try {
-      if (leadTab === 'new') { const res = await api.convertLead(selectedConv.id, {}); toast.success('Lead created'); setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c)); }
+      if (leadTab === 'new') { const res = await api.convertLead(selectedConv.id, { destination: newLeadDestination }); toast.success('Lead created'); setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c)); }
       else if (selectedExistingLead) { await api.convertLead(selectedConv.id, { lead_id: selectedExistingLead.id }); toast.success('Linked to lead'); setSelectedConv(p => ({ ...p, lead_id: selectedExistingLead.id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: selectedExistingLead.id } : c)); setSelectedExistingLead(null); setLeadSearch(''); }
       setShowLeadModal(false);
     } catch (e) { toast.error(e.message); } finally { setConvertingLead(false); }
+  };
+
+  const handleSelectQuickReply = (qr) => {
+    setReplyText(prev => prev + (prev ? '\n' : '') + qr.content);
+    setShowQuickReplyPicker(false);
+    setTimeout(() => textareaRef.current?.focus(), 10);
+  };
+
+  const handleSaveQuickReply = async (e) => {
+    e.preventDefault();
+    setSavingQuickReply(true);
+    try {
+      if (quickReplyForm.id) {
+        await api.updateQuickReply(quickReplyForm.id, quickReplyForm);
+        toast.success('Quick reply updated!');
+      } else {
+        await api.createQuickReply(quickReplyForm);
+        toast.success('Quick reply added!');
+      }
+      const all = await api.quickReplies();
+      setQuickReplies(all);
+      setQuickReplyForm({ id: null, title: '', content: '', category: '' });
+    } catch (err) {
+      toast.error('Failed to save quick reply: ' + err.message);
+    } finally {
+      setSavingQuickReply(false);
+    }
+  };
+
+  const handleDeleteQuickReply = async (id) => {
+    if (!window.confirm('Delete this quick reply?')) return;
+    try {
+      await api.deleteQuickReply(id);
+      setQuickReplies(prev => prev.filter(q => q.id !== id));
+      toast.success('Quick reply deleted');
+    } catch (err) {
+      toast.error('Failed to delete quick reply: ' + err.message);
+    }
+  };
+
+  const handleSaveTemplate = async (e) => {
+    e.preventDefault();
+    setSavingTemplate(true);
+    try {
+      if (templateForm.id) {
+        const res = await api.updateTemplate(templateForm.id, templateForm);
+        setTemplates(prev => prev.map(t => t.id === templateForm.id ? res : t));
+        toast.success('Template updated');
+      } else {
+        const res = await api.createTemplate(templateForm);
+        setTemplates(prev => [...prev, res]);
+        toast.success('Template added');
+      }
+      setTemplateForm({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] });
+    } catch (err) {
+      toast.error('Failed to save template: ' + err.message);
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (id) => {
+    if (!window.confirm('Delete this template?')) return;
+    try {
+      await api.deleteTemplate(id);
+      setTemplates(prev => prev.filter(t => t.id !== id));
+      toast.success('Template deleted');
+    } catch (err) {
+      toast.error('Failed to delete template: ' + err.message);
+    }
   };
 
   const handleSelectTemplate = (t) => {
@@ -592,30 +729,12 @@ export default function Conversations({ user }) {
           })}
         </div>
 
-        {/* Search + Filter + Refresh */}
+        {/* Search + Refresh */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="relative hidden md:block">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
-            <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
+          <div className="hidden md:block relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+            <input type="text" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)}
               className="w-48 bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/15 focus:border-blue-500 transition-all placeholder-slate-400" />
-          </div>
-          <div className="relative">
-            <button onClick={() => setFilterDropdownOpen(o => !o)} className={`p-2 rounded-lg transition-colors ${filterDropdownOpen ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}>
-              <Filter size={15} />
-            </button>
-            {filterDropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setFilterDropdownOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 min-w-[180px] py-1">
-                  {FILTERS.map(f => (
-                    <button key={f.key} onClick={() => { setStatusFilter(f.key); setFilterDropdownOpen(false); }}
-                      className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-50 transition-colors ${statusFilter === f.key ? 'font-bold text-blue-700 bg-blue-50/50' : 'text-slate-600'}`}>
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
           <button onClick={loadConversations} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors" title="Refresh">
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -629,7 +748,7 @@ export default function Conversations({ user }) {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── CHANNEL SIDEBAR ── */}
-        <div className={`${sidebarCollapsed ? 'w-16' : 'w-56'} bg-slate-50 border-r border-slate-200 flex-shrink-0 flex flex-col transition-all duration-200 z-10`}>
+        <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} ${sidebarCollapsed ? 'w-16' : 'w-56'} bg-slate-50 border-r border-slate-200 flex-shrink-0 flex flex-col transition-all duration-200 z-10`}>
           {/* Sidebar header */}
           <div className="h-11 flex items-center justify-between px-3 border-b border-slate-200/80 flex-shrink-0">
             {!sidebarCollapsed && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Channels</p>}
@@ -762,14 +881,41 @@ export default function Conversations({ user }) {
           </div>
         </div>
 
-        {/* ── CONVERSATION LIST ── */}
-        <div className={`${selectedConv ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-88 flex-col bg-white border-r border-slate-200 flex-shrink-0`}>
+        <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} w-full md:w-80 lg:w-88 flex-col bg-white border-r border-slate-200 flex-shrink-0`}>
           {/* Mobile search */}
           <div className="p-2 md:hidden">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
               <input type="text" placeholder="Search conversations…" value={search} onChange={e => setSearch(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/15 focus:border-blue-500 transition-all placeholder-slate-400" />
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="px-3 pt-2 pb-2 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-shrink-0">
+            {FILTERS.slice(0, 4).map(f => (
+              <button key={f.key} onClick={() => setStatusFilter(f.key)}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${statusFilter === f.key ? 'bg-blue-100 text-blue-700 shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                {f.label}
+              </button>
+            ))}
+            <div className="relative">
+              <button onClick={() => setFilterDropdownOpen(o => !o)} className={`p-1.5 rounded-full transition-all flex items-center justify-center min-w-[28px] ${filterDropdownOpen ? 'bg-blue-100 text-blue-700 shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                <Filter size={13} />
+              </button>
+              {filterDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setFilterDropdownOpen(false)} />
+                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 min-w-[180px] py-1">
+                    {FILTERS.slice(4).map(f => (
+                      <button key={f.key} onClick={() => { setStatusFilter(f.key); setFilterDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors ${statusFilter === f.key ? 'font-bold text-blue-700 bg-blue-50/50' : 'text-slate-600 hover:bg-slate-50'}`}>
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -792,7 +938,7 @@ export default function Conversations({ user }) {
                 const sla = getSlaColor(conv.last_message_at);
                 return (
                     <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
-                      className={`mx-2 my-1 px-3 py-3 flex gap-3 transition-all duration-150 outline-none rounded-xl border ${isSel ? 'bg-blue-50/85 border-blue-100/80 shadow-sm text-blue-900' : 'bg-white hover:bg-slate-50/60 border-transparent'}`}>
+                      className={`group mx-2 my-1 px-3 py-3 flex gap-3 transition-all duration-150 outline-none rounded-xl border relative ${isSel ? 'bg-blue-50/85 border-blue-100/80 shadow-sm text-blue-900' : 'bg-white hover:bg-slate-50/60 border-transparent'}`}>
                       <div className="relative flex-shrink-0">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-sm bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>
                           {initials(conv.contact_name || 'C')}
@@ -807,12 +953,14 @@ export default function Conversations({ user }) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <p className={`text-xs truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
-                              {conv.contact_name || conv.contact_phone || 'Contact'}
+                            <p className={`text-xs flex items-center gap-1.5 truncate ${conv.unread_count > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
+                              {conv.unread_count > 0 && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 shadow-sm" title="Unread" />}
+                              <span className="truncate">{conv.contact_name || conv.contact_phone || 'Contact'}</span>
                             </p>
                             {conv.assigned_to && (
-                              <span className="text-[8px] text-blue-600 font-medium flex-shrink-0 truncate max-w-[60px]">
-                                {initials(conv.assigned_to)}
+                              <span className="flex items-center gap-0.5 text-[9px] text-blue-700 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md font-bold flex-shrink-0 shadow-sm" title={`Assigned to: ${conv.assigned_to}`}>
+                                <User size={9} className="text-blue-500" />
+                                <span className="truncate max-w-[50px]">{conv.assigned_to.split(' ')[0]}</span>
                               </span>
                             )}
                           </div>
@@ -825,7 +973,7 @@ export default function Conversations({ user }) {
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 mt-0.5">
+                        <div className="flex items-center gap-1 mt-0.5 pr-8">
                           {conv.last_message_direction === 'out' && !conv.unread_count && (
                             conv.last_message_status === 'read' ? <CheckCheck size={11} className="text-sky-400 flex-shrink-0" /> :
                             conv.last_message_status === 'failed' ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" /> :
@@ -849,6 +997,22 @@ export default function Conversations({ user }) {
                           )}
                         </div>
                       </div>
+
+                      {/* Hover Quick Actions */}
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-white/95 shadow-sm border border-slate-200/60 rounded-xl px-1 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {conv.unread_count > 0 ? (
+                          <button onClick={(e) => handleMarkAsRead(e, conv)} title="Mark as Read" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors">
+                            <CheckCircle size={14} />
+                          </button>
+                        ) : (
+                          <button onClick={(e) => handleMarkAsUnread(e, conv)} title="Mark as Unread" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors">
+                            <MessageSquare size={14} />
+                          </button>
+                        )}
+                        <button onClick={(e) => handleToggleArchiveItem(e, conv)} title={conv.status === 'archived' ? 'Reopen' : 'Archive'} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-colors">
+                          <Archive size={14} />
+                        </button>
+                      </div>
                     </button>
                 );
               })
@@ -863,7 +1027,7 @@ export default function Conversations({ user }) {
               {/* Chat Header */}
               <div className="h-14 px-4 bg-white flex items-center justify-between border-b border-slate-100 shadow-sm z-10 flex-shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
-                  <button onClick={() => setSelectedConv(null)} className="md:hidden p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                  <button onClick={() => setSelectedConv(null)} className="xl:hidden p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
                     <ArrowLeft size={18} />
                   </button>
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>
@@ -887,14 +1051,14 @@ export default function Conversations({ user }) {
                       {selectedConv.lead_id ? (
                         <><span className="text-slate-300">·</span><Link to={`/leads/${selectedConv.lead_id}`} className="text-blue-600 hover:underline inline-flex items-center gap-0.5 font-semibold">Lead #{selectedConv.lead_id} <ExternalLink size={9} /></Link></>
                       ) : (
-                        <><span className="text-slate-300">·</span><button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }} className="text-amber-600 hover:text-amber-700 font-semibold cursor-pointer">+ Convert to Lead</button></>
+                        <><span className="text-slate-300">·</span><button onClick={handleOpenLeadModal} className="text-amber-600 hover:text-amber-700 font-semibold cursor-pointer">+ Convert to Lead</button></>
                       )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {!selectedConv.lead_id ? (
-                    <button onClick={() => { setLeadTab('new'); setShowLeadModal(true); }}
+                    <button onClick={handleOpenLeadModal}
                       className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm">
                       <User size={13} />
                       <span>Add to Lead</span>
@@ -911,7 +1075,7 @@ export default function Conversations({ user }) {
                     <Star size={16} />
                   </button>
                   <button onClick={() => setShowContactPanel(p => !p)} title="Contact info"
-                    className={`hidden lg:flex p-2 rounded-lg transition-colors cursor-pointer ${showContactPanel ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
+                    className={`hidden xl:flex p-2 rounded-lg transition-colors cursor-pointer ${showContactPanel ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
                     <Info size={16} />
                   </button>
                   <button onClick={() => handleToggleArchive(selectedConv)} title={selectedConv.status === 'archived' ? 'Reopen' : 'Archive'}
@@ -1014,8 +1178,33 @@ export default function Conversations({ user }) {
                   </div>
 
                   {/* Templates */}
-                  {templates.length > 0 && (
-                    <div className="px-4 py-2 bg-white/80 border-t border-slate-100 flex items-center gap-2 overflow-x-auto scrollbar-none">
+                  {/* Quick Replies & Templates */}
+                  <div className="px-4 py-2 bg-white/80 border-t border-slate-100 flex items-center gap-4 overflow-x-auto scrollbar-none">
+                    {/* Quick Replies */}
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setShowQuickReplyPicker(o => !o)} className="text-[10px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors shadow-sm">
+                        <Zap size={12} className="fill-amber-500 text-amber-500" /> Quick Replies
+                      </button>
+                      {showQuickReplyPicker && (
+                        <div className="relative flex items-center gap-2">
+                          <input type="text" placeholder="Search replies…" value={quickReplySearch} onChange={e => setQuickReplySearch(e.target.value)}
+                            className="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-500/20" />
+                          <button onClick={() => { setShowQuickReplyPicker(false); setShowQuickReplyModal(true); }}
+                            className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-amber-500 hover:text-amber-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
+                            Manage
+                          </button>
+                          {quickReplies.filter(q => (q.title || '').toLowerCase().includes(quickReplySearch.toLowerCase())).slice(0, 5).map(q => (
+                            <button key={q.id} onClick={() => handleSelectQuickReply(q)} title={q.content}
+                              className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-amber-500 hover:text-amber-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
+                              {q.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Templates */}
+                    <div className="flex items-center gap-2 pl-4 border-l border-slate-200">
                       <button onClick={() => setShowTemplatePicker(o => !o)} className="text-[10px] font-bold text-slate-400 flex items-center gap-1 whitespace-nowrap hover:text-blue-600 transition-colors">
                         <LayoutTemplate size={11} /> Templates
                       </button>
@@ -1023,6 +1212,10 @@ export default function Conversations({ user }) {
                         <div className="relative flex items-center gap-2">
                           <input type="text" placeholder="Search templates…" value={templateSearch} onChange={e => setTemplateSearch(e.target.value)}
                             className="w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500/20" />
+                          <button onClick={() => { setShowTemplatePicker(false); setShowTemplateModal(true); }}
+                            className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-blue-500 hover:text-blue-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
+                            Manage
+                          </button>
                           {templates.filter(t => (t.name || '').toLowerCase().includes(templateSearch.toLowerCase())).slice(0, 5).map(t => (
                             <button key={t.id} onClick={() => handleSelectTemplate(t)} title={t.content}
                               className="text-[11px] font-semibold text-slate-600 bg-white border border-slate-200/80 px-3 py-1.5 rounded-lg hover:border-blue-500 hover:text-blue-600 whitespace-nowrap transition-all shadow-sm active:scale-95">
@@ -1032,7 +1225,7 @@ export default function Conversations({ user }) {
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
 
                   {/* Attachment preview */}
                   {selectedFile && (
@@ -1065,15 +1258,29 @@ export default function Conversations({ user }) {
                       className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0" aria-label="Attach file">
                       <Paperclip size={17} />
                     </button>
-                    <button type="button" onClick={() => setReplyText(p => p + '😊')} disabled={sending}
-                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0" aria-label="Add emoji">
-                      <Smile size={17} />
-                    </button>
+                    <div className="relative flex-shrink-0">
+                      <button type="button" onClick={() => setShowEmojiPicker(p => !p)} disabled={sending}
+                        className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors flex items-center justify-center" aria-label="Add emoji">
+                        <Smile size={17} />
+                      </button>
+                      {showEmojiPicker && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowEmojiPicker(false)} />
+                          <div className="absolute bottom-full left-0 mb-2 z-50 shadow-2xl rounded-2xl overflow-hidden border border-slate-200">
+                            <EmojiPicker onEmojiClick={(emojiData) => {
+                              setReplyText(p => p + emojiData.emoji);
+                              setShowEmojiPicker(false);
+                              textareaRef.current?.focus();
+                            }} width={300} height={350} searchDisabled={false} skinTonesDisabled />
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <textarea ref={textareaRef} value={replyText} onChange={e => setReplyText(e.target.value)}
                       placeholder={selectedFile ? 'Add a caption…' : 'Type a message…'}
                       rows={1}
                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                      className="flex-1 bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/60 resize-none max-h-28 scrollbar-thin placeholder-slate-400 transition-all" />
+                      className="flex-1 bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/60 resize-none max-h-28 scrollbar-thin placeholder-slate-400" />
                     <button type="submit" disabled={sending || uploading || (!replyText.trim() && !selectedFile)}
                       className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white p-2.5 rounded-xl shadow-md shadow-blue-500/15 transition-all flex-shrink-0 flex items-center justify-center active:scale-95" aria-label="Send message">
                       <Send size={15} />
@@ -1083,7 +1290,7 @@ export default function Conversations({ user }) {
 
                 {/* Right Panel — Contact Info */}
                 {showContactPanel && (
-                  <div className="hidden lg:flex w-72 border-l border-slate-200/80 bg-white flex-col overflow-y-auto scrollbar-thin flex-shrink-0">
+                  <div className="hidden xl:flex w-72 border-l border-slate-200/80 bg-white flex-col overflow-y-auto scrollbar-thin flex-shrink-0">
                     <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                       <p className="text-xs font-bold text-slate-700">Contact Details</p>
                       <button onClick={() => setShowContactPanel(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={13} /></button>
@@ -1317,6 +1524,109 @@ export default function Conversations({ user }) {
         </div>
       )}
 
+      {/* Quick Reply Modal */}
+      {showQuickReplyModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 border border-slate-100 max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Zap size={16} className="text-amber-500" /> Manage Quick Replies</h3>
+              <button onClick={() => setShowQuickReplyModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={16} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+              {quickReplies.map(qr => (
+                <div key={qr.id} className="border border-slate-200 rounded-xl p-3 flex gap-4 hover:border-slate-300 transition-colors group">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-700 text-xs mb-1">{qr.title}</p>
+                    <p className="text-slate-500 text-[11px] whitespace-pre-wrap">{qr.content}</p>
+                  </div>
+                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setQuickReplyForm(qr)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={14} /></button>
+                    <button onClick={() => handleDeleteQuickReply(qr.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+              {quickReplies.length === 0 && (
+                <div className="text-center py-8 text-slate-400 text-xs font-semibold">No quick replies yet. Create one below!</div>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveQuickReply} className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+              <h4 className="font-bold text-slate-700 text-xs">{quickReplyForm.id ? 'Edit Quick Reply' : 'Add New Quick Reply'}</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <input type="text" placeholder="Title (e.g. Greeting)" required value={quickReplyForm.title} onChange={e => setQuickReplyForm(f => ({...f, title: e.target.value}))}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
+                <input type="text" placeholder="Category (optional)" value={quickReplyForm.category || ''} onChange={e => setQuickReplyForm(f => ({...f, category: e.target.value}))}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
+              </div>
+              <textarea placeholder="Message content..." required value={quickReplyForm.content} onChange={e => setQuickReplyForm(f => ({...f, content: e.target.value}))} rows={3}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-none" />
+              <div className="flex justify-end gap-2">
+                {quickReplyForm.id && (
+                  <button type="button" onClick={() => setQuickReplyForm({ id: null, title: '', content: '', category: '' })} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Cancel Edit</button>
+                )}
+                <button type="submit" disabled={savingQuickReply} className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors disabled:opacity-50">
+                  {savingQuickReply ? 'Saving...' : (quickReplyForm.id ? 'Update Reply' : 'Add Reply')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Templates Modal */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 border border-slate-100 max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><LayoutTemplate size={16} className="text-blue-600" /> Manage Templates</h3>
+              <button onClick={() => setShowTemplateModal(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"><X size={16} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+              {templates.map(t => (
+                <div key={t.id} className="border border-slate-200 rounded-xl p-3 flex gap-4 hover:border-slate-300 transition-colors group">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-bold text-slate-700 text-xs">{t.name}</p>
+                      <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium">{t.category}</span>
+                    </div>
+                    <p className="text-slate-500 text-[11px] whitespace-pre-wrap">{t.content}</p>
+                  </div>
+                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setTemplateForm(t)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={14} /></button>
+                    <button onClick={() => handleDeleteTemplate(t.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+              {templates.length === 0 && (
+                <div className="text-center py-8 text-slate-400 text-xs font-semibold">No templates yet. Create one below!</div>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveTemplate} className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+              <h4 className="font-bold text-slate-700 text-xs">{templateForm.id ? 'Edit Template' : 'Add New Template'}</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <input type="text" placeholder="Template Name (e.g. Follow-up)" required value={templateForm.name} onChange={e => setTemplateForm(f => ({...f, name: e.target.value}))}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                <input type="text" placeholder="Category (e.g. general)" value={templateForm.category || ''} onChange={e => setTemplateForm(f => ({...f, category: e.target.value}))}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+              </div>
+              <textarea placeholder="Template content..." required value={templateForm.content} onChange={e => setTemplateForm(f => ({...f, content: e.target.value}))} rows={3}
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none" />
+              <div className="flex justify-end gap-2">
+                {templateForm.id && (
+                  <button type="button" onClick={() => setTemplateForm({ id: null, name: '', content: '', category: 'general', language: 'en', variables: [] })} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Cancel Edit</button>
+                )}
+                <button type="submit" disabled={savingTemplate} className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors disabled:opacity-50">
+                  {savingTemplate ? 'Saving...' : (templateForm.id ? 'Update Template' : 'Add Template')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Convert to Lead Modal */}
       {showLeadModal && selectedConv && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1336,9 +1646,20 @@ export default function Conversations({ user }) {
             {leadTab === 'new' ? (
               <div className="flex flex-col gap-3.5">
                 <p className="text-xs text-slate-500">Create a new CRM lead for <strong className="text-slate-700">{selectedConv.contact_name || 'this contact'}</strong> via {selectedConv.channel_type}.</p>
-                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 flex flex-col gap-2 text-xs">
-                  <div className="flex justify-between"><span className="text-slate-400">Name</span> <span className="font-bold text-slate-700">{selectedConv.contact_name || 'N/A'}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Phone</span> <span className="font-bold text-slate-700">{selectedConv.contact_phone || 'N/A'}</span></div>
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 flex flex-col gap-3 text-xs">
+                  <div className="flex justify-between items-center"><span className="text-slate-400">Name</span> <span className="font-bold text-slate-700">{selectedConv.contact_name || 'N/A'}</span></div>
+                  <div className="flex justify-between items-center"><span className="text-slate-400">Phone</span> <span className="font-bold text-slate-700">{selectedConv.contact_phone || 'N/A'}</span></div>
+                  
+                  {/* Destination Selection */}
+                  <div className="pt-2 border-t border-slate-200/60 mt-1 flex flex-col gap-1.5">
+                    <label className="text-slate-500 font-medium">Destination</label>
+                    <select value={newLeadDestination} onChange={e => setNewLeadDestination(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-blue-500 font-semibold text-slate-800">
+                      {['Bangladesh', 'China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand', 'Cyprus'].map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <button type="button" disabled={convertingLead} onClick={handleConvertLead}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 transition-colors">

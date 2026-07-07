@@ -2943,7 +2943,7 @@ function upsertConversation(contactId, channelId, channelType) {
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 
-function createLeadFromContact(contactId, source, initialMessage, creatorUser) {
+function createLeadFromContact(contactId, source, initialMessage, creatorUser, destination = 'Bangladesh') {
   try {
     const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
     if (!contact || contact.lead_id) return null;
@@ -2990,7 +2990,7 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser) {
       client_name,
       phone,
       email,
-      destination: 'Bangladesh',
+      destination,
       source: 'In-House',
       lead_source: leadSourceMap[source] || 'Chat',
       lead_status: 'New Lead',
@@ -5901,7 +5901,7 @@ app.get('/api/conversations/:id', (req, res) => {
 app.post('/api/conversations/:id/convert-lead', (req, res) => {
   try {
     if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
-    const { lead_id } = req.body;
+    const { lead_id, destination } = req.body;
     if (!userHasAccessToConversation(req.user, req.params.id)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -5926,7 +5926,7 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
       }
     } else {
       // Create new lead
-      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user);
+      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user, destination);
       if (!lead) return res.status(500).json({ error: 'Failed to create lead' });
     }
 
@@ -6117,6 +6117,15 @@ app.post('/api/conversations/:id/read', (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
   db.prepare("UPDATE conversations SET unread_count=0 WHERE id=?").run(req.params.id);
+  res.json({ ok:true });
+});
+
+// Mark conversation unread
+app.post('/api/conversations/:id/unread', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  db.prepare("UPDATE conversations SET unread_count=1 WHERE id=?").run(req.params.id);
   res.json({ ok:true });
 });
 
@@ -6717,7 +6726,7 @@ app.get('/api/templates', (req, res) => requireManagerOrAdmin(req, res, () => {
   }));
 }));
 
-app.post('/api/templates', (req, res) => requireAdmin(req, res, () => {
+app.post('/api/templates', (req, res) => {
   const { name, category, language, content, variables, approved } = req.body || {};
   if (!name || !content) return res.status(400).json({ error: 'name and content are required' });
   const info = db.prepare(`INSERT INTO message_templates (name, category, language, content, variables, approved)
@@ -6725,9 +6734,9 @@ app.post('/api/templates', (req, res) => requireAdmin(req, res, () => {
   const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(info.lastInsertRowid);
   try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
   res.json(r);
-}));
+});
 
-app.put('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
+app.put('/api/templates/:id', (req, res) => {
   const { name, category, language, content, variables, approved } = req.body || {};
   const cur = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
@@ -6736,12 +6745,12 @@ app.put('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
   const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
   try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
   res.json(r);
-}));
+});
 
-app.delete('/api/templates/:id', (req, res) => requireAdmin(req, res, () => {
+app.delete('/api/templates/:id', (req, res) => {
   db.prepare("DELETE FROM message_templates WHERE id=?").run(req.params.id);
   res.json({ ok: true });
-}));
+});
 
 // Contact Tags
 app.get('/api/tags', (req, res) => requireManagerOrAdmin(req, res, () => {
