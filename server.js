@@ -2505,7 +2505,7 @@ function runMigrations() {
 
   // Seed pre-built data from external module (keeps server.js small)
   try {
-    const seedData = require('./seed-data.js');
+    const seedData = require('./seed-data.cjs');
 
     // Seed templates
     const checkTmpl = db.prepare("SELECT COUNT(*) as c FROM message_templates");
