@@ -20,9 +20,11 @@ const STAGES = [
   { status: 'Not Interested', hex: '#f87171', col: 'bg-red-400',     border: 'border-red-400',     light: 'bg-red-50',      ring: 'ring-red-200/50' },
 ];
 
+import { canViewOwnLeadsOnly } from '../lib/roles';
+
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
-export default function Leads() {
+export default function Leads({ user }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlView = searchParams.get('view');
 
@@ -378,7 +380,9 @@ export default function Leads() {
               {view === 'table' && (
                 <FilterSelect value={filters.status} onChange={v => setFilter('status', v)} options={settings.leadStatuses} placeholder="All Statuses" />
               )}
-              <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
+              {!canViewOwnLeadsOnly(user) && (
+                <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
+              )}
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
               <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources} placeholder="All Sources" />
             </div>
@@ -823,7 +827,7 @@ export default function Leads() {
 
       {modal && (
         <Modal title={modal === 'add' ? '➕ Add New Lead' : `✏️ Edit Lead — ${modal.lead_id}`} onClose={() => setModal(null)} wide>
-          <LeadForm lead={modal === 'add' ? null : modal} settings={settings} onSave={() => { setModal(null); load(); }} />
+          <LeadForm user={user} lead={modal === 'add' ? null : modal} settings={settings} onSave={() => { setModal(null); load(); }} />
         </Modal>
       )}
 

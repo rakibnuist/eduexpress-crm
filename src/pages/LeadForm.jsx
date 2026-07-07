@@ -22,7 +22,9 @@ const mapStages = (stagesArray) => {
   });
 };
 
-export default function LeadForm({ lead, settings, onSave }) {
+import { canViewOwnLeadsOnly } from '../lib/roles';
+
+export default function LeadForm({ user, lead, settings, onSave }) {
   const [form, setForm] = useState(initial(lead));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
@@ -44,6 +46,20 @@ export default function LeadForm({ lead, settings, onSave }) {
   useEffect(() => {
     api.employeesActive().then(setEmployees).catch(() => setEmployees([]));
   }, []);
+
+  // Pre-fill consultant details if user can view own leads only
+  useEffect(() => {
+    if (!lead && user && canViewOwnLeadsOnly(user) && employees.length > 0) {
+      const meEmp = employees.find(e => String(e.emp_id) === String(user.emp_id));
+      if (meEmp) {
+        setForm(prev => ({
+          ...prev,
+          assigned_employee_id: String(meEmp.id),
+          assigned_consultant: meEmp.name
+        }));
+      }
+    }
+  }, [lead, user, employees]);
 
   // Auto-balance = fee - paid; show live but don't make it editable.
   const balance = useMemo(() => {
@@ -143,7 +159,7 @@ export default function LeadForm({ lead, settings, onSave }) {
         </Row>
         <Row>
           <EmployeeSelect label="Assigned consultant" value={form.assigned_employee_id || ''} onChange={v => set('assigned_employee_id', v)}
-            employees={employees} placeholder="— pick —" />
+            employees={employees} placeholder="— pick —" disabled={canViewOwnLeadsOnly(user)} />
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
         {(form.lead_status === 'File Opened' || form.lead_status === 'Enrolled') && (
@@ -332,14 +348,14 @@ function TextareaField({ label, value = '', onChange, placeholder, rows = 3 }) {
   );
 }
 
-function EmployeeSelect({ label, value = '', onChange, employees = [], placeholder = '— select —', required }) {
+function EmployeeSelect({ label, value = '', onChange, employees = [], placeholder = '— select —', required, disabled }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-600 mb-1">
         {label}{required && <span className="text-rose-500"> *</span>}
       </label>
-      <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required}
-        className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer">
+      <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required} disabled={disabled}
+        className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer disabled:bg-slate-50 disabled:text-slate-500">
         <option value="">{placeholder}</option>
         {employees.map(e => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
       </select>
