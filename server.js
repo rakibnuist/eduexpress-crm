@@ -8447,3 +8447,19 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   });
 }
+
+// Background loop to poll Facebook for new messages because webhooks are dropped in Development mode
+setInterval(async () => {
+  try {
+    if (!dbReady) return;
+    const channels = db.prepare("SELECT id, name, type FROM channels WHERE type IN ('messenger', 'instagram') AND active = 1").all();
+    for (const channel of channels) {
+      // Run a fast, 1-month sync in the background
+      await syncChannelMessages(channel.id, 1).catch(err => {
+        console.warn(`[sync-polling-loop] Sync failed for channel ${channel.name}:`, err.message);
+      });
+    }
+  } catch (err) {
+    console.error('[sync-polling-loop] Global error in background loop:', err.message);
+  }
+}, 15000);

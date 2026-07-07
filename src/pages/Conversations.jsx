@@ -424,6 +424,8 @@ export default function Conversations({ user }) {
             const data = event;
             if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
             setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
+          } else if (event && event.type === 'sync_done') {
+            loadConversations();
           }
         } catch (err) {
           if (!activeLongPoll) break;
