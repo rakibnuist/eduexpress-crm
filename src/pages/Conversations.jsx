@@ -343,48 +343,85 @@ export default function Conversations({ user }) {
     }
   }, [replyText]);
 
-  // ── Auto-reconnect SSE on any error/close ──────────────────────────────
+  // ── Auto-reconnect SSE + Polling fallback ──────────────────────────────
   useEffect(() => {
     let es = null;
     let reconnectTimer = null;
+    let pollTimer = null;
     let retryDelay = 2000;
+    let sseFailCount = 0;
+    let sseConnected = false;
     const MAX_DELAY = 30000;
+    const POLL_INTERVAL = 5000;
+    const SSE_FAIL_THRESHOLD = 3;
+
+    function handleNewMessageData(data) {
+      const currConv = selectedConvRef.current;
+      if (currConv && data.conversation_id === currConv.id) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
+          return [...prev, data];
+        });
+        api.markConversationAsRead(currConv.id).catch(() => {});
+        setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
+      }
+      setConversations(prev => {
+        const idx = prev.findIndex(c => c.id === data.conversation_id);
+        if (idx === -1) {
+          api.getConversation(data.conversation_id).then(conv => {
+            if (conv) setConversations(cur => cur.some(c => c.id === conv.id) ? cur : [conv, ...cur]);
+          }).catch(() => {});
+          return prev;
+        }
+        const currConv2 = selectedConvRef.current;
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], last_message: data.content || updated[idx].last_message, last_message_at: data.created_at || updated[idx].last_message_at, last_message_direction: data.direction === 'in' || data.direction === 'inbound' ? 'in' : 'out', unread_count: (currConv2 && currConv2.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
+        return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
+      });
+    }
+
+    // Polling fallback — refresh conversations and current messages
+    function startPolling() {
+      if (pollTimer) return;
+      console.log('[sync] SSE unavailable, falling back to polling every', POLL_INTERVAL, 'ms');
+      pollTimer = setInterval(async () => {
+        try {
+          const p = { status: 'all', limit: 200 };
+          const res = await api.conversations(p);
+          if (res?.conversations) {
+            setConversations(prev => {
+              if (JSON.stringify(prev.map(c=>c.id+':'+c.unread_count+':'+c.last_message_at)) !== JSON.stringify(res.conversations.map(c=>c.id+':'+c.unread_count+':'+c.last_message_at))) return res.conversations;
+              return prev;
+            });
+          }
+          const currConv = selectedConvRef.current;
+          if (currConv) {
+            const msgs = await api.messages(currConv.id);
+            if (msgs) {
+              setMessages(prev => {
+                if (prev.length !== msgs.length || (prev.length > 0 && prev[prev.length-1].id !== msgs[msgs.length-1]?.id)) return msgs;
+                return prev;
+              });
+            }
+          }
+        } catch (err) { /* silent */ }
+      }, POLL_INTERVAL);
+    }
+
+    function stopPolling() {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
 
     function connect() {
       if (es) { try { es.close(); } catch {} }
-      es = new EventSource('/api/events', { withCredentials: true });
+      try {
+        es = new EventSource('/api/events', { withCredentials: true });
+      } catch { sseFailCount = SSE_FAIL_THRESHOLD; startPolling(); return; }
 
-      es.addEventListener('connected', () => { retryDelay = 2000; });
+      es.addEventListener('connected', () => { retryDelay = 2000; sseFailCount = 0; sseConnected = true; stopPolling(); });
 
       es.addEventListener('new_message', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          const currConv = selectedConvRef.current;
-          if (currConv && data.conversation_id === currConv.id) {
-            setMessages(prev => {
-              if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
-              return [...prev, data];
-            });
-            api.markConversationAsRead(currConv.id).catch(() => {});
-            setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
-          } else {
-            const meta = getChannelMeta(data.channel_type || 'whatsapp');
-            toast.info(`New ${meta.label} message`, { duration: 3000 });
-          }
-          setConversations(prev => {
-            const idx = prev.findIndex(c => c.id === data.conversation_id);
-            if (idx === -1) {
-              api.getConversation(data.conversation_id).then(conv => {
-                if (conv) setConversations(cur => cur.some(c => c.id === conv.id) ? cur : [conv, ...cur]);
-              }).catch(() => {});
-              return prev;
-            }
-            const currConv2 = selectedConvRef.current;
-            const updated = [...prev];
-            updated[idx] = { ...updated[idx], last_message: data.content, last_message_at: data.created_at, unread_count: (currConv2 && currConv2.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
-            return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
-          });
-        } catch (err) { console.error('SSE new_message error:', err); }
+        try { handleNewMessageData(JSON.parse(e.data)); } catch (err) { console.error('SSE new_message error:', err); }
       });
 
       es.addEventListener('message_status', (e) => {
@@ -405,6 +442,11 @@ export default function Conversations({ user }) {
       es.onerror = () => {
         try { es.close(); } catch {}
         es = null;
+        sseConnected = false;
+        sseFailCount++;
+        if (sseFailCount >= SSE_FAIL_THRESHOLD) {
+          startPolling();
+        }
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
           retryDelay = Math.min(retryDelay * 1.5, MAX_DELAY);
@@ -414,8 +456,12 @@ export default function Conversations({ user }) {
     }
 
     connect();
+    // Also start polling immediately as a safety net — SSE will stop it once connected
+    const initialPollDelay = setTimeout(() => { if (!sseConnected) startPolling(); }, 3000);
     return () => {
+      clearTimeout(initialPollDelay);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      stopPolling();
       if (es) try { es.close(); } catch {}
     };
   }, [toast]);
@@ -720,7 +766,7 @@ export default function Conversations({ user }) {
 
   /* ── sidebar channel sections ── */
   const whatsappChannels = useMemo(() => {
-    const all = channels.filter(c => c.type === 'whatsapp');
+    const all = channels.filter(c => c.type === 'whatsapp' && c.active !== 0);
     if (isFullAccess) return all;
     if (isConsultant) return all.filter(c => isMyWhatsApp(c));
     return [];
@@ -730,18 +776,10 @@ export default function Conversations({ user }) {
     return channels.filter(c => c.type !== 'whatsapp' && c.active !== 0);
   }, [channels]);
 
-  const groupedChannels = useMemo(() => {
-    const groups = [];
-    const byType = {};
-    otherChannels.forEach(c => {
-      if (!byType[c.type]) byType[c.type] = [];
-      byType[c.type].push(c);
-    });
-    Object.entries(byType).forEach(([type, list]) => {
-      groups.push({ type, label: getChannelMeta(type).label, channels: list });
-    });
-    return groups;
-  }, [otherChannels]);
+  // All individual channels for sidebar listing
+  const allIndividualChannels = useMemo(() => {
+    return [...whatsappChannels, ...otherChannels];
+  }, [whatsappChannels, otherChannels]);
 
   /* ── render ── */
   return (
@@ -782,22 +820,29 @@ export default function Conversations({ user }) {
             );
           })}
 
-          {/* Per-channel sub-items */}
-          {!sidebarCollapsed && groupedChannels.map(group => (
-            <div key={group.type}>
-              {group.channels.length > 1 && group.channels.map(ch => {
+          {/* Individual channel sub-items (WhatsApp + Pages) */}
+          {!sidebarCollapsed && allIndividualChannels.length > 0 && (
+            <div className="mt-1 pt-1 border-t border-[#e4e6eb]">
+              {allIndividualChannels.map(ch => {
                 const isActive = channelTab === `channel_${ch.id}`;
                 const unread = unreadCounts.byId?.[ch.id] || 0;
+                const chMeta = getChannelMeta(ch.type);
                 return (
                   <button key={ch.id} onClick={() => setChannelTab(`channel_${ch.id}`)} title={ch.name}
-                    className={`w-full flex items-center gap-2 px-6 py-1.5 rounded-lg text-[12px] transition-all ${isActive ? 'bg-[#e7f3ff] text-[#1877f2] font-semibold' : 'text-[#606770] hover:bg-[#f0f2f5]'}`}>
+                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12px] transition-all ${isActive ? 'bg-[#e7f3ff] text-[#1877f2] font-semibold' : 'text-[#606770] hover:bg-[#f0f2f5]'}`}>
+                    <div className="relative flex-shrink-0">
+                      {ch.avatar_url
+                        ? <img src={ch.avatar_url} alt={ch.name} className="w-[28px] h-[28px] rounded-full object-cover" />
+                        : <div className={`w-[28px] h-[28px] rounded-full flex items-center justify-center text-white font-bold text-[10px] ${chMeta.bg}`}>{chMeta.icon}</div>
+                      }
+                    </div>
                     <span className="flex-1 text-left truncate">{ch.name}</span>
-                    {unread > 0 && <span className="bg-[#1877f2] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{unread}</span>}
+                    {unread > 0 && <span className="bg-[#1877f2] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{unread}</span>}
                   </button>
                 );
               })}
             </div>
-          ))}
+          )}
         </div>
       </div>
 
@@ -876,7 +921,14 @@ export default function Conversations({ user }) {
                 const countryFlag = getCountryEmoji(conv.lead_destination);
                 return (
                   <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
-                    className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${isSel ? 'bg-[#e7f3ff]' : 'hover:bg-[#f0f2f5]'}`}>
+                    className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${
+                      isSel ? 'bg-[#e7f3ff]'
+                      : isUnread ? 'bg-[#f0f7ff] hover:bg-[#e7f3ff]'
+                      : 'hover:bg-[#f0f2f5]'
+                    }`}>
+
+                    {/* Unread indicator bar */}
+                    {isUnread && <div className="absolute left-0 top-2 bottom-2 w-[3px] bg-[#1877f2] rounded-r-full" />}
 
                     {/* Avatar */}
                     <div className="relative flex-shrink-0 mt-0.5">
@@ -893,11 +945,11 @@ export default function Conversations({ user }) {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline justify-between gap-1">
-                        <span className={`text-[14px] truncate leading-tight ${isUnread ? 'font-bold text-[#1c1e21]' : 'font-semibold text-[#1c1e21]'}`}>
+                        <span className={`text-[14px] truncate leading-tight ${isUnread ? 'font-extrabold text-[#050505]' : 'font-medium text-[#65676b]'}`}>
                           {conv.contact_name || conv.contact_phone || 'Contact'}
                           {countryFlag && <span className="ml-1 text-[13px]">{countryFlag}</span>}
                         </span>
-                        <span className="text-[11px] text-[#8a8d91] whitespace-nowrap flex-shrink-0">{formatLastMessageTime(conv.last_message_at)}</span>
+                        <span className={`text-[11px] whitespace-nowrap flex-shrink-0 ${isUnread ? 'font-bold text-[#1877f2]' : 'text-[#8a8d91]'}`}>{formatLastMessageTime(conv.last_message_at)}</span>
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
                         {conv.last_message_direction === 'out' && (
@@ -907,11 +959,11 @@ export default function Conversations({ user }) {
                               ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" />
                               : <CheckCheck size={11} className="text-[#8a8d91] flex-shrink-0" />
                         )}
-                        <p className={`text-[12px] truncate flex-1 ${isUnread ? 'font-semibold text-[#1c1e21]' : 'text-[#606770]'}`}>
+                        <p className={`text-[12px] truncate flex-1 ${isUnread ? 'font-bold text-[#050505]' : 'font-normal text-[#65676b]'}`}>
                           {conv.last_message || 'No messages yet'}
                         </p>
                         {isUnread && (
-                          <span className="w-[18px] h-[18px] rounded-full bg-[#1877f2] text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+                          <span className="w-[20px] h-[20px] rounded-full bg-[#1877f2] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
                             {conv.unread_count}
                           </span>
                         )}
