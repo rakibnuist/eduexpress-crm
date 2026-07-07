@@ -13,6 +13,8 @@ const require = createRequire(import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
+console.log('[startup] Port detected:', PORT, 'type:', typeof PORT);
+console.log('[startup] Env keys:', Object.keys(process.env).join(', '));
 
 const PERSISTENT_HOME = '/home/u898266115';
 const LOCAL_DB_PATH = join(__dirname, 'crm.db');
