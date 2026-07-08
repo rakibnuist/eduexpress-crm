@@ -5099,16 +5099,14 @@ function logPayrollExpense(row) {
   });
 }
 
-// The fixed payroll whitelist — only these 5 employees appear in payroll
-const PAYROLL_WHITELIST = ['Abdullah Al Rakib', 'Sakib Al Jubaer', 'Tahmid Imam', 'Taj Ahmed', 'Afsana Meme'];
-
 // List payroll entries for a month (auto-creates rows for active employees if missing)
 app.get('/api/payroll', (req, res) => requireAdmin(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const wd = workingDaysInMonth(month);
-  // Only generate payroll for the 5 whitelisted employees who exist in the employees table
-  const allActive = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
-  const employees = allActive.filter(e => PAYROLL_WHITELIST.includes(e.name));
+  
+  // Generate payroll for all active employees
+  const employees = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  
   const ensure = db.prepare(`INSERT OR IGNORE INTO payroll
     (month, emp_id, name, base_salary, working_days, days_worked, net_pay)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -5121,9 +5119,10 @@ app.get('/api/payroll', (req, res) => requireAdmin(req, res, () => {
     recalc.run(present, wd, month, emp.emp_id, emp.name);
   }
 
-  // Only show rows for whitelisted employees
-  const placeholders = PAYROLL_WHITELIST.map(() => '?').join(',');
-  const rows = db.prepare(`SELECT * FROM payroll WHERE month=? AND name IN (${placeholders}) ORDER BY name`).all(month, ...PAYROLL_WHITELIST);
+  // Fetch all active employees' payrolls for the month
+  const activeEmpNames = employees.map(e => e.name);
+  const placeholders = activeEmpNames.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT * FROM payroll WHERE month=? AND name IN (${placeholders}) ORDER BY name`).all(month, ...activeEmpNames);
 
   // Defensive deduplication to ensure same name is never shown twice in payroll
   const seen = new Set();
