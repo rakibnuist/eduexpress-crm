@@ -2503,6 +2503,10 @@ function runMigrations() {
         console.log(`[migration] Self-healed ${info.changes} leads and assigned them to Afsana Meme.`);
       }
     }
+    // Self-heal users table mapping for Afsana Meme and Tahmid Imam
+    db.prepare("UPDATE users SET emp_id = 'E-04', consultant_name = 'Afsana Meme' WHERE email LIKE '%afsana@eduexpressint.com%' OR name = 'Afsana'").run();
+    db.prepare("UPDATE users SET emp_id = 'E-03' WHERE email LIKE '%tahmidrazi%' OR name LIKE '%Tahmid Imam%'").run();
+    console.log(`[migration] Self-healed users table mappings for Afsana and Tahmid.`);
   } catch (e) {
     console.error("[migration] Failed to self-heal Afsana lead assignment:", e.message);
   }
