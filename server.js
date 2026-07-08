@@ -3107,7 +3107,7 @@ function upsertConversation(contactId, channelId, channelType) {
   return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
 }
 
-function createLeadFromContact(contactId, source, initialMessage, creatorUser, destination = 'Bangladesh') {
+function createLeadFromContact(contactId, source, initialMessage, creatorUser, options = {}) {
   try {
     const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
     if (!contact || contact.lead_id) return null;
@@ -3119,9 +3119,11 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, d
       instagram: 'Instagram Inquiry',
       tiktok: 'TikTok Inquiry'
     };
-    const client_name = contact.name || sourceMap[source] || 'Chat Inquiry';
-    const phone = contact.phone || null;
+    const client_name = options.client_name || contact.name || sourceMap[source] || 'Chat Inquiry';
+    const phone = options.phone || contact.phone || null;
     const email = contact.email || null;
+    const destination = options.destination || 'Bangladesh';
+    const degree = options.degree || null;
 
     // Find the channel consultant or assign to the converting consultant user
     let assigned_consultant = null;
@@ -3155,6 +3157,7 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, d
       phone,
       email,
       destination,
+      degree,
       source: 'In-House',
       lead_source: leadSourceMap[source] || 'Chat',
       lead_status: 'New Lead',
@@ -6087,7 +6090,7 @@ app.get('/api/conversations/:id', (req, res) => {
 app.post('/api/conversations/:id/convert-lead', (req, res) => {
   try {
     if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
-    const { lead_id, destination } = req.body;
+    const { lead_id, destination, phone, degree, client_name } = req.body;
     if (!userHasAccessToConversation(req.user, req.params.id)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -6112,7 +6115,9 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
       }
     } else {
       // Create new lead
-      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user, destination);
+      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user, {
+        destination, phone, degree, client_name
+      });
       if (!lead) return res.status(500).json({ error: 'Failed to create lead' });
     }
 

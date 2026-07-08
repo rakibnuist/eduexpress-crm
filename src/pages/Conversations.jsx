@@ -126,6 +126,9 @@ export default function Conversations({ user }) {
   const [newNote, setNewNote] = useState('');
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [newLeadDestination, setNewLeadDestination] = useState('Bangladesh');
+  const [newLeadPhone, setNewLeadPhone] = useState('');
+  const [newLeadDegree, setNewLeadDegree] = useState('');
+  const [newLeadName, setNewLeadName] = useState('');
 
   const selectedConvRef = useRef(null);
   useEffect(() => {
@@ -707,6 +710,9 @@ export default function Conversations({ user }) {
     } else {
       setNewLeadDestination('Bangladesh');
     }
+    setNewLeadName(selectedConv?.contact_name || '');
+    setNewLeadPhone(selectedConv?.contact_phone || '');
+    setNewLeadDegree('');
     setShowLeadModal(true);
   };
 
@@ -714,7 +720,7 @@ export default function Conversations({ user }) {
     if (!selectedConv) return;
     setConvertingLead(true);
     try {
-      if (leadTab === 'new') { const res = await api.convertLead(selectedConv.id, { destination: newLeadDestination }); toast.success('Lead created'); setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c)); }
+      if (leadTab === 'new') { const res = await api.convertLead(selectedConv.id, { destination: newLeadDestination, phone: newLeadPhone, degree: newLeadDegree, client_name: newLeadName }); toast.success('Lead created'); setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c)); }
       else if (selectedExistingLead) { await api.convertLead(selectedConv.id, { lead_id: selectedExistingLead.id }); toast.success('Linked to lead'); setSelectedConv(p => ({ ...p, lead_id: selectedExistingLead.id })); setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: selectedExistingLead.id } : c)); setSelectedExistingLead(null); setLeadSearch(''); }
       setShowLeadModal(false);
     } catch (e) { toast.error(e.message); } finally { setConvertingLead(false); }
@@ -1512,13 +1518,33 @@ export default function Conversations({ user }) {
               {leadTab === 'new' ? (
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Destination Country</label>
-                    <select value={newLeadDestination} onChange={e => setNewLeadDestination(e.target.value)}
-                      className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20">
-                      {['Bangladesh','China','Malta','Hungary','Greece','Estonia','Georgia','Malaysia','Thailand','Cyprus','UK','USA','Canada','Australia','Germany','France','India','Pakistan','Nepal','Italy'].map(d => (
-                        <option key={d}>{d}</option>
-                      ))}
-                    </select>
+                    <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Client Name</label>
+                    <input type="text" value={newLeadName} onChange={e => setNewLeadName(e.target.value)} placeholder="Full Name" className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20" />
+                  </div>
+                  <div>
+                    <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Phone Number</label>
+                    <input type="text" value={newLeadPhone} onChange={e => setNewLeadPhone(e.target.value)} placeholder="+880..." className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20" />
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Destination</label>
+                      <select value={newLeadDestination} onChange={e => setNewLeadDestination(e.target.value)}
+                        className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20">
+                        {['Bangladesh','China','Malta','Hungary','Greece','Estonia','Georgia','Malaysia','Thailand','Cyprus','UK','USA','Canada','Australia','Germany','France','India','Pakistan','Nepal','Italy'].map(d => (
+                          <option key={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Degree</label>
+                      <select value={newLeadDegree} onChange={e => setNewLeadDegree(e.target.value)}
+                        className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20">
+                        <option value="">Unknown</option>
+                        {['Bachelors','Masters','PhD','Diploma','Language','MBBS'].map(d => (
+                          <option key={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <button disabled={convertingLead} onClick={handleConvertLead}
                     className="w-full bg-[#1877f2] hover:bg-[#166fe5] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-[13px] flex items-center justify-center gap-2 transition-colors">
