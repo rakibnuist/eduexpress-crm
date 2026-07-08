@@ -900,12 +900,6 @@ app.put('/api/leads/:id/stage', (req, res) => {
     service_fee, paid, last_education,
   } = req.body || {};
 
-  // RBAC: Prevent unauthorized China destination changes
-  const isChangingToChina = (destination === 'China' || source === 'China') && lead.destination !== 'China' && lead.source !== 'China';
-  if (isChangingToChina && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
-    return res.status(403).json({ error: 'Only Application Managers and Administrators can change a lead to China.' });
-  }
-
   const stages = getApplicationStages();
   if (stage && !stages.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
@@ -3949,11 +3943,6 @@ app.put('/api/leads/:id', async (req, res) => {
   }
   if (!leadIsVisibleTo(oldLead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
-  }
-  // RBAC: Prevent unauthorized China destination changes
-  const isChangingToChina = (d.destination === 'China' || d.source === 'China') && oldLead.destination !== 'China' && oldLead.source !== 'China';
-  if (isChangingToChina && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
-    return res.status(403).json({ error: 'Only Application Managers and Administrators can change a lead to China.' });
   }
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   const params = leadParams(d, oldLead.lead_id, balance);
