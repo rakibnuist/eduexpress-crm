@@ -734,6 +734,11 @@ function leadIsVisibleTo(lead, user) {
 function leadIsChina(lead) {
   return lead?.destination === 'China' || lead?.source === 'China';
 }
+function isChinaBlockedForUser(lead, user) {
+  if (!leadIsChina(lead)) return false;
+  if (canViewChinaData(user)) return false;
+  return !leadIsVisibleTo(lead, user);
+}
 
 // Reference: list of stages + doc templates (for the UI).
 app.get('/api/application/meta', (req, res) => {
@@ -3800,8 +3805,8 @@ app.get('/api/leads', (req, res) => {
     params.me = meName;
     params.meClean = meClean;
   }
-  // China data isolation: exclude China leads for unauthorized users
-  if (!canViewChinaData(req.user)) {
+  // China data isolation: exclude China leads for unauthorized users unless they own/are assigned to them
+  if (!canViewChinaData(req.user) && !canViewOwnLeadsOnly(req.user)) {
     where.push("(destination != 'China' AND source != 'China')");
   }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
@@ -3814,7 +3819,7 @@ app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id WHERE l.id=? OR l.lead_id=?`).get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) {
@@ -3932,7 +3937,7 @@ app.put('/api/leads/:id', async (req, res) => {
   const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!oldLead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(oldLead)) {
+  if (isChinaBlockedForUser(oldLead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(oldLead, req.user)) {
@@ -4019,7 +4024,7 @@ app.delete('/api/leads/:id', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) {
