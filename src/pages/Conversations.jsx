@@ -949,7 +949,9 @@ export default function Conversations({ user }) {
           <div className="px-4 pt-4 pb-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[18px] font-bold text-[#1c1e21]">
-                {channelTab === 'all' ? 'All messages' : getChannelMeta(channelTab.replace('channel_', '')).label || channelTab}
+                {channelTab === 'all' ? 'All messages' 
+                 : channelTab.startsWith('channel_') ? (allIndividualChannels.find(c => String(c.id) === channelTab.replace('channel_', ''))?.name || 'Channel')
+                 : getChannelMeta(channelTab).label || channelTab}
                 {totalUnread > 0 && <span className="ml-2 text-[13px] font-semibold text-[#1877f2]">{totalUnread}</span>}
               </h2>
               <button onClick={handleRefresh} title="Refresh" className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770] transition-colors">
