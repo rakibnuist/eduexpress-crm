@@ -1016,12 +1016,12 @@ export default function Conversations({ user }) {
                   <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
                     className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${
                       isSel ? 'bg-[#e7f3ff]'
-                      : isUnread ? 'bg-[#f0f7ff] hover:bg-[#e7f3ff]'
+                      : isUnread ? 'bg-[#e3f0ff] hover:bg-[#d8ebff] shadow-[inset_0_0_0_1px_rgba(24,119,242,0.1)]' // Stronger highlight for unread
                       : 'hover:bg-[#f0f2f5]'
                     }`}>
 
                     {/* Unread indicator bar */}
-                    {isUnread && <div className="absolute left-0 top-2 bottom-2 w-[3px] bg-[#1877f2] rounded-r-full" />}
+                    {isUnread && <div className="absolute left-0 top-1 bottom-1 w-[4px] bg-[#1877f2] rounded-r-full shadow-sm" />}
 
                     {/* Avatar */}
                     <div className="relative flex-shrink-0 mt-0.5">

@@ -25,7 +25,7 @@ const mapStages = (stagesArray) => {
 import { canViewOwnLeadsOnly } from '../lib/roles';
 
 export default function LeadForm({ user, lead, settings, onSave }) {
-  const [form, setForm] = useState(initial(lead));
+  const [form, setForm] = useState(initial(lead, user));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -250,7 +250,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
 }
 
 /* ─── Initial form state from an existing lead (or sensible defaults) ─── */
-function initial(lead) {
+function initial(lead, user) {
   if (!lead) return {
     lead_status: 'New Lead',
     date_added: new Date().toISOString().slice(0, 10),
@@ -264,6 +264,8 @@ function initial(lead) {
     blood_group: '', date_of_birth: '',
     medical_notes: '', emergency_contact: '',
     gpa: '',
+    assigned_consultant: user ? user.name : '',
+    assigned_employee_id: user ? user.id : '',
   };
   return {
     ...lead,
