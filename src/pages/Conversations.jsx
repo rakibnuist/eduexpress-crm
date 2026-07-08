@@ -1038,11 +1038,11 @@ export default function Conversations({ user }) {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline justify-between gap-1">
-                        <span className={`text-[14px] truncate leading-tight ${isUnread ? 'font-extrabold text-[#050505]' : 'font-medium text-[#65676b]'}`}>
+                        <span className={`text-[14.5px] truncate leading-tight ${isUnread ? 'font-bold text-black' : 'font-semibold text-[#1c1e21]'}`}>
                           {conv.contact_name || conv.contact_phone || 'Contact'}
                           {countryFlag && <span className="ml-1 text-[13px]">{countryFlag}</span>}
                         </span>
-                        <span className={`text-[11px] whitespace-nowrap flex-shrink-0 ${isUnread ? 'font-bold text-[#1877f2]' : 'text-[#8a8d91]'}`}>{formatLastMessageTime(conv.last_message_at)}</span>
+                        <span className={`text-[11.5px] whitespace-nowrap flex-shrink-0 ${isUnread ? 'font-bold text-[#1877f2]' : 'text-[#8a8d91]'}`}>{formatLastMessageTime(conv.last_message_at)}</span>
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
                         {conv.last_message_direction === 'out' && (
@@ -1052,11 +1052,11 @@ export default function Conversations({ user }) {
                               ? <AlertCircle size={11} className="text-rose-500 flex-shrink-0" />
                               : <CheckCheck size={11} className="text-[#8a8d91] flex-shrink-0" />
                         )}
-                        <p className={`text-[12px] truncate flex-1 ${isUnread ? 'font-bold text-[#050505]' : 'font-normal text-[#65676b]'}`}>
+                        <p className={`text-[12.5px] truncate flex-1 ${isUnread ? 'font-bold text-[#050505]' : 'font-normal text-[#65676b]'}`}>
                           {conv.last_message || 'No messages yet'}
                         </p>
                         {isUnread && (
-                          <span className="w-[20px] h-[20px] rounded-full bg-[#1877f2] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
+                          <span className="w-[18px] h-[18px] rounded-full bg-[#1877f2] text-white text-[9.5px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
                             {conv.unread_count}
                           </span>
                         )}

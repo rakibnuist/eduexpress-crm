@@ -5693,6 +5693,9 @@ async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
     `UPDATE conversations SET last_message=?, last_message_at=?
      WHERE id=? AND (last_message_at IS NULL OR last_message_at < ?)`
   );
+  const stmtIncrementUnread = db.prepare(
+    `UPDATE conversations SET unread_count = unread_count + 1 WHERE id=?`
+  );
 
   const insertBatch = db.transaction((rows, conv) => {
     let added = 0;
@@ -5728,6 +5731,7 @@ async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
         if (result.changes > 0) {
           added++;
           if (createdAt) stmtConvUpdate.run(content, createdAt, conv.id, createdAt);
+          if (!fromPage) stmtIncrementUnread.run(conv.id);
         } else if (i === 0) {
           console.log(`[sync] insertBatch: msg.id=${msg.id} skipped (changes=0, likely duplicate wa_message_id)`);
         }
