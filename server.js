@@ -3753,8 +3753,13 @@ app.get('/api/dashboard', (req, res) => {
   if (isConsultant) {
     const meName = user.consultant_name || user.name || '';
     const meClean = meName.split(' ')[0];
+    let empId = -1;
+    if (user.emp_id) {
+      const emp = db.prepare("SELECT id FROM employees WHERE emp_id=?").get(user.emp_id);
+      if (emp) empId = emp.id;
+    }
     leadWhere = `WHERE (assigned_employee_id = ? OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(?)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(?)) OR TRIM(LOWER(?)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(?)) || '%')`;
-    leadParams = [user.id, meName, meClean, meName, meClean];
+    leadParams = [empId, meName, meClean, meName, meClean];
   }
 
   // China data isolation: exclude China leads from stats for unauthorized users
