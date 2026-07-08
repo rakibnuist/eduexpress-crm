@@ -986,7 +986,7 @@ app.get('/api/leads/:id/university-applications', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -998,7 +998,7 @@ app.post('/api/leads/:id/university-applications', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1018,7 +1018,7 @@ app.put('/api/university-applications/:id', (req, res) => {
   if (!row) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1057,7 +1057,7 @@ app.delete('/api/university-applications/:id', (req, res) => {
   if (!row) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(row.lead_id);
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1070,7 +1070,7 @@ app.get('/api/leads/:id/documents', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1091,7 +1091,7 @@ app.post('/api/leads/:id/documents', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1108,7 +1108,7 @@ app.put('/api/documents/:id', (req, res) => {
   if (!doc) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -1133,7 +1133,7 @@ app.delete('/api/documents/:id', (req, res) => {
   if (!doc) return res.status(404).json({ error: 'Not found' });
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(doc.lead_id);
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4023,7 +4023,7 @@ app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res,
       const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
       if (!lead) continue;
       if (!leadIsVisibleTo(lead, req.user)) continue;
-      if (!canViewChinaData(req.user) && leadIsChina(lead)) continue;
+      if (isChinaBlockedForUser(lead, req.user)) continue;
       db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(consultant, id);
       const updatedLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
       updated.push(updatedLead);
@@ -4058,7 +4058,7 @@ app.get('/api/leads/:id/timeline', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4099,7 +4099,7 @@ app.post('/api/leads/:id/notes', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4398,7 +4398,7 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4552,7 +4552,7 @@ app.post('/api/leads/:id/regenerate-token', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4566,7 +4566,7 @@ app.put('/api/leads/:id/public', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -4581,7 +4581,7 @@ app.get('/api/leads/:id/qr', async (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).end();
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).end();
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).end();
@@ -6160,7 +6160,7 @@ app.post('/api/leads/:id/convert-to-application', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) {
