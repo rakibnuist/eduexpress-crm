@@ -886,7 +886,7 @@ app.put('/api/leads/:id/stage', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads
-  if (!canViewChinaData(req.user) && leadIsChina(lead)) {
+  if (isChinaBlockedForUser(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to China lead records' });
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).json({ error: 'Not your lead' });
@@ -899,6 +899,13 @@ app.put('/api/leads/:id/stage', (req, res) => {
     next_followup, client_name, phone, email, program, notes, lead_status,
     service_fee, paid, last_education,
   } = req.body || {};
+
+  // RBAC: Prevent unauthorized China destination changes
+  const isChangingToChina = (destination === 'China' || source === 'China') && lead.destination !== 'China' && lead.source !== 'China';
+  if (isChangingToChina && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
+    return res.status(403).json({ error: 'Only Application Managers and Administrators can change a lead to China.' });
+  }
+
   const stages = getApplicationStages();
   if (stage && !stages.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
