@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { canViewAllConversations } from '../lib/roles';
 import {
   MessageSquare, Search, Send, User, Phone, ExternalLink,
@@ -104,7 +104,7 @@ export default function Conversations({ user }) {
   const [uploading, setUploading] = useState(false);
   const [updatingConv, setUpdatingConv] = useState(false);
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
   const [channelTab, setChannelTab] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);

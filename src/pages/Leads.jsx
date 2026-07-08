@@ -21,6 +21,7 @@ const STAGES = [
 ];
 
 import { canViewOwnLeadsOnly } from '../lib/roles';
+import { formatPhoneDisplay, getWAUrl } from '../lib/phone';
 
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
@@ -491,11 +492,17 @@ export default function Leads({ user }) {
                       </td>
                       <td className="py-3 px-3.5 text-slate-500 whitespace-nowrap text-xs font-medium">
                         {l.phone ? (
-                          <a href={`https://wa.me/${l.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-                            className="inline-flex items-center gap-1 text-slate-600 hover:text-emerald-600 hover:underline transition-colors" title="Chat on WhatsApp">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
-                            {l.phone}
-                          </a>
+                          <div className="flex flex-col gap-1">
+                            <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
+                              className="inline-flex items-center gap-1 text-slate-600 hover:text-emerald-600 hover:underline transition-colors" title="Chat on WhatsApp">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
+                              {formatPhoneDisplay(l.phone, l.nationality)}
+                            </a>
+                            <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`} 
+                              className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline font-semibold w-fit">
+                              Open Inbox
+                            </Link>
+                          </div>
                         ) : '—'}
                       </td>
                       <td className="py-3 px-3.5 text-slate-600 font-semibold">{l.destination || '—'}</td>
@@ -503,11 +510,17 @@ export default function Leads({ user }) {
                       <td className="py-3 px-3.5 text-slate-500 font-medium">{l.gpa ?? '—'}</td>
                       <td className="py-3 px-3.5 text-slate-500 text-xs max-w-[120px] truncate font-medium">
                         {l.lead_source === 'WhatsApp' ? (
-                          <a href={l.phone ? `https://wa.me/${l.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                            <span>WhatsApp</span>
-                          </a>
+                          <div className="flex items-center gap-1">
+                            <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                              <span>WhatsApp</span>
+                            </a>
+                            <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
+                              className="inline-flex items-center justify-center p-1 rounded-md text-blue-600 hover:bg-blue-50 transition-colors bg-white border border-blue-100" title="Open in CRM Inbox">
+                              <MessageSquare size={13} />
+                            </Link>
+                          </div>
                         ) : l.lead_source === 'Messenger' ? (
                           <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
@@ -688,12 +701,19 @@ export default function Leads({ user }) {
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{l.client_name}</p>
                             {l.lead_source === 'WhatsApp' && (
-                              <a href={l.phone ? `https://wa.me/${l.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
-                                onClick={e => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors flex-shrink-0" title="Message on WhatsApp">
-                                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
-                                WA
-                              </a>
+                              <div className="flex items-center gap-1">
+                                <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
+                                  onClick={e => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors flex-shrink-0" title="Message on WhatsApp">
+                                  <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
+                                  WA
+                                </a>
+                                <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
+                                  onClick={e => e.stopPropagation()}
+                                  className="inline-flex items-center justify-center p-0.5 rounded text-blue-600 hover:bg-blue-50 transition-colors border border-blue-100" title="Open in CRM Inbox">
+                                  <MessageSquare size={11} />
+                                </Link>
+                              </div>
                             )}
                             {l.lead_source === 'Messenger' && (
                               <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
@@ -720,11 +740,15 @@ export default function Leads({ user }) {
                         {l.phone && (
                           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
                             <Phone size={11} className="text-slate-400 flex-shrink-0"/>
-                            <a href={`https://wa.me/${l.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
+                            <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
                               className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1" title="Chat on WhatsApp">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
-                              {l.phone}
+                              {formatPhoneDisplay(l.phone, l.nationality)}
                             </a>
+                            <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
+                              className="ml-1 text-blue-500 hover:text-blue-700 transition-colors" title="Open in CRM Inbox">
+                              <MessageSquare size={11} />
+                            </Link>
                           </div>
                         )}
                         {l.destination && (
