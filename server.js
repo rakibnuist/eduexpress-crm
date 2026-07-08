@@ -719,17 +719,36 @@ function templateFor(destination) {
 function leadIsVisibleTo(lead, user) {
   if (canViewAllLeads(user)) return true;
   const me = user?.consultant_name || user?.name || '';
-  if (!me || !lead.assigned_consultant) return false;
-  const leadC = lead.assigned_consultant.toLowerCase().trim();
+  if (!me) return false;
+
   const meC = me.toLowerCase().trim();
   const meClean = meC.split(' ')[0];
-  const nameMatch = leadC === meC || meClean === leadC || meC.includes(leadC) || leadC.includes(meClean);
-  // Also check employee_id match if both are linked
+
+  // 1. Check if user is the assigned consultant
+  if (lead.assigned_consultant) {
+    const leadC = lead.assigned_consultant.toLowerCase().trim();
+    const nameMatch = leadC === meC || meClean === leadC || meC.includes(leadC) || leadC.includes(meClean);
+    if (nameMatch) return true;
+  }
+
+  // 2. Check if user is the client/student themselves (by name)
+  if (lead.client_name) {
+    const clientC = lead.client_name.toLowerCase().trim();
+    if (clientC === meC || meC.includes(clientC) || clientC.includes(meC)) return true;
+  }
+
+  // 3. Check if user is the client/student themselves (by email match)
+  if (lead.email && user.email) {
+    if (lead.email.toLowerCase().trim() === user.email.toLowerCase().trim()) return true;
+  }
+
+  // 4. Check employee_id match if both are linked
   if (lead.assigned_employee_id && user.emp_id) {
     const emp = db.prepare("SELECT emp_id FROM employees WHERE id=?").get(lead.assigned_employee_id);
     if (emp && emp.emp_id === user.emp_id) return true;
   }
-  return nameMatch;
+
+  return false;
 }
 function leadIsChina(lead) {
   return lead?.destination === 'China' || lead?.source === 'China';
