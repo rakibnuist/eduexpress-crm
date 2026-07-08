@@ -3862,11 +3862,21 @@ function leadParams(d, lead_id, balance) {
       if (emp?.name) assigned_consultant = emp.name;
     } catch {}
   }
+  let phone = d.phone ? String(d.phone).trim() : null;
+  if (phone) {
+    const digits = phone.replace(/[^\d]/g, '');
+    if (digits.startsWith('01') && digits.length === 11) {
+      phone = '+88' + digits;
+    } else if (digits.startsWith('8801') && digits.length === 13) {
+      phone = '+' + digits;
+    }
+  }
+
   return {
     lead_id, balance,
     date_added: d.date_added || new Date().toISOString().slice(0,10),
     client_name: d.client_name,
-    phone: d.phone, email: d.email,
+    phone: phone, email: d.email,
     destination: txt(d.destination),
     last_education: txt(d.last_education),
     gpa: d.gpa === '' || d.gpa == null ? null : Number(d.gpa),

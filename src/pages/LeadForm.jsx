@@ -74,8 +74,19 @@ export default function LeadForm({ user, lead, settings, onSave }) {
     e.preventDefault();
     setSaving(true);
     try {
+      let finalPhone = form.phone ? form.phone.trim() : '';
+      if (finalPhone) {
+        const digits = finalPhone.replace(/[^\d]/g, '');
+        if (digits.startsWith('01') && digits.length === 11) {
+          finalPhone = '+88' + digits;
+        } else if (digits.startsWith('8801') && digits.length === 13) {
+          finalPhone = '+' + digits;
+        }
+      }
+
       const payload = {
         ...form,
+        phone:       finalPhone,
         gpa:         form.gpa === '' ? null : Number(form.gpa),
         service_fee: form.service_fee === '' ? 0 : Number(form.service_fee),
         paid:        form.paid        === '' ? 0 : Number(form.paid),
