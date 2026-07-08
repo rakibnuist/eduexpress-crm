@@ -104,6 +104,7 @@ export default function Conversations({ user }) {
   const [uploading, setUploading] = useState(false);
   const [updatingConv, setUpdatingConv] = useState(false);
 
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [channelTab, setChannelTab] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
