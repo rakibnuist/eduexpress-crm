@@ -54,3 +54,6 @@ uploads/*.png
 uploads/*.jpeg
 uploads/*.doc
 uploads/*.docx
+
+*.sqlite
+*.sqlite3
