@@ -99,8 +99,13 @@ const uploadLimiter = rateLimit({
 app.use(standardLimiter);
 app.get('/api/auth/emergency-reset', (req, res) => {
   const newHash = hashPassword('eduexpress2026');
-  db.prepare("UPDATE users SET password_hash = ? WHERE email = 'admin@eduexpressint.com'").run(newHash);
-  res.send('Admin password has been reset to eduexpress2026. You can now log in.');
+  const info = db.prepare("UPDATE users SET password_hash = ?, active = 1 WHERE role = 'admin'").run(newHash);
+  const admins = db.prepare("SELECT id, email, name, active FROM users WHERE role = 'admin'").all();
+  res.json({
+    message: 'Admin password has been reset to eduexpress2026. You can now log in.',
+    rowsUpdated: info.changes,
+    adminsFound: admins
+  });
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/logout', authLimiter);
