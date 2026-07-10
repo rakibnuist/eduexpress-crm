@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2, Wifi, Funnel, FileText, CheckCircle2, Search, GripVertical, Building, Briefcase, Lock, Bell, Database, HardDrive, Activity, Music } from 'lucide-react';
+import { Info, AlertTriangle, Clock, Users, Globe, Tag, CreditCard, Shield, Plus, Pencil, Trash2, Mail, X, Loader2, MapPin, Save, Megaphone, StickyNote, MessageCircle, MessageSquare, RefreshCw, Key, Settings2, Wifi, Funnel, FileText, CheckCircle2, Search, GripVertical, Building, Briefcase, Lock, Bell, Database, HardDrive, Activity, Music, Upload } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 
@@ -1740,7 +1740,10 @@ function CompanyProfileSettings() {
 function SystemHealthCard() {
   const [dbSize, setDbSize] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(false);
+  const fileInputRef = useRef(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   useEffect(() => {
     fetch('/api/health/db-size', { credentials: 'include' })
@@ -1768,6 +1771,44 @@ function SystemHealthCard() {
     }
   };
 
+  const handleRestore = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    e.target.value = '';
+
+    const confirmed = await confirm({
+      title: 'Restore Database',
+      message: 'WARNING: Restoring this backup will completely overwrite your current database. The server will restart automatically. Are you sure you want to proceed?',
+      confirmText: 'Yes, Restore Now',
+      danger: true
+    });
+    if (!confirmed) return;
+
+    try {
+      setRestoring(true);
+      const buffer = await file.arrayBuffer();
+      const res = await fetch('/api/health/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: buffer,
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Restore failed');
+      
+      toast.success(data.message);
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 5000);
+      
+    } catch (e) {
+      toast.error('Restore failed: ' + e.message);
+      setRestoring(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
       <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-emerald-50 text-emerald-700 border-emerald-100">
@@ -1790,18 +1831,23 @@ function SystemHealthCard() {
             <p className="text-xs text-slate-400">Tailwind CSS 4 · Lucide icons</p>
           </div>
           <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Last Backup</p>
-            <p className="text-lg font-bold text-slate-800">Manual</p>
-            <p className="text-xs text-slate-400">No automated backup configured</p>
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Backups</p>
+            <p className="text-lg font-bold text-slate-800">Automated</p>
+            <p className="text-xs text-slate-400">Daily local backups enabled</p>
           </div>
         </div>
         <div className="flex gap-2 mt-4">
-          <button onClick={handleBackup}
-            className="flex items-center gap-1.5 text-xs font-medium bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 shadow-sm transition-colors">
+          <input type="file" accept=".db" ref={fileInputRef} onChange={handleRestore} className="hidden" />
+          <button onClick={handleBackup} disabled={restoring}
+            className="flex items-center gap-1.5 text-xs font-medium bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-50">
             <Database size={13} /> Download Backup
           </button>
-          <button onClick={() => window.open('/api/health/export-json', '_blank')}
-            className="flex items-center gap-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors">
+          <button onClick={() => fileInputRef.current?.click()} disabled={restoring}
+            className="flex items-center gap-1.5 text-xs font-medium bg-red-50 border border-red-200 text-red-600 px-4 py-2 rounded-xl hover:bg-red-100 shadow-sm transition-colors disabled:opacity-50">
+            <Upload size={13} /> {restoring ? 'Restoring...' : 'Upload & Restore'}
+          </button>
+          <button onClick={() => window.open('/api/health/export-json', '_blank')} disabled={restoring}
+            className="flex items-center gap-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50">
             <FileText size={13} /> Export JSON
           </button>
         </div>

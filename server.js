@@ -4409,6 +4409,25 @@ app.post('/api/health/backup', (req, res) => requireAdmin(req, res, () => {
   }
 }));
 
+app.post('/api/health/restore', express.raw({ type: 'application/octet-stream', limit: '100mb' }), (req, res) => requireAdmin(req, res, () => {
+  try {
+    if (!req.body || !Buffer.isBuffer(req.body)) {
+      return res.status(400).json({ error: 'No database file provided or invalid format.' });
+    }
+    const restorePath = join(__dirname, 'restore.db');
+    writeFileSync(restorePath, req.body);
+    res.json({ message: 'Backup file received. Server is restarting to apply changes...' });
+    
+    // Give response time to flush before exiting
+    setTimeout(() => {
+      console.log('[restore] Initiating database restore and server restart...');
+      process.exit(0);
+    }, 1000);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
 app.get('/api/health/export-json', (req, res) => requireAdmin(req, res, () => {
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
@@ -8545,3 +8564,37 @@ setInterval(async () => {
     isBackgroundSyncing = false;
   }
 }, 15000);
+
+// ── Automated Daily Backups ───────────────────────────────────────
+setInterval(() => {
+  try {
+    if (!dbReady || !db) return;
+    const backupsDir = join(DB_DIR, 'backups');
+    if (!existsSync(backupsDir)) {
+      mkdirSync(backupsDir, { recursive: true });
+    }
+    
+    // Create new backup
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const backupPath = join(backupsDir, `crm_backup_${dateStr}.db`);
+    db.flush();
+    const data = db.export();
+    writeFileSync(backupPath, Buffer.from(data));
+    console.log(`[backup] Automated backup created: ${backupPath}`);
+    
+    // Cleanup backups older than 7 days
+    const files = readdirSync(backupsDir);
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const fs = require('fs');
+    files.forEach(file => {
+      const filePath = join(backupsDir, file);
+      const stat = fs.statSync(filePath);
+      if (stat.mtimeMs < sevenDaysAgo && file.endsWith('.db')) {
+        unlinkSync(filePath);
+        console.log(`[backup] Deleted old automated backup: ${file}`);
+      }
+    });
+  } catch (err) {
+    console.error('[backup] Automated backup failed:', err.message);
+  }
+}, 24 * 60 * 60 * 1000); // 24 hours
