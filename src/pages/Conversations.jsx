@@ -427,28 +427,40 @@ export default function Conversations({ user }) {
     const isSseDisabled = sessionStorage.getItem('disable_sse') === 'true';
 
     function handleNewMessageData(data) {
-      const currConv = selectedConvRef.current;
-      if (currConv && data.conversation_id === currConv.id) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === data.id || (data.wa_message_id && m.wa_message_id === data.wa_message_id))) return prev;
-          return [...prev, data];
-        });
-        api.markConversationAsRead(currConv.id).catch(() => {});
-        setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
-      }
-      setConversations(prev => {
-        const idx = prev.findIndex(c => c.id === data.conversation_id);
-        if (idx === -1) {
-          api.getConversation(data.conversation_id).then(conv => {
-            if (conv) setConversations(cur => cur.some(c => c.id === conv.id) ? cur : [conv, ...cur]);
-          }).catch(() => {});
-          return prev;
+      try {
+        const currConv = selectedConvRef.current;
+        // Use loose equality (==) to prevent integer vs string mismatch bugs
+        if (currConv && data.conversation_id == currConv.id) {
+          setMessages(prev => {
+            if (prev.some(m => m.id == data.id || (data.wa_message_id && m.wa_message_id == data.wa_message_id))) return prev;
+            return [...prev, data];
+          });
+          api.markConversationAsRead(currConv.id).catch(() => {});
+          setSelectedConv(prev => prev ? { ...prev, unread_count: 0 } : null);
         }
-        const currConv2 = selectedConvRef.current;
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], last_message: data.content || updated[idx].last_message, last_message_at: data.created_at || updated[idx].last_message_at, last_message_direction: data.direction === 'in' || data.direction === 'inbound' ? 'in' : 'out', unread_count: (currConv2 && currConv2.id === updated[idx].id) ? 0 : (updated[idx].unread_count + ((data.direction === 'in' || data.direction === 'inbound') ? 1 : 0)) };
-        return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
-      });
+        setConversations(prev => {
+          const idx = prev.findIndex(c => c.id == data.conversation_id);
+          if (idx === -1) {
+            api.getConversation(data.conversation_id).then(conv => {
+              if (conv) setConversations(cur => cur.some(c => c.id == conv.id) ? cur : [conv, ...cur]);
+            }).catch(() => {});
+            return prev;
+          }
+          const currConv2 = selectedConvRef.current;
+          const updated = [...prev];
+          const isIncoming = data.direction === 'in' || data.direction === 'inbound';
+          updated[idx] = { 
+            ...updated[idx], 
+            last_message: data.content || updated[idx].last_message, 
+            last_message_at: data.created_at || updated[idx].last_message_at, 
+            last_message_direction: isIncoming ? 'in' : 'out', 
+            unread_count: (currConv2 && currConv2.id == updated[idx].id) ? 0 : (updated[idx].unread_count + (isIncoming ? 1 : 0)) 
+          };
+          return updated.sort((a, b) => (toDate(b.last_message_at) || 0) - (toDate(a.last_message_at) || 0));
+        });
+      } catch (err) {
+        console.error("Error handling new message:", err);
+      }
     }
 
     let activeLongPoll = true;
