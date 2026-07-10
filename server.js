@@ -1316,6 +1316,15 @@ app.get('/api/activity', (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/debug/webhooks', (req, res) => {
+  try {
+    const logs = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 50").all();
+    res.json(logs.map(l => ({ ...l, payload: JSON.parse(l.payload) })));
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
@@ -2337,6 +2346,7 @@ function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_channel_access_user ON channel_access(user_id);
       CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
+      CREATE TABLE IF NOT EXISTS webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
     `);
 
     // Migrate legacy single-role users to user_roles junction table
@@ -6626,6 +6636,12 @@ app.get('/webhook/meta', (req, res) => {
 app.post('/webhook/meta', async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
+  
+  try {
+    db.prepare("INSERT INTO webhook_logs (payload) VALUES (?)").run(JSON.stringify(body));
+  } catch (err) {
+    console.error("Failed to log webhook", err.message);
+  }
 
   // ── WhatsApp Cloud API ─────────────────────────────────
   if (body.object === 'whatsapp_business_account') {
