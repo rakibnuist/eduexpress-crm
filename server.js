@@ -6638,62 +6638,62 @@ app.post('/webhook/meta', async (req, res) => {
           const channel = db.prepare("SELECT * FROM channels WHERE trim(phone_number_id)=? AND type='whatsapp'").get(phoneNumberId);
           if (!channel) { console.log('⚠️ Unknown WA channel:', phoneNumberId); continue; }
 
-        // Delivery/read status updates
-        for (const status of val.statuses || []) {
-          try {
-            db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
-            const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
-            if (msg) {
-              broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
-            } else {
-              broadcast('message_status', { wa_message_id: status.id, status: status.status });
+          // Delivery/read status updates
+          for (const status of val.statuses || []) {
+            try {
+              db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
+              const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
+              if (msg) {
+                broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
+              } else {
+                broadcast('message_status', { wa_message_id: status.id, status: status.status });
+              }
+            } catch(e) { console.error('WA status update error:', e.message); }
+          }
+
+          // Incoming messages
+          for (const msg of val.messages || []) {
+            const profileName = val.contacts?.find(c=>c.wa_id===msg.from)?.profile?.name || msg.from;
+            const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
+            const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
+
+            // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
+            if (msg.referral && !contact.lead_id) {
+              createLeadFromReferral({
+                contact,
+                channel,
+                referralData: msg.referral,
+                sourcePlatform: 'whatsapp'
+              });
+              const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+              if (updatedContact) contact.lead_id = updatedContact.lead_id;
             }
-          } catch(e) { console.error('WA status update error:', e.message); }
-        }
 
-        // Incoming messages
-        for (const msg of val.messages || []) {
-          const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
+            let content, type = msg.type, mediaUrl = null, caption = null;
+            if (msg.type === 'text')     { content = msg.text?.body; }
+            else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
+            else if (msg.type === 'audio')    { mediaUrl = msg.audio?.id;    content = '[Voice Message]'; }
+            else if (msg.type === 'video')    { mediaUrl = msg.video?.id;    caption = msg.video?.caption; content = '[Video]'; }
+            else if (msg.type === 'document') { mediaUrl = msg.document?.id; content = `[Document: ${msg.document?.filename||''}]`; }
+            else if (msg.type === 'location') { content = `📍 Location: ${msg.location?.latitude},${msg.location?.longitude}`; }
+            else if (msg.type === 'button')   { content = msg.button?.text; type='text'; }
+            else { content = `[${msg.type}]`; }
 
-          // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
-          if (msg.referral && !contact.lead_id) {
-            createLeadFromReferral({
-              contact,
-              channel,
-              referralData: msg.referral,
-              sourcePlatform: 'whatsapp'
-            });
-            const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
-            if (updatedContact) contact.lead_id = updatedContact.lead_id;
+            saveMessage(conv.id, 'in', content, type, msg.id, mediaUrl, caption);
+            // Run automation rules on the incoming message
+            const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+            if (savedMsg) {
+              // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+            }
+            const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+            if (waInCount === 1) {
+              // Forward to n8n — Gemini generates personalised AI welcome
+              /* setImmediate(() => forwardToN8N({ ... })); */
+            }
+            console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
           }
-
-          let content, type = msg.type, mediaUrl = null, caption = null;
-          if (msg.type === 'text')     { content = msg.text?.body; }
-          else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
-          else if (msg.type === 'audio')    { mediaUrl = msg.audio?.id;    content = '[Voice Message]'; }
-          else if (msg.type === 'video')    { mediaUrl = msg.video?.id;    caption = msg.video?.caption; content = '[Video]'; }
-          else if (msg.type === 'document') { mediaUrl = msg.document?.id; content = `[Document: ${msg.document?.filename||''}]`; }
-          else if (msg.type === 'location') { content = `📍 Location: ${msg.location?.latitude},${msg.location?.longitude}`; }
-          else if (msg.type === 'button')   { content = msg.button?.text; type='text'; }
-          else { content = `[${msg.type}]`; }
-
-          saveMessage(conv.id, 'in', content, type, msg.id, mediaUrl, caption);
-          // Run automation rules on the incoming message
-          const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
-          if (savedMsg) {
-            // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
-          }
-          const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
-          if (waInCount === 1) {
-            // Forward to n8n — Gemini generates personalised AI welcome
-            /* setImmediate(() => forwardToN8N({
-              platform: 'whatsapp',
-              conversationId: conv.id,
-              senderName: profileName,
-              messageText: content || ''
-            })); */
-          }
-          console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
+        } catch (outerErr) {
+          console.error('WA webhook outer error:', outerErr.message);
         }
       }
     }
@@ -6786,61 +6786,63 @@ app.post('/webhook/meta', async (req, res) => {
           if (!messaging.message) continue;
           const isEcho = messaging.message.is_echo;
           const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
-          const channel = db.prepare("SELECT * FROM channels WHERE trim(page_id)=? AND type='messenger'").get(pageId);
-          if (!channel) {
-             console.log(`⚠️ Unknown Messenger channel for page_id: ${pageId}`);
-             continue;
+          const channel = db.prepare("SELECT * FROM channels WHERE trim(page_id)=? AND type='messenger'").get(String(pageId).trim());
+          if (!channel) continue;
+
+          const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(customerId) || upsertContact({ name: `Messenger User`, messenger_id: customerId });
+          // Fetch name + profile picture from Messenger API
+          try {
+            const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
+            const nr = await fetch(`https://graph.facebook.com/v19.0/${customerId}?fields=name,profile_pic&access_token=${pageToken}`);
+            const nd = await nr.json();
+            if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
+            if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
+          } catch {}
+
+          const conv = upsertConversation(contact.id, channel.id, 'messenger');
+
+          const referral = messaging.referral || messaging.message?.referral;
+          // If message is from a Meta Paid Ad (Click-to-Messenger referral), auto-create a lead
+          if (referral && !contact.lead_id) {
+            createLeadFromReferral({
+              contact,
+              channel,
+              referralData: referral,
+              sourcePlatform: 'messenger'
+            });
+            const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+            if (updatedContact) contact.lead_id = updatedContact.lead_id;
           }
 
-        const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(customerId) || upsertContact({ name: `Messenger User`, messenger_id: customerId });
-        // Fetch name + profile picture from Messenger API
-        try {
-          const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
-          const nr = await fetch(`https://graph.facebook.com/v19.0/${customerId}?fields=name,profile_pic&access_token=${pageToken}`);
-          const nd = await nr.json();
-          if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
-          if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
-        } catch {}
-
-        const conv = upsertConversation(contact.id, channel.id, 'messenger');
-
-        const referral = messaging.referral || messaging.message?.referral;
-        // If message is from a Meta Paid Ad (Click-to-Messenger referral), auto-create a lead
-        if (referral && !contact.lead_id) {
-          createLeadFromReferral({
-            contact,
-            channel,
-            referralData: referral,
-            sourcePlatform: 'messenger'
-          });
-          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
-          if (updatedContact) contact.lead_id = updatedContact.lead_id;
-        }
-
-        // Extract text or media attachment
-        let text = messaging.message.text, mtype = 'text', murl = null;
-        const att = messaging.message.attachments?.[0];
-        if (!text && att) {
-          murl = att.payload?.url || null;
-          if (att.type === 'image')      { text = '📷 Photo';  mtype = 'image'; }
-          else if (att.type === 'video') { text = '🎥 Video';  mtype = 'video'; }
-          else if (att.type === 'audio') { text = '🎵 Audio';  mtype = 'audio'; }
-          else if (att.type === 'file')  { text = '📎 File';   mtype = 'file'; }
-          else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
-        }
-        if (!text) text = '[message]';
-        saveMessage(conv.id, isEcho ? 'out' : 'in', text, mtype, messaging.message.mid, murl);
-        // Run automation rules
-        const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
-        if (savedMsg) {
-          // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
-        }
-        const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
-        if (msInCount === 1) {
-          // Forward to n8n — Gemini generates personalised AI welcome
-          /* setImmediate(() => forwardToN8N({ ... })); */
-        }
-        console.log(`💬 Messenger [${channel.name}]: ${text}`);
+          // Extract text or media attachment
+          let text = messaging.message.text, mtype = 'text', murl = null;
+          const att = messaging.message.attachments?.[0];
+          if (!text && att) {
+            murl = att.payload?.url || null;
+            if (att.type === 'image')      { text = '📷 Photo';  mtype = 'image'; }
+            else if (att.type === 'video') { text = '🎥 Video';  mtype = 'video'; }
+            else if (att.type === 'audio') { text = '🎵 Audio';  mtype = 'audio'; }
+            else if (att.type === 'file')  { text = '📎 File';   mtype = 'file'; }
+            else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
+          }
+          if (!text) text = '[message]';
+          saveMessage(conv.id, isEcho ? 'out' : 'in', text, mtype, messaging.message.mid, murl);
+          // Run automation rules
+          const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+          if (savedMsg) {
+            // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+          }
+          const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+          if (msInCount === 1) {
+            // Forward to n8n — Gemini generates personalised AI welcome
+            /* setImmediate(() => forwardToN8N({
+              platform: 'messenger',
+              conversationId: conv.id,
+              senderName: 'Messenger User', // DB will have real name shortly after
+              messageText: text || ''
+            })); */
+          }
+          console.log(`💬 Messenger [${channel.name}]: ${text}`);
         } catch (msgErr) {
           console.error('Messenger webhook error:', msgErr.message);
         }
