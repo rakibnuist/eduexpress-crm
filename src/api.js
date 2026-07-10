@@ -8,7 +8,7 @@ async function req(path, opts = {}, attempt = 1) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
-  if (r.status === 401) {
+  if (r.status === 401 && path !== '/auth/login') {
     if (!path.startsWith('/auth/') && window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
