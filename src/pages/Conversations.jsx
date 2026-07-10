@@ -476,6 +476,11 @@ export default function Conversations({ user }) {
           } else if (event && event.type === 'message_status') {
             const data = event;
             if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+          } else if (event && event.type === 'message_deleted') {
+            const data = event;
+            if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
+              setMessages(prev => prev.filter(m => m.id !== data.message_id));
+            }
           } else if (event && event.type === 'conversation_deleted') {
             const data = event;
             if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
@@ -548,6 +553,15 @@ export default function Conversations({ user }) {
           const data = JSON.parse(e.data);
           if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
         } catch (err) { console.error('SSE message_status error:', err); }
+      });
+
+      es.addEventListener('message_deleted', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
+            setMessages(prev => prev.filter(m => m.id !== data.message_id));
+          }
+        } catch (err) { console.error('SSE message_deleted error:', err); }
       });
 
       es.addEventListener('conversation_deleted', (e) => {
@@ -627,6 +641,17 @@ export default function Conversations({ user }) {
       }
     } catch (err) { toast.error('Failed to send: ' + err.message); }
     finally { setSending(false); }
+  };
+
+  const handleDeleteMessage = async (msgId) => {
+    if (!window.confirm('Are you sure you want to delete this message?')) return;
+    try {
+      await api.deleteMessage(msgId);
+      setMessages(prev => prev.filter(m => m.id !== msgId));
+      toast.success('Message deleted');
+    } catch (err) {
+      toast.error('Failed to delete message: ' + err.message);
+    }
   };
 
   const handleFileChange = (e) => {
@@ -1235,12 +1260,21 @@ export default function Conversations({ user }) {
                           const isOut = msg.direction === 'out' || msg.direction === 'outbound';
                           const mediaUrl = getMediaUrl(msg);
                           return (
-                            <div key={msg.id || item.key} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5`}>
+                            <div key={msg.id || item.key} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5 group`}>
                               {!isOut && (
                                 selectedConv.contact_avatar
                                   ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end mb-1 mr-1.5" />
                                   : <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0 self-end mb-1 mr-1.5 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>{initials(selectedConv.contact_name || 'C')}</div>
                               )}
+                              
+                              {isOut && (
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center mr-2">
+                                  <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 text-[#8a8d91] hover:text-red-500 hover:bg-red-50 rounded-full" title="Delete Message">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              )}
+
                               <div className={`max-w-[65%] ${isOut ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
                                 {/* Media */}
                                 {mediaUrl && msg.type === 'image' && (
@@ -1281,6 +1315,14 @@ export default function Conversations({ user }) {
                                   )}
                                 </div>
                               </div>
+
+                              {!isOut && (
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center ml-2">
+                                  <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 text-[#8a8d91] hover:text-red-500 hover:bg-red-50 rounded-full" title="Delete Message">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

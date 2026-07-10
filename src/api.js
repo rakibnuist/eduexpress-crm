@@ -217,6 +217,7 @@ export const api = {
   deleteConversation:(id)    => req(`/conversations/${id}`, { method: 'DELETE' }),
   messages:        (convId)  => req(`/conversations/${convId}/messages`),
   sendMessage:     (convId, d)=> req(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(d) }),
+  deleteMessage:   (msgId)   => req(`/messages/${msgId}`, { method: 'DELETE' }),
   pollMessages:    ()        => req('/messages/poll', { method: 'POST' }),
   quickReplies:    ()        => req('/quick-replies'),
   createQuickReply:(d)       => req('/quick-replies', { method: 'POST', body: JSON.stringify(d) }),
