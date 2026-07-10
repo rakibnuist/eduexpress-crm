@@ -6632,26 +6632,27 @@ app.post('/webhook/meta', async (req, res) => {
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         if (change.field !== 'messages') continue;
-        const val = change.value;
-        const phoneNumberId = val.metadata?.phone_number_id;
-        const channel = db.prepare("SELECT * FROM channels WHERE phone_number_id=? AND type='whatsapp'").get(phoneNumberId);
-        if (!channel) { console.log('⚠️ Unknown WA channel:', phoneNumberId); continue; }
+        try {
+          const val = change.value;
+          const phoneNumberId = String(val.metadata?.phone_number_id).trim();
+          const channel = db.prepare("SELECT * FROM channels WHERE trim(phone_number_id)=? AND type='whatsapp'").get(phoneNumberId);
+          if (!channel) { console.log('⚠️ Unknown WA channel:', phoneNumberId); continue; }
 
         // Delivery/read status updates
         for (const status of val.statuses || []) {
-          db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
-          const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
-          if (msg) {
-            broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
-          } else {
-            broadcast('message_status', { wa_message_id: status.id, status: status.status });
-          }
+          try {
+            db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
+            const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
+            if (msg) {
+              broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
+            } else {
+              broadcast('message_status', { wa_message_id: status.id, status: status.status });
+            }
+          } catch(e) { console.error('WA status update error:', e.message); }
         }
 
         // Incoming messages
         for (const msg of val.messages || []) {
-          const profileName = val.contacts?.find(c=>c.wa_id===msg.from)?.profile?.name || msg.from;
-          const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
           const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
 
           // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
@@ -6780,12 +6781,16 @@ app.post('/webhook/meta', async (req, res) => {
 
       // Messenger messages
       for (const messaging of entry.messaging || []) {
-        console.log(`[webhook] Received Messenger webhook:`, JSON.stringify(messaging));
-        if (!messaging.message) continue;
-        const isEcho = messaging.message.is_echo;
-        const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
-        const channel = db.prepare("SELECT * FROM channels WHERE page_id=? AND type='messenger'").get(pageId);
-        if (!channel) continue;
+        try {
+          console.log(`[webhook] Received Messenger webhook:`, JSON.stringify(messaging));
+          if (!messaging.message) continue;
+          const isEcho = messaging.message.is_echo;
+          const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
+          const channel = db.prepare("SELECT * FROM channels WHERE trim(page_id)=? AND type='messenger'").get(pageId);
+          if (!channel) {
+             console.log(`⚠️ Unknown Messenger channel for page_id: ${pageId}`);
+             continue;
+          }
 
         const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(customerId) || upsertContact({ name: `Messenger User`, messenger_id: customerId });
         // Fetch name + profile picture from Messenger API
@@ -6833,14 +6838,12 @@ app.post('/webhook/meta', async (req, res) => {
         const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (msInCount === 1) {
           // Forward to n8n — Gemini generates personalised AI welcome
-          /* setImmediate(() => forwardToN8N({
-            platform: 'messenger',
-            conversationId: conv.id,
-            senderName: 'Messenger User', // DB will have real name shortly after
-            messageText: text || ''
-          })); */
+          /* setImmediate(() => forwardToN8N({ ... })); */
         }
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
+        } catch (msgErr) {
+          console.error('Messenger webhook error:', msgErr.message);
+        }
       }
     }
     return;
