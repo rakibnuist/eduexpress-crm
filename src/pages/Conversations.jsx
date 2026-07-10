@@ -387,10 +387,11 @@ export default function Conversations({ user }) {
     else { setMessages([]); setContactNotes([]); setContactTags([]); }
   }, [selectedConv, loadMessages, loadContactDetails]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => {
-    const timer = setInterval(() => { silentRefresh(); if (selectedConv) silentRefreshMessages(selectedConv); }, 10000);
-    return () => clearInterval(timer);
-  }, [selectedConv, silentRefresh, silentRefreshMessages]);
+  // Polling loop removed in favor of Server-Sent Events (SSE)
+  // useEffect(() => {
+  //   const timer = setInterval(() => { silentRefresh(); if (selectedConv) silentRefreshMessages(selectedConv); }, 10000);
+  //   return () => clearInterval(timer);
+  // }, [selectedConv, silentRefresh, silentRefreshMessages]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -411,8 +412,7 @@ export default function Conversations({ user }) {
     const POLL_INTERVAL = 5000;
     const SSE_FAIL_THRESHOLD = 2;
 
-    const isProduction = typeof window !== 'undefined' && window.location.hostname === 'crm.eduexpressint.com';
-    const isSseDisabled = isProduction || sessionStorage.getItem('disable_sse') === 'true';
+    const isSseDisabled = sessionStorage.getItem('disable_sse') === 'true';
 
     function handleNewMessageData(data) {
       const currConv = selectedConvRef.current;
