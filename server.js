@@ -6643,17 +6643,17 @@ app.post('/webhook/meta', async (req, res) => {
           // Run automation rules on the incoming message
           const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
           if (savedMsg) {
-            executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+            // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
           }
           const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
           if (waInCount === 1) {
             // Forward to n8n — Gemini generates personalised AI welcome
-            setImmediate(() => forwardToN8N({
+            /* setImmediate(() => forwardToN8N({
               platform: 'whatsapp',
               conversationId: conv.id,
               senderName: profileName,
               messageText: content || ''
-            }));
+            })); */
           }
           console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
@@ -6789,17 +6789,17 @@ app.post('/webhook/meta', async (req, res) => {
         // Run automation rules
         const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
         if (savedMsg) {
-          executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+          // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
         }
         const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
         if (msInCount === 1) {
           // Forward to n8n — Gemini generates personalised AI welcome
-          setImmediate(() => forwardToN8N({
+          /* setImmediate(() => forwardToN8N({
             platform: 'messenger',
             conversationId: conv.id,
             senderName: 'Messenger User', // DB will have real name shortly after
             messageText: text || ''
-          }));
+          })); */
         }
         console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
