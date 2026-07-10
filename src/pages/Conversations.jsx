@@ -382,9 +382,13 @@ export default function Conversations({ user }) {
   }, []);
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => {
-    if (selectedConv) { loadMessages(selectedConv); loadContactDetails(selectedConv); }
+    if (selectedConv?.id) { 
+      const convStub = { id: selectedConv.id };
+      loadMessages(convStub); 
+      loadContactDetails(convStub); 
+    }
     else { setMessages([]); setContactNotes([]); setContactTags([]); }
-  }, [selectedConv, loadMessages, loadContactDetails]);
+  }, [selectedConv?.id, loadMessages, loadContactDetails]);
   useEffect(() => {
     const scrollToBottom = () => {
       if (scrollContainerRef.current) {
@@ -616,6 +620,12 @@ export default function Conversations({ user }) {
   }, [leadSearch, leadTab]);
 
   /* ── actions ── */
+  const handleSelectConv = async (c) => {
+    setSelectedConv(c);
+    setMessages([]);
+    if (window.innerWidth < 1024) setShowMobileDrawer(false);
+  };
+
   const handleSend = async (e) => {
     e?.preventDefault();
     if (!replyText.trim() && !selectedFile) return;
