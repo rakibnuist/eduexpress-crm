@@ -384,7 +384,16 @@ export default function Conversations({ user }) {
     if (selectedConv) { loadMessages(selectedConv); loadContactDetails(selectedConv); }
     else { setMessages([]); setContactNotes([]); setContactTags([]); }
   }, [selectedConv, loadMessages, loadContactDetails]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    // Jump instantly to bottom instead of smooth scrolling to prevent getting stuck in middle
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    
+    // Add a tiny delay to ensure images/layout have finished shifting
+    const t = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }, 100);
+    return () => clearTimeout(t);
+  }, [messages]);
   // Polling loop removed in favor of Server-Sent Events (SSE)
   // useEffect(() => {
   //   const timer = setInterval(() => { silentRefresh(); if (selectedConv) silentRefreshMessages(selectedConv); }, 10000);
