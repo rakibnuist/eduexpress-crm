@@ -6771,6 +6771,7 @@ app.post('/webhook/meta', async (req, res) => {
 
       // Messenger messages
       for (const messaging of entry.messaging || []) {
+        console.log(`[webhook] Received Messenger webhook:`, JSON.stringify(messaging));
         if (!messaging.message) continue;
         const isEcho = messaging.message.is_echo;
         const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
@@ -6781,7 +6782,7 @@ app.post('/webhook/meta', async (req, res) => {
         // Fetch name + profile picture from Messenger API
         try {
           const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
-          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,profile_pic&access_token=${pageToken}`);
+          const nr = await fetch(`https://graph.facebook.com/v19.0/${customerId}?fields=name,profile_pic&access_token=${pageToken}`);
           const nd = await nr.json();
           if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
           if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
