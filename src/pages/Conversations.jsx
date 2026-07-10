@@ -77,6 +77,7 @@ export default function Conversations({ user }) {
   const toast = useToast();
   const confirm = useConfirm();
   const messagesEndRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -385,14 +386,18 @@ export default function Conversations({ user }) {
     else { setMessages([]); setContactNotes([]); setContactTags([]); }
   }, [selectedConv, loadMessages, loadContactDetails]);
   useEffect(() => {
-    // Jump instantly to bottom instead of smooth scrolling to prevent getting stuck in middle
-    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    const scrollToBottom = () => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }
+    };
     
-    // Add a tiny delay to ensure images/layout have finished shifting
-    const t = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-    }, 100);
-    return () => clearTimeout(t);
+    scrollToBottom();
+    const t = setTimeout(scrollToBottom, 100);
+    const t2 = setTimeout(scrollToBottom, 300);
+    return () => { clearTimeout(t); clearTimeout(t2); };
   }, [messages]);
   // Polling loop removed in favor of Server-Sent Events (SSE)
   // useEffect(() => {
@@ -1190,7 +1195,7 @@ export default function Conversations({ user }) {
               <div className="flex-1 flex overflow-hidden">
                 {/* Messages */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 scrollbar-thin" style={{ background: '#f0f2f5' }}>
+                  <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 scrollbar-thin" style={{ background: '#f0f2f5' }}>
                     {loadingMessages ? (
                       <div className="flex flex-col items-center justify-center h-full gap-2 text-[#8a8d91]">
                         <div className="w-5 h-5 border-2 border-[#1877f2] border-t-transparent rounded-full animate-spin" />
