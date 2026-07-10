@@ -6097,9 +6097,8 @@ app.get('/api/conversations', (req, res) => {
     return { ...c, sla_status, priority };
   });
 
-  // Sort by priority first, then by last_message_at desc
+  // Sort strictly by last_message_at desc
   convWithMeta.sort((a, b) => {
-    if (b.priority !== a.priority) return b.priority - a.priority;
     return (b.last_message_at || '').localeCompare(a.last_message_at || '');
   });
 
