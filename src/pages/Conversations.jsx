@@ -242,8 +242,6 @@ export default function Conversations({ user }) {
     }
     // sort: priority first, then unread, then last message time
     list.sort((a, b) => {
-      if (a.is_priority !== b.is_priority) return b.is_priority ? 1 : -1;
-      if ((a.unread_count || 0) !== (b.unread_count || 0)) return (b.unread_count || 0) - (a.unread_count || 0);
       return (toDate(b.last_message_at) || new Date(0)) - (toDate(a.last_message_at) || new Date(0));
     });
     return list;

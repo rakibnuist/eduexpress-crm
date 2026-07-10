@@ -3317,17 +3317,17 @@ function forwardToN8N(data) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function saveInboundMessage(convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
+function saveMessage(convId, direction, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
   try {
     const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,media_url,caption,status)
-      VALUES (?,?,?,?,?,?,?,'delivered')`).run(convId, 'in', type, content, waMessageId, mediaUrl, caption);
+      VALUES (?,?,?,?,?,?,?,'delivered')`).run(convId, direction, type, content, waMessageId, mediaUrl, caption);
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
     db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), unread_count=unread_count+1 WHERE id=?").run(content || `[${type}]`, convId);
     const conv = db.prepare("SELECT conversations.*, contacts.name as contact_name, contacts.phone as contact_phone, channels.name as channel_name, channels.type as channel_type FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id WHERE conversations.id=?").get(convId);
     broadcast('new_message', {
       ...msg,
       conversation_id: convId,
-      direction: 'inbound',
+      direction: direction === 'in' ? 'inbound' : 'outbound',
       contact_name: conv?.contact_name,
       channel_type: conv?.channel_type,
     }, (u) => userHasAccessToConversation(u, convId));
@@ -6661,7 +6661,7 @@ app.post('/webhook/meta', async (req, res) => {
           else if (msg.type === 'button')   { content = msg.button?.text; type='text'; }
           else { content = `[${msg.type}]`; }
 
-          saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
+          saveMessage(conv.id, 'in', content, type, msg.id, mediaUrl, caption);
           // Run automation rules on the incoming message
           const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
           if (savedMsg) {
@@ -6765,12 +6765,13 @@ app.post('/webhook/meta', async (req, res) => {
 
       // Messenger messages
       for (const messaging of entry.messaging || []) {
-        if (!messaging.message || messaging.message.is_echo) continue;
-        const senderId = messaging.sender.id;
+        if (!messaging.message) continue;
+        const isEcho = messaging.message.is_echo;
+        const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
         const channel = db.prepare("SELECT * FROM channels WHERE page_id=? AND type='messenger'").get(pageId);
         if (!channel) continue;
 
-        const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(senderId) || upsertContact({ name: `Messenger User`, messenger_id: senderId });
+        const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(customerId) || upsertContact({ name: `Messenger User`, messenger_id: customerId });
         // Fetch name + profile picture from Messenger API
         try {
           const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
@@ -6807,7 +6808,7 @@ app.post('/webhook/meta', async (req, res) => {
           else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
         }
         if (!text) text = '[message]';
-        saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
+        saveMessage(conv.id, isEcho ? 'out' : 'in', text, mtype, messaging.message.mid, murl);
         // Run automation rules
         const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
         if (savedMsg) {
