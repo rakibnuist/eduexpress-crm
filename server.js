@@ -99,11 +99,22 @@ const uploadLimiter = rateLimit({
 app.use(standardLimiter);
 app.get('/api/auth/emergency-reset', (req, res) => {
   const newHash = hashPassword('eduexpress2026');
-  const info = db.prepare("UPDATE users SET password_hash = ?, active = 1").run(newHash);
+  
+  // First, check if admin exists
+  const existingAdmin = db.prepare("SELECT id FROM users WHERE email = 'admin@eduexpressint.com'").get();
+  
+  if (!existingAdmin) {
+    const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, active) VALUES (?, ?, ?, ?, ?)`).run(
+      'admin@eduexpressint.com', 'Administrator', newHash, 'admin', 1
+    );
+    db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, ?)`).run(info.lastInsertRowid, 'founder_ceo');
+  } else {
+    db.prepare("UPDATE users SET password_hash = ?, active = 1 WHERE email = 'admin@eduexpressint.com'").run(newHash);
+  }
+
   const allUsers = db.prepare("SELECT id, email, name, role, active FROM users").all();
   res.json({
-    message: 'All passwords have been reset to eduexpress2026 temporarily for debugging.',
-    rowsUpdated: info.changes,
+    message: 'Admin account has been recreated and password set to eduexpress2026.',
     usersFound: allUsers
   });
 });
