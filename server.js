@@ -19,16 +19,29 @@ const LOCAL_DB_PATH = join(__dirname, 'crm.db');
 let DB_PATH = process.env.DB_PATH;
 
 if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
-  DB_PATH = LOCAL_DB_PATH;
-  const oldDbPath = join(PERSISTENT_HOME, 'crm-data', 'crm.db');
-  if (existsSync(oldDbPath) && !existsSync(LOCAL_DB_PATH)) {
-    try {
-      copyFileSync(oldDbPath, LOCAL_DB_PATH);
-      console.log(`[database] Auto-migrated database from ${oldDbPath} to ${LOCAL_DB_PATH}`);
-    } catch (err) {
-      console.error(`[database] Migration from legacy path failed:`, err.message);
-    }
+  const persistentDir = join(PERSISTENT_HOME, 'crm-data');
+  if (!existsSync(persistentDir)) {
+    mkdirSync(persistentDir, { recursive: true });
   }
+  DB_PATH = join(persistentDir, 'crm.db');
+  
+  const restoreDbPath = join(__dirname, 'restore.db');
+  if (existsSync(restoreDbPath)) {
+    try {
+      copyFileSync(restoreDbPath, DB_PATH);
+      console.log(`[database] Restored database from ${restoreDbPath} to ${DB_PATH}`);
+      unlinkSync(restoreDbPath);
+    } catch (err) {
+      console.error(`[database] Restore failed:`, err.message);
+    }
+  } else if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH)) {
+    try {
+      copyFileSync(LOCAL_DB_PATH, DB_PATH);
+      console.log(`[database] Copied bundled database to ${DB_PATH}`);
+    } catch (err) {}
+  }
+} else if (!DB_PATH) {
+  DB_PATH = LOCAL_DB_PATH;
 }
 const DB_DIR = dirname(DB_PATH);
 
