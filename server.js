@@ -5696,6 +5696,15 @@ async function syncChannelMetadata(channelId) {
         db.prepare("UPDATE channels SET name = ?, avatar_url = ? WHERE id = ?").run(data.name, avatarUrl, channelId);
         console.log(`[channel-metadata] Updated messenger/instagram channel ${channelId} (${data.name}) avatar: ${avatarUrl ? 'yes' : 'no'}`);
       }
+
+      // Auto-subscribe the Page to our webhook to ensure messages arrive instantly
+      try {
+        const subRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,messaging_optins,leadgen&access_token=${effectiveToken}`, { method: 'POST' });
+        const subData = await subRes.json();
+        console.log(`[channel-metadata] Auto-subscribed webhook for page ${pageId}:`, subData.success ? 'Success' : `Failed (${subData.error?.message})`);
+      } catch (err) {
+        console.warn(`[channel-metadata] Webhook auto-subscribe error for page ${pageId}:`, err.message);
+      }
     } catch (err) {
       console.warn(`[channel-metadata] Error syncing messenger/instagram channel ${channelId}:`, err.message);
     }
