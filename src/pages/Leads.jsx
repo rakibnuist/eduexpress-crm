@@ -7,7 +7,7 @@ import { useToast } from '../components/Toast';
 import { 
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, X,
   LayoutGrid, Table as TableIcon, GripVertical, Phone, MapPin, User,
-  Calendar, Filter, CalendarDays, Building2, FolderOpen, ArrowRight
+  Calendar, Filter, CalendarDays, Building2, FolderOpen, ArrowRight, MessageSquare
 } from 'lucide-react';
 
 const STAGES = [
