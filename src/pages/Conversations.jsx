@@ -381,14 +381,21 @@ export default function Conversations({ user }) {
     api.employees().then(setEmployees).catch(() => {});
   }, []);
   useEffect(() => { loadConversations(); }, [loadConversations]);
+  const selectedConvIdRef = useRef(null);
   useEffect(() => {
-    if (selectedConv?.id) { 
-      const convStub = { id: selectedConv.id };
-      loadMessages(convStub); 
-      loadContactDetails(convStub); 
+    if (selectedConv?.id) {
+      if (selectedConvIdRef.current !== selectedConv.id) {
+        selectedConvIdRef.current = selectedConv.id;
+        loadMessages(selectedConv);
+        loadContactDetails(selectedConv);
+      }
+    } else {
+      selectedConvIdRef.current = null;
+      setMessages([]);
+      setContactNotes([]);
+      setContactTags([]);
     }
-    else { setMessages([]); setContactNotes([]); setContactTags([]); }
-  }, [selectedConv?.id, loadMessages, loadContactDetails]);
+  }, [selectedConv, loadMessages, loadContactDetails]);
   useEffect(() => {
     const scrollToBottom = () => {
       if (scrollContainerRef.current) {
@@ -1085,7 +1092,7 @@ export default function Conversations({ user }) {
                 const isUnread = Number(conv.unread_count || 0) > 0;
                 const countryFlag = getCountryEmoji(conv.lead_destination);
                 return (
-                  <button key={conv.id} onClick={() => { setSelectedConv(conv); setShowMobileDrawer(false); }}
+                  <button key={conv.id} onClick={() => handleSelectConv(conv)}
                     className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${
                       isSel ? 'bg-[#e7f3ff]'
                       : isUnread ? 'bg-[#e3f0ff] hover:bg-[#d8ebff] shadow-[inset_0_0_0_1px_rgba(24,119,242,0.1)]' // Stronger highlight for unread
