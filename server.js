@@ -228,7 +228,9 @@ app.get('/diagnose-db', (req, res) => {
     const size = existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const integrity = db.prepare("PRAGMA integrity_check").get();
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, tables });
+    const userCount = db.prepare("SELECT COUNT(*) as c FROM users").get().c;
+    const leadsCount = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
+    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, userCount, leadsCount, tables });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
