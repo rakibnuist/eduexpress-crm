@@ -532,6 +532,10 @@ export default function Conversations({ user }) {
         } catch (err) { console.error('SSE conversation_deleted error:', err); }
       });
 
+      es.addEventListener('sync_done', () => {
+        refreshBgRef.current();
+      });
+
       es.onerror = () => {
         try { es.close(); } catch {}
         es = null;
