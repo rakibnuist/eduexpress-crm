@@ -8590,7 +8590,7 @@ setInterval(() => {
       const filePath = join(backupsDir, file);
       const stat = fs.statSync(filePath);
       if (stat.mtimeMs < sevenDaysAgo && file.endsWith('.db')) {
-        unlinkSync(filePath);
+        fs.unlinkSync(filePath);
         console.log(`[backup] Deleted old automated backup: ${file}`);
       }
     });
