@@ -437,8 +437,14 @@ const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
+  
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+
   if (AUTH_FREE.includes(req.path)) return next();
   if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
   // Service-account bypass: trusted internal key (no location restriction)
