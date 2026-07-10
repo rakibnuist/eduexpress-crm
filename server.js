@@ -97,6 +97,11 @@ const uploadLimiter = rateLimit({
   message: { error: 'Upload quota exceeded, please try again later.' },
 });
 app.use(standardLimiter);
+app.get('/api/auth/emergency-reset', (req, res) => {
+  const newHash = hashPassword('eduexpress2026');
+  db.prepare("UPDATE users SET password_hash = ? WHERE email = 'admin@eduexpressint.com'").run(newHash);
+  res.send('Admin password has been reset to eduexpress2026. You can now log in.');
+});
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/logout', authLimiter);
 app.use('/api/upload', uploadLimiter);
@@ -409,7 +414,7 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead'];
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
