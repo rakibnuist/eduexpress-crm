@@ -957,7 +957,7 @@ export default function Conversations({ user }) {
 
   /* ── render ── */
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-white overflow-hidden" style={{ fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif" }}>
+    <div className="flex-1 h-full flex bg-white overflow-hidden" style={{ fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif" }}>
 
       {/* ═══ LEFT: Channel Sidebar ═══ */}
       <div className={`${selectedConv ? 'hidden xl:flex' : 'flex'} ${sidebarCollapsed ? 'w-14' : 'w-52'} bg-white border-r border-[#e4e6eb] flex-col flex-shrink-0 transition-all duration-200 z-10`}>

@@ -3519,7 +3519,7 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
 
       // Auto-Lead Creation from Message Content (Bangladeshi numbers)
       if (direction === 'in' && type === 'text' && content && !conv.lead_id) {
-        const bdPhoneRegex = /(?:\+?88)?01[3-9]\d{8}/;
+        const bdPhoneRegex = /(?:\+?88[\s-]*)?01[3-9](?:[\s-]*\d){8}/;
         const match = content.match(bdPhoneRegex);
         if (match) {
           const extractedPhone = match[0];
