@@ -9119,11 +9119,10 @@ app.get('/api/admin/download-db', (req, res) => {
   res.download(DB_PATH);
 });
 
-const multer = require('multer');
-const upload = multer({ dest: 'uploads/' });
-app.post('/api/admin/upload-db', upload.single('db'), (req, res) => {
-  const fs = require('fs');
-  fs.copyFileSync(req.file.path, DB_PATH);
+const fs = require('fs');
+app.post('/api/admin/upload-db', express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
+  if (!req.body || req.body.length === 0) return res.status(400).send('No file');
+  fs.writeFileSync(DB_PATH, req.body);
   res.json({ success: true, message: 'Database replaced successfully. Restarting...' });
   setTimeout(() => process.exit(0), 1000); // Force PM2/Hostinger to restart
 });
