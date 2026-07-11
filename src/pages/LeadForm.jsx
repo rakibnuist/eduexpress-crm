@@ -188,23 +188,31 @@ export default function LeadForm({ user, lead, settings, onSave }) {
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
         {(form.lead_status === 'File Opened' || form.lead_status === 'Enrolled') && (
-          <Row cols={1}>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                File Stage (Active Student Profile)
-              </label>
-              <select
-                value={form.application_stage || mappedStages[0]?.key || ''}
-                onChange={e => set('application_stage', e.target.value)}
-                className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white font-semibold text-slate-700 cursor-pointer"
-              >
-                <option value="">— pick file stage —</option>
-                {mappedStages.map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          </Row>
+          <>
+            <Row cols={1}>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  File Stage (Active Student Profile)
+                </label>
+                <select
+                  value={form.application_stage || mappedStages[0]?.key || ''}
+                  onChange={e => set('application_stage', e.target.value)}
+                  className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white font-semibold text-slate-700 cursor-pointer"
+                >
+                  <option value="">— pick file stage —</option>
+                  {mappedStages.map(s => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </Row>
+            <Row>
+              <SelectField label="Payment Agreement" value={form.payment_agreement} onChange={v => set('payment_agreement', v)}
+                options={['Standard', 'All Payment After VISA (Hardcopy Required)', 'All Payment After VISA (Deposit Required)']} placeholder="— pick —" />
+              <SelectField label="Hardcopy Status" value={form.hardcopy_status} onChange={v => set('hardcopy_status', v)}
+                options={['Not Received', 'Received (In Office)', 'Returned to Student']} placeholder="— pick —" />
+            </Row>
+          </>
         )}
       </Section>
 
@@ -315,6 +323,8 @@ function initial(lead, user) {
     passing_year: lead.passing_year ?? '', last_education_major: lead.last_education_major ?? '',
     height: lead.height ?? '', weight: lead.weight ?? '',
     english_test_type: lead.english_test_type ?? '',
+    payment_agreement: lead.payment_agreement ?? '',
+    hardcopy_status: lead.hardcopy_status ?? '',
   };
 }
 

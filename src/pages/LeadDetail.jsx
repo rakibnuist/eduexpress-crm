@@ -328,6 +328,12 @@ export default function LeadDetail({ user }) {
                 <span className="text-slate-400">Not started</span>
               )}
             </Row>
+            {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') && (
+              <>
+                <Row label="Payment Agreement">{lead.payment_agreement || 'Standard'}</Row>
+                <Row label="Hardcopy">{lead.hardcopy_status || 'Not Received'}</Row>
+              </>
+            )}
             <Row label="Visa deadline">{lead.visa_deadline || '—'}</Row>
             <Row label="Departure">{lead.departure_date || '—'}</Row>
             <Row label="Source">{lead.source || '—'}</Row>

@@ -2300,6 +2300,8 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN height TEXT`,
     `ALTER TABLE leads      ADD COLUMN weight TEXT`,
     `ALTER TABLE leads      ADD COLUMN english_test_type TEXT`,
+    `ALTER TABLE leads      ADD COLUMN payment_agreement TEXT`,
+    `ALTER TABLE leads      ADD COLUMN hardcopy_status TEXT`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
@@ -3996,6 +3998,8 @@ function leadParams(d, lead_id, balance) {
     blood_group: txt(d.blood_group), date_of_birth: txt(d.date_of_birth),
     medical_notes: txt(d.medical_notes), emergency_contact: txt(d.emergency_contact),
     height: txt(d.height), weight: txt(d.weight),
+    payment_agreement: txt(d.payment_agreement),
+    hardcopy_status: txt(d.hardcopy_status),
     // Active application stage
     application_stage: txt(d.application_stage),
   };
@@ -4008,7 +4012,8 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
-  application_stage, passing_year, last_education_major, height, weight, english_test_type
+  application_stage, passing_year, last_education_major, height, weight, english_test_type,
+  payment_agreement, hardcopy_status
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -4016,7 +4021,8 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
-  @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type
+  @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
+  @payment_agreement, @hardcopy_status
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -4031,7 +4037,8 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   emergency_contact=@emergency_contact,
   application_stage=@application_stage, passing_year=@passing_year,
   last_education_major=@last_education_major, height=@height, weight=@weight,
-  english_test_type=@english_test_type
+  english_test_type=@english_test_type, payment_agreement=@payment_agreement,
+  hardcopy_status=@hardcopy_status
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
