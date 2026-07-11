@@ -74,7 +74,10 @@ export default function Settings() {
 
         {/* USERS & ACCESS */}
         {activeTab === 'users' && (
-          <UserManagement consultants={settings.consultants || []} />
+          <div className="space-y-6">
+            <UserManagement consultants={settings.consultants || []} />
+            <PartnerAgenciesManager />
+          </div>
         )}
 
         {/* INTEGRATIONS */}
@@ -531,13 +534,18 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
     roles: u.roles || (u.role ? [u.role] : []),
     consultant_name: u.consultant_name || '',
     emp_id: u.emp_id || '',
+    agency_id: u.agency_id || '',
     password: '',
   });
   const [employees, setEmployees] = useState([]);
+  const [agencies, setAgencies] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
 
-  useEffect(() => { api.employees().then(setEmployees).catch(() => {}); }, []);
+  useEffect(() => { 
+    api.employees().then(setEmployees).catch(() => {});
+    api.marketing.list('partner-agencies').then(setAgencies).catch(() => {});
+  }, []);
 
   const allRoles = [
     { key: 'founder_ceo', label: 'Founder & CEO', desc: 'Full access — everything including China data' },
@@ -546,6 +554,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
     { key: 'application_manager', label: 'Application Manager', desc: 'All applications + China data, no Finance/HR' },
     { key: 'marketing_manager', label: 'Marketing Manager', desc: 'Marketing + automation + all chats' },
     { key: 'consultant', label: 'Consultant', desc: 'Own leads only, Bangladesh pipeline' },
+    { key: 'agent', label: 'Partner Agent', desc: 'External agency partner portal access' },
   ];
 
   const toggleRole = (roleKey) => {
@@ -565,6 +574,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
         roles: form.roles,
         consultant_name: form.roles.includes('consultant') ? form.consultant_name : null,
         emp_id: form.emp_id || null,
+        agency_id: form.roles.includes('agent') ? (form.agency_id || null) : null,
       };
       if (editing) {
         if (form.password) payload.password = form.password;
@@ -645,6 +655,19 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
               </datalist>
             </div>
           )}
+
+          {form.roles.includes('agent') && (
+            <div>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Linked Partner Agency</label>
+              <select value={form.agency_id} onChange={e => setForm(f => ({ ...f, agency_id: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                <option value="">— Select an Agency —</option>
+                {agencies.map(a => (
+                  <option key={a.id} value={a.id}>{a.agency_name} {a.contact_person ? `(${a.contact_person})` : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="text-xs font-semibold text-slate-600 mb-1 block">
               Linked consultant <span className="text-slate-400 font-normal">(enables auto check-in on login)</span>
@@ -675,6 +698,158 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
               className="text-sm px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2">
               {saving && <Loader2 size={14} className="animate-spin" />}
               {saving ? 'Saving…' : editing ? 'Save changes' : 'Create user'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────── PARTNER AGENCIES ────────────────────────── */
+function PartnerAgenciesManager() {
+  const [agencies, setAgencies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    api.marketing.list('partner-agencies').then(setAgencies).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const remove = async (a) => {
+    const ok = await confirm({
+      title: `Delete agency "${a.agency_name}"?`,
+      body: 'This will remove the agency permanently.',
+      tone: 'danger', confirmLabel: 'Delete agency'
+    });
+    if (!ok) return;
+    try { await api.marketing.remove('partner-agencies', a.id); load(); toast.success('Agency deleted'); }
+    catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-2.5 text-slate-800">
+          <Briefcase size={18} className="text-blue-600" />
+          <h3 className="font-bold">Partner Agencies</h3>
+        </div>
+        <button onClick={() => setModal({ mode: 'add' })}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
+          <Plus size={14} /> Add Agency
+        </button>
+      </div>
+      
+      <div className="p-0 overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wider">
+            <tr>
+              <th className="px-5 py-3 font-semibold">Agency Name</th>
+              <th className="px-5 py-3 font-semibold">Contact Person</th>
+              <th className="px-5 py-3 font-semibold">Email</th>
+              <th className="px-5 py-3 font-semibold">Phone</th>
+              <th className="px-5 py-3 font-semibold">Commission</th>
+              <th className="px-5 py-3 font-semibold text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
+              <tr><td colSpan="6" className="px-5 py-8 text-center text-slate-400"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Loading agencies...</td></tr>
+            ) : agencies.length === 0 ? (
+              <tr><td colSpan="6" className="px-5 py-8 text-center text-slate-500">No partner agencies added yet.</td></tr>
+            ) : (
+              agencies.map(a => (
+                <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-5 py-3 font-medium text-slate-800">{a.agency_name}</td>
+                  <td className="px-5 py-3 text-slate-600">{a.contact_person}</td>
+                  <td className="px-5 py-3 text-slate-600">{a.email}</td>
+                  <td className="px-5 py-3 text-slate-600">{a.phone}</td>
+                  <td className="px-5 py-3 text-slate-600">{a.commission_rate ? `${a.commission_rate}%` : '-'}</td>
+                  <td className="px-5 py-3 text-right">
+                    <button onClick={() => setModal({ mode: 'edit', agency: a })} className="p-1.5 text-slate-400 hover:text-blue-600 transition-colors mr-1"><Pencil size={15} /></button>
+                    <button onClick={() => remove(a)} className="p-1.5 text-slate-400 hover:text-red-600 transition-colors"><Trash2 size={15} /></button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <AgencyModal modal={modal} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />
+      )}
+    </div>
+  );
+}
+
+function AgencyModal({ modal, onClose, onSaved }) {
+  const editing = modal.mode === 'edit';
+  const a = modal.agency || {};
+  const [form, setForm] = useState({
+    agency_name: a.agency_name || '',
+    contact_person: a.contact_person || '',
+    email: a.email || '',
+    phone: a.phone || '',
+    commission_rate: a.commission_rate || ''
+  });
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (editing) {
+        await api.marketing.update('partner-agencies', a.id, form);
+      } else {
+        await api.marketing.create('partner-agencies', form);
+      }
+      toast.success(editing ? 'Agency updated' : 'Agency created');
+      onSaved();
+    } catch (err) {
+      toast.error(err.message || 'Save failed');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
+          <h3 className="font-bold text-slate-800">{editing ? 'Edit Agency' : 'Add Agency'}</h3>
+          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"><X size={18} /></button>
+        </div>
+        <form onSubmit={save} className="p-5 space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Agency Name</label>
+            <input required value={form.agency_name} onChange={e => setForm(f => ({ ...f, agency_name: e.target.value }))} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Contact Person</label>
+            <input value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Email</label>
+            <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Phone</label>
+            <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600 mb-1 block">Commission Rate (%)</label>
+            <input type="number" step="0.1" value={form.commission_rate} onChange={e => setForm(f => ({ ...f, commission_rate: e.target.value }))} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={saving} className="text-sm px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2">
+              {saving && <Loader2 size={14} className="animate-spin" />} Save
             </button>
           </div>
         </form>
