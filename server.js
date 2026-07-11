@@ -654,6 +654,25 @@ function generatePublicToken() {
   return crypto.randomBytes(9).toString('base64url'); // 12 char URL-safe
 }
 
+app.post('/api/admin/fix-page-names', (req, res) => requireAdmin(req, res, () => {
+  try {
+    const result = db.prepare(`
+      UPDATE leads 
+      SET page_name = (
+        SELECT c.name 
+        FROM channels c 
+        JOIN conversations conv ON conv.channel_id = c.id 
+        WHERE conv.lead_id = leads.id 
+        LIMIT 1
+      ) 
+      WHERE page_name IS NULL
+    `).run();
+    res.json({ ok: true, changes: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}));
+
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
 app.get('/api/users', (req, res) => requireAdmin(req, res, () => {
   const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login,agency_id FROM users ORDER BY id").all();
@@ -9262,5 +9281,24 @@ function scanOldChatsForLeads() {
     console.error('Retro scan error:', e.message);
   }
 }
+
+// Retroactively fix page names for old leads
+try {
+  const fixRes = db.prepare(`
+    UPDATE leads 
+    SET page_name = (
+      SELECT c.name 
+      FROM channels c 
+      JOIN conversations conv ON conv.channel_id = c.id 
+      WHERE conv.lead_id = leads.id 
+      LIMIT 1
+    ) 
+    WHERE page_name IS NULL
+  `).run();
+  console.log(`[Startup] Fixed page_name for ${fixRes.changes} existing leads.`);
+} catch(e) {
+  console.error('[Startup] Failed to fix page_name:', e.message);
+}
+
 // Run immediately after server starts
 setTimeout(scanOldChatsForLeads, 3000);
