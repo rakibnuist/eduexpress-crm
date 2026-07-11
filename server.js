@@ -6922,8 +6922,9 @@ app.post('/webhook/meta', async (req, res) => {
   if (body.object === 'instagram') {
     for (const entry of body.entry || []) {
       for (const msg of entry.messaging || []) {
-        if (!msg.message || msg.message.is_echo) continue;
-        const senderId = msg.sender.id;
+        if (!msg.message) continue;
+        const isEcho = msg.message.is_echo;
+        const senderId = isEcho ? msg.recipient.id : msg.sender.id;
         const igAccountId = entry.id;
         const channel = db.prepare("SELECT * FROM channels WHERE ig_account_id=? AND type='instagram'").get(igAccountId);
         if (!channel) continue;
@@ -6951,7 +6952,7 @@ app.post('/webhook/meta', async (req, res) => {
           if (updatedContact) contact.lead_id = updatedContact.lead_id;
         }
         const text = msg.message.text || '[message]';
-        saveInboundMessage(conv.id, text, 'text', msg.message.mid);
+        saveMessage(conv.id, isEcho ? 'out' : 'in', text, 'text', msg.message.mid);
         console.log(`📸 Instagram [${channel.name}]: ${text}`);
       }
     }

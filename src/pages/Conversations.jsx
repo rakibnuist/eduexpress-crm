@@ -488,15 +488,15 @@ export default function Conversations({ user }) {
                 handleNewMessageData(event);
               } else if (event && event.type === 'message_status') {
                 const data = event;
-                if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+                if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id == data.wa_message_id ? { ...m, status: data.status } : m));
               } else if (event && event.type === 'message_deleted') {
                 const data = event;
-                if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
-                  setMessages(prev => prev.filter(m => m.id !== data.message_id));
+                if (selectedConvRef.current && selectedConvRef.current.id == data.conversation_id) {
+                  setMessages(prev => prev.filter(m => m.id != data.message_id));
                 }
               } else if (event && event.type === 'conversation_deleted') {
                 const data = event;
-                if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+                if (selectedConvRef.current && selectedConvRef.current.id == data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
                 setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
               } else if (event && event.type === 'sync_done') {
                 refreshBgRef.current();
@@ -566,15 +566,15 @@ export default function Conversations({ user }) {
       es.addEventListener('message_status', (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+          if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id == data.wa_message_id ? { ...m, status: data.status } : m));
         } catch (err) { console.error('SSE message_status error:', err); }
       });
 
       es.addEventListener('message_deleted', (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
-            setMessages(prev => prev.filter(m => m.id !== data.message_id));
+          if (selectedConvRef.current && selectedConvRef.current.id == data.conversation_id) {
+            setMessages(prev => prev.filter(m => m.id != data.message_id));
           }
         } catch (err) { console.error('SSE message_deleted error:', err); }
       });
@@ -582,7 +582,7 @@ export default function Conversations({ user }) {
       es.addEventListener('conversation_deleted', (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+          if (selectedConvRef.current && selectedConvRef.current.id == data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
           setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
         } catch (err) { console.error('SSE conversation_deleted error:', err); }
       });
