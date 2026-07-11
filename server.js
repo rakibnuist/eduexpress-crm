@@ -3265,6 +3265,30 @@ function autoLinkOrCreateLead(contact) {
       } catch (e) {}
     }
 
+    if (!page_name) {
+      try {
+        const convChannel = db.prepare(`
+          SELECT c.id, c.name, c.type 
+          FROM conversations conv 
+          JOIN channels c ON conv.channel_id = c.id 
+          WHERE conv.contact_id = ? 
+          ORDER BY conv.last_message_at DESC LIMIT 1
+        `).get(contact.id);
+        
+        if (convChannel) {
+          page_name = convChannel.name;
+          channel_id = convChannel.id;
+          if (lead_source === 'Inbox') {
+            if (convChannel.type === 'messenger') lead_source = 'Messenger';
+            else if (convChannel.type === 'instagram') lead_source = 'Instagram Ad';
+            else if (convChannel.type === 'whatsapp') lead_source = 'WhatsApp';
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching channel for page_name fallback:', e.message);
+      }
+    }
+
     const info = db.prepare(`INSERT INTO leads (
       lead_id, date_added, client_name, phone, lead_source, lead_status, source,
       meta_ad_id, meta_campaign, ad_name, page_name, channel_id, assigned_consultant, notes
