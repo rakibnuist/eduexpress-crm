@@ -1336,6 +1336,64 @@ function ShareCard({ lead, onChanged }) {
   useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
   const url = token ? `${window.location.origin}/s/${token}` : null;
 
+  const generateCompositeQR = () => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 400; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 400, 480);
+        ctx.fillStyle = '#2563eb'; ctx.fillRect(0, 0, 400, 80);
+        
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Student Portal Access', 200, 38);
+        ctx.font = '13px sans-serif'; ctx.fillText('Scan to view application progress', 200, 60);
+        
+        ctx.drawImage(img, 80, 110, 240, 240);
+        
+        ctx.fillStyle = '#1e293b'; ctx.font = 'bold 20px sans-serif';
+        ctx.fillText(lead.client_name || 'Student', 200, 390);
+        
+        ctx.fillStyle = '#64748b'; ctx.font = '14px monospace';
+        ctx.fillText(`ID: ${lead.lead_id}`, 200, 415);
+        
+        ctx.fillStyle = '#94a3b8'; ctx.font = '11px sans-serif';
+        ctx.fillText('Keep this code secure. Do not share publicly.', 200, 455);
+        
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob); else reject(new Error('Canvas failed'));
+        }, 'image/png');
+      };
+      img.onerror = () => reject(new Error('Failed to load QR image'));
+      img.src = api.qrUrl(lead.id);
+    });
+  };
+
+  const handleDownload = async () => {
+    try {
+      const blob = await generateCompositeQR();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = objUrl;
+      a.download = `Student-Portal-${lead.client_name?.replace(/\\s+/g, '-') || lead.id}.png`;
+      a.click(); URL.revokeObjectURL(objUrl);
+    } catch (e) { toast.error('Could not generate QR code card'); }
+  };
+
+  const handleShare = async () => {
+    try {
+      const blob = await generateCompositeQR();
+      const file = new File([blob], `Student-Portal-${lead.lead_id}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: 'Student Portal QR', files: [file] });
+      } else {
+        await navigator.share({ title: 'Student Portal', url: url });
+      }
+    } catch (e) { /* ignored */ }
+  };
+
   const generate = async () => {
     setBusy(true);
     try { const r = await api.regenerateToken(lead.id); setToken(r.public_token); setEnabled(true); onChanged?.(); toast.success('New share link generated'); }
@@ -1392,24 +1450,11 @@ function ShareCard({ lead, onChanged }) {
               <p className="text-[10px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>
               
               <div className="flex gap-2 w-full mt-3">
-                <a href={api.qrUrl(lead.id)} download={`QR-${lead.id}.png`} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
+                <button onClick={handleDownload} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
                   <Download size={13} /> Download QR
-                </a>
+                </button>
                 {!!navigator.share && (
-                  <button onClick={async () => {
-                    try {
-                      const res = await fetch(api.qrUrl(lead.id));
-                      const blob = await res.blob();
-                      const file = new File([blob], `QR-${lead.id}.png`, { type: blob.type });
-                      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                        await navigator.share({ title: 'Student Portal QR', files: [file] });
-                      } else {
-                        await navigator.share({ title: 'Student Portal', url: url });
-                      }
-                    } catch (e) {
-                      // user likely cancelled the share sheet
-                    }
-                  }} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
+                  <button onClick={handleShare} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
                     <Share2 size={13} /> Share QR
                   </button>
                 )}
