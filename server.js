@@ -4014,7 +4014,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
   application_stage, passing_year, last_education_major, height, weight, english_test_type,
-  payment_agreement, hardcopy_status, hardcopy_documents
+  payment_agreement, hardcopy_status, hardcopy_documents, age
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -4023,7 +4023,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
   @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
-  @payment_agreement, @hardcopy_status, @hardcopy_documents
+  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -4039,7 +4039,8 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   application_stage=@application_stage, passing_year=@passing_year,
   last_education_major=@last_education_major, height=@height, weight=@weight,
   english_test_type=@english_test_type, payment_agreement=@payment_agreement,
-  hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents
+  hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents,
+  age=@age
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {

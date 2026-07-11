@@ -402,10 +402,11 @@ export default function LeadDetail({ user }) {
           )}
 
           {/* Medical info — relevant for visas (China MBBS etc.) */}
-          {(lead.blood_group || lead.date_of_birth || lead.medical_notes || lead.emergency_contact || lead.height || lead.weight) && (
+          {(lead.blood_group || lead.date_of_birth || lead.age || lead.medical_notes || lead.emergency_contact || lead.height || lead.weight) && (
             <Card title="Medical & Emergency" icon={<Heart size={14}/>}>
               <Row label="Blood group">{lead.blood_group || '—'}</Row>
               <Row label="Date of birth">{lead.date_of_birth || '—'}</Row>
+              <Row label="Age">{lead.age ? `${lead.age} years` : '—'}</Row>
               <Row label="Height">{lead.height || '—'}</Row>
               <Row label="Weight">{lead.weight || '—'}</Row>
               <Row label="Emergency contact">{lead.emergency_contact || '—'}</Row>

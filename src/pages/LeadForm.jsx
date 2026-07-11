@@ -265,6 +265,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
             <SelectField label="Blood group" value={form.blood_group} onChange={v => set('blood_group', v)}
               options={BLOOD} placeholder="—" />
             <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => set('date_of_birth', v)} />
+            <Field label="Age" type="number" value={form.age} onChange={v => set('age', v)} placeholder="e.g. 21" />
           </Row>
           <Row>
             <Field label="Height" value={form.height} onChange={v => set('height', v)} placeholder="e.g. 5'8&quot;" />
@@ -324,7 +325,7 @@ function initial(lead, user) {
     degree: lead.degree ?? '', major: lead.major ?? '',
     intake_term: lead.intake_term ?? '', university: lead.university ?? '',
     drive_link: lead.drive_link ?? '',
-    blood_group: lead.blood_group ?? '', date_of_birth: lead.date_of_birth ?? '',
+    blood_group: lead.blood_group ?? '', date_of_birth: lead.date_of_birth ?? '', age: lead.age ?? '',
     medical_notes: lead.medical_notes ?? '', emergency_contact: lead.emergency_contact ?? '',
     passing_year: lead.passing_year ?? '', last_education_major: lead.last_education_major ?? '',
     height: lead.height ?? '', weight: lead.weight ?? '',
