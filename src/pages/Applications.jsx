@@ -1390,6 +1390,30 @@ function ShareCard({ lead, onChanged }) {
             <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center mt-2 shadow-sm">
               <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={200} height={200} className="rounded" loading="lazy" />
               <p className="text-[10px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>
+              
+              <div className="flex gap-2 w-full mt-3">
+                <a href={api.qrUrl(lead.id)} download={`QR-${lead.id}.png`} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
+                  <Download size={13} /> Download QR
+                </a>
+                {!!navigator.share && (
+                  <button onClick={async () => {
+                    try {
+                      const res = await fetch(api.qrUrl(lead.id));
+                      const blob = await res.blob();
+                      const file = new File([blob], `QR-${lead.id}.png`, { type: blob.type });
+                      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        await navigator.share({ title: 'Student Portal QR', files: [file] });
+                      } else {
+                        await navigator.share({ title: 'Student Portal', url: url });
+                      }
+                    } catch (e) {
+                      // user likely cancelled the share sheet
+                    }
+                  }} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 text-[11px] font-semibold py-1.5 rounded-lg flex justify-center items-center gap-1.5 transition-colors cursor-pointer">
+                    <Share2 size={13} /> Share QR
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
