@@ -4743,7 +4743,14 @@ app.get('/api/public/student/:token', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
   if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
 
-  const uniApps = db.prepare("SELECT id, university, program, status, application_id, submitted_on, decision_on, notes FROM lead_university_applications WHERE lead_id=? ORDER BY id").all(lead.id);
+  const uniApps = db.prepare(`
+    SELECT l.id, l.university, l.program, l.status, l.application_id, l.submitted_on, l.decision_on, l.notes,
+           k.country
+    FROM lead_university_applications l
+    LEFT JOIN kb_universities k ON l.university = k.name
+    WHERE l.lead_id=? 
+    ORDER BY l.id
+  `).all(lead.id);
   const docs = db.prepare(`SELECT id, doc_type, status, notes, file_url, student_uploaded_url, student_uploaded_at, requested_by_student, received_on
                            FROM lead_documents
                            WHERE lead_id=?
@@ -4765,6 +4772,10 @@ app.get('/api/public/student/:token', (req, res) => {
       assigned_consultant: lead.assigned_consultant,
       drive_link: lead.drive_link,
       blood_group: lead.blood_group,
+      email: lead.email,
+      phone: lead.phone,
+      date_of_birth: lead.date_of_birth,
+      passport: lead.passport,
     },
     stages: getApplicationStages(),
     universities: uniApps,

@@ -170,6 +170,53 @@ export default function StudentPortal() {
                 </span>
               )}
             </div>
+            </div>
+            
+            {/* Student Details Grid */}
+            <div className="mt-8 pt-6 border-t border-slate-100">
+              <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
+                Student Details
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {student.email && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Email</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.email}</span>
+                  </div>
+                )}
+                {student.phone && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Phone</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.phone}</span>
+                  </div>
+                )}
+                {student.nationality && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Nationality</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.nationality}</span>
+                  </div>
+                )}
+                {student.intake_term && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Intake</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.intake_term}</span>
+                  </div>
+                )}
+                {student.date_of_birth && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Date of Birth</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.date_of_birth}</span>
+                  </div>
+                )}
+                {student.passport && (
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Passport No.</span>
+                    <span className="block text-sm font-medium text-slate-800 truncate">{student.passport}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
           </div>
         </section>
 
@@ -255,7 +302,14 @@ export default function StudentPortal() {
                     <div key={u.id} className="group relative p-5 rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-md transition-all duration-200 bg-white">
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{u.university}</h3>
+                          <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors flex items-center gap-2">
+                            {u.university}
+                            {u.country && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase tracking-wider border border-slate-200">
+                                <MapPin size={10} /> {u.country}
+                              </span>
+                            )}
+                          </h3>
                           <div className="mt-1.5 flex items-center gap-2 text-sm text-slate-600 font-medium bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-lg w-fit">
                             <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Major:</span>
                             <span>{u.program || student.major || 'General Program'}</span>
