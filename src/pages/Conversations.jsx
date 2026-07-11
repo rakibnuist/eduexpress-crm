@@ -480,24 +480,28 @@ export default function Conversations({ user }) {
       console.log('[sync] Running CDN-friendly long-polling loop…');
       while (activeLongPoll) {
         try {
-          const event = await api.pollMessages();
+          const res = await api.pollMessages();
           if (!activeLongPoll) break;
-          if (event && event.type === 'new_message') {
-            handleNewMessageData(event);
-          } else if (event && event.type === 'message_status') {
-            const data = event;
-            if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
-          } else if (event && event.type === 'message_deleted') {
-            const data = event;
-            if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
-              setMessages(prev => prev.filter(m => m.id !== data.message_id));
-            }
-          } else if (event && event.type === 'conversation_deleted') {
-            const data = event;
-            if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
-            setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
-          } else if (event && event.type === 'sync_done') {
-            refreshBgRef.current();
+          if (res && res.events) {
+            res.events.forEach(event => {
+              if (event && event.type === 'new_message') {
+                handleNewMessageData(event);
+              } else if (event && event.type === 'message_status') {
+                const data = event;
+                if (selectedConvRef.current) setMessages(prev => prev.map(m => m.wa_message_id === data.wa_message_id ? { ...m, status: data.status } : m));
+              } else if (event && event.type === 'message_deleted') {
+                const data = event;
+                if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) {
+                  setMessages(prev => prev.filter(m => m.id !== data.message_id));
+                }
+              } else if (event && event.type === 'conversation_deleted') {
+                const data = event;
+                if (selectedConvRef.current && selectedConvRef.current.id === data.conversation_id) { setSelectedConv(null); toast.info('Conversation was deleted'); }
+                setConversations(prev => prev.filter(c => c.id !== data.conversation_id));
+              } else if (event && event.type === 'sync_done') {
+                refreshBgRef.current();
+              }
+            });
           }
         } catch (err) {
           if (!activeLongPoll) break;
