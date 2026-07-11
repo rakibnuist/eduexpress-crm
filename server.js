@@ -288,7 +288,8 @@ app.post('/api/auth/login', (req, res) => {
   // If neither config is set the check is skipped (safe for initial setup).
   // Admins may log in from anywhere — they are exempt from the office network
   // and geofence gates (their password has already been verified above).
-  const enforceLocation = !isFullAdmin(user); // Full admins exempt from location enforcement
+  const userRoles = JSON.parse(user.roles || '[]');
+  const enforceLocation = !isFullAdmin(user) && !userRoles.includes('agent'); // Full admins & agents exempt from location enforcement
   const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
   const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
 
@@ -508,10 +509,14 @@ function canViewAutomation(user) {
   return isFullAdmin(user) || userHasRole(user, 'marketing_manager');
 }
 function canViewAllLeads(user) {
+  if (isAgent(user)) return false;
   return isFullAdmin(user) || isInvestor(user) || userHasAnyRole(user, 'application_manager', 'marketing_manager');
 }
 function canViewOwnLeadsOnly(user) {
-  return userHasRole(user, 'consultant') && !canViewAllLeads(user);
+  return userHasRole(user, 'consultant') && !canViewAllLeads(user) && !isAgent(user);
+}
+function isAgent(user) {
+  return userHasRole(user, 'agent');
 }
 function canViewAllConversations(user) {
   // Full admins (Founder & CEO, Managing Director, legacy Admin) + any role with explicit all-conversations permission
@@ -626,7 +631,7 @@ function generatePublicToken() {
 
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
 app.get('/api/users', (req, res) => requireAdmin(req, res, () => {
-  const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login FROM users ORDER BY id").all();
+  const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login,agency_id FROM users ORDER BY id").all();
   // Attach roles array to each user
   for (const u of users) {
     const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(u.id).map(r => r.role);
@@ -635,12 +640,12 @@ app.get('/api/users', (req, res) => requireAdmin(req, res, () => {
   res.json(users);
 }));
 app.post('/api/users', (req, res) => requireAdmin(req, res, () => {
-  const { email, name, password, role = 'consultant', roles = [], consultant_name = null, emp_id = null } = req.body || {};
+  const { email, name, password, role = 'consultant', roles = [], consultant_name = null, emp_id = null, agency_id = null } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
-    const safeRole = ['admin', 'manager', 'consultant'].includes(role) ? role : 'consultant';
-    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
-      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id);
+    const safeRole = ['admin', 'manager', 'consultant', 'agent'].includes(role) ? role : 'consultant';
+    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id,agency_id) VALUES (?,?,?,?,?,?,?)`)
+      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id, agency_id);
     const newUserId = info.lastInsertRowid;
     // Insert into user_roles if roles provided
     const newRoles = Array.isArray(roles) && roles.length ? roles : [safeRole === 'admin' ? 'founder_ceo' : safeRole === 'manager' ? 'application_manager' : 'consultant'];
@@ -655,12 +660,12 @@ app.post('/api/users', (req, res) => requireAdmin(req, res, () => {
   }
 }));
 app.put('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
-  const { name, role, roles, consultant_name, emp_id, active, password } = req.body || {};
+  const { name, role, roles, consultant_name, emp_id, active, password, agency_id } = req.body || {};
   const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   const newHash = password ? hashPassword(password) : cur.password_hash;
-  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=? WHERE id=?`)
-    .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, req.params.id);
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=?, agency_id=COALESCE(?,agency_id) WHERE id=?`)
+    .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, agency_id ?? null, req.params.id);
   // Update user_roles if roles array provided
   if (Array.isArray(roles)) {
     db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
@@ -1442,6 +1447,16 @@ function setupSchema() { db.exec(`
     meta_form_id TEXT,
     meta_ad_id TEXT,
     meta_campaign TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS partner_agencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agency_name TEXT NOT NULL,
+    contact_person TEXT,
+    phone TEXT,
+    email TEXT,
+    commission_rate REAL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -2295,6 +2310,11 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN major TEXT`,
     `ALTER TABLE leads      ADD COLUMN drive_link TEXT`,
     `ALTER TABLE leads      ADD COLUMN deposit REAL DEFAULT 0`,
+    // Partner Agency Portal
+    `ALTER TABLE users      ADD COLUMN agency_id INTEGER`,
+    `ALTER TABLE leads      ADD COLUMN agency_id INTEGER`,
+    `ALTER TABLE leads      ADD COLUMN lead_type TEXT DEFAULT 'B2C'`,
+
     // Student portal + medical
     `ALTER TABLE leads      ADD COLUMN public_token TEXT`,
     `ALTER TABLE leads      ADD COLUMN public_enabled INTEGER DEFAULT 1`,
@@ -4033,6 +4053,11 @@ app.get('/api/leads', (req, res) => {
     params.me = meName;
     params.meClean = meClean;
   }
+  // Agency isolation: Agents can ONLY see their own agency's leads
+  if (isAgent(req.user)) {
+    where.push("agency_id=@agency_id");
+    params.agency_id = req.user.agency_id;
+  }
   // China data isolation: exclude China leads for unauthorized users unless they own/are assigned to them
   if (!canViewChinaData(req.user) && !canViewOwnLeadsOnly(req.user)) {
     where.push("(destination != 'China' AND source != 'China')");
@@ -4119,6 +4144,9 @@ function leadParams(d, lead_id, balance) {
     age: num(d.age),
     // Active application stage
     application_stage: txt(d.application_stage),
+    // Agent Portal
+    agency_id: d.agency_id ? Number(d.agency_id) : null,
+    lead_type: txt(d.lead_type) || 'B2C',
   };
 }
 
@@ -4130,7 +4158,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
   application_stage, passing_year, last_education_major, height, weight, english_test_type,
-  payment_agreement, hardcopy_status, hardcopy_documents, age
+  payment_agreement, hardcopy_status, hardcopy_documents, age, agency_id, lead_type
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -4139,7 +4167,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
   @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
-  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age
+  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age, @agency_id, @lead_type
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -4156,7 +4184,7 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   last_education_major=@last_education_major, height=@height, weight=@weight,
   english_test_type=@english_test_type, payment_agreement=@payment_agreement,
   hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents,
-  age=@age
+  age=@age, agency_id=@agency_id, lead_type=@lead_type
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
@@ -4174,6 +4202,13 @@ app.post('/api/leads', async (req, res) => {
   }
   const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
+  if (isAgent(req.user)) {
+    d.agency_id = req.user.agency_id;
+    d.lead_type = 'B2B';
+    d.lead_source = 'Partner Agency';
+  } else {
+    d.lead_type = d.lead_type || 'B2C';
+  }
   const params = leadParams(d, lead_id, balance);
   const info = db.prepare(LEAD_INSERT_SQL).run(params);
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(info.lastInsertRowid);
@@ -7776,6 +7811,7 @@ marketingCrud('kb/universities', 'kb_universities', ['name','country','city','pr
 marketingCrud('kb/scholarships', 'kb_scholarships', ['name','country','type','coverage','eligibility','deadline','source_url','status','last_verified','notes']);
 marketingCrud('kb/sources', 'kb_sources', ['topic','url','source_type','use_for','date_added','notes']);
 marketingCrud('kb/docs', 'kb_docs', ['name','type','destination','drive_url','version','owner','updated_at']);
+marketingCrud('partner-agencies', 'partner_agencies', ['agency_name','contact_person','phone','email','commission_rate']);
 
 // ── Brain API pool (rotation state; secrets stay in n8n) ──
 app.get('/api/marketing/brain', (req, res) => requireMarketing(req, res, () => {

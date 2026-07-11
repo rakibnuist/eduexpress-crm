@@ -47,6 +47,7 @@ const ensureAbsoluteUrl = (url) => {
 };
 
 export default function LeadDetail({ user }) {
+  const isAgentUser = user?.roles?.includes('agent');
   const { id } = useParams();
   const navigate = useNavigate();
   const [lead, setLead]         = useState(null);
@@ -207,8 +208,8 @@ export default function LeadDetail({ user }) {
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               {lead.date_added && <>Added {lead.date_added}</>}
-              {lead.assigned_consultant && <> · Assigned to <strong>{lead.assigned_consultant}</strong></>}
-              {lead.referrer && <> · Referred by {lead.referrer}</>}
+              {!isAgentUser && lead.assigned_consultant && <> · Assigned to <strong>{lead.assigned_consultant}</strong></>}
+              {!isAgentUser && lead.referrer && <> · Referred by {lead.referrer}</>}
             </p>
           </div>
         </div>
@@ -241,10 +242,14 @@ export default function LeadDetail({ user }) {
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Service fee"  value={fmt(lead.service_fee)} icon={<DollarSign size={16}/>} color="blue" />
-        <StatCard label="Paid"         value={fmt(lead.paid)} icon={<CheckCircle2 size={16}/>} color="emerald"
-          sub={`Deposit: ${fmtFull(lead.deposit || 0)}`} />
-        <StatCard label="Balance"      value={fmt(balance)} icon={<CreditCard size={16}/>} color={balance > 0 ? 'rose' : 'slate'} />
+        {!isAgentUser && (
+          <>
+            <StatCard label="Service fee"  value={fmt(lead.service_fee)} icon={<DollarSign size={16}/>} color="blue" />
+            <StatCard label="Paid"         value={fmt(lead.paid)} icon={<CheckCircle2 size={16}/>} color="emerald"
+              sub={`Deposit: ${fmtFull(lead.deposit || 0)}`} />
+            <StatCard label="Balance"      value={fmt(balance)} icon={<CreditCard size={16}/>} color={balance > 0 ? 'rose' : 'slate'} />
+          </>
+        )}
         <StatCard label="Documents"    value={`${docsReceived}/${docs.length}`} icon={<FileText size={16}/>} color="violet"
           sub={unis.length > 0 ? `${unisAdmitted}/${unis.length} unis admitted` : null} />
       </div>
@@ -341,25 +346,29 @@ export default function LeadDetail({ user }) {
             )}
             <Row label="Visa deadline">{lead.visa_deadline || '—'}</Row>
             <Row label="Departure">{lead.departure_date || '—'}</Row>
-            <Row label="Source">{lead.source || '—'}</Row>
-            <Row label="Referrer">{lead.referrer || '—'}</Row>
-            <Row label="Lead source">
-              {lead.lead_source === 'WhatsApp' ? (
-                <a href={lead.phone ? `https://wa.me/${lead.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
-                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                  <span>WhatsApp (Message)</span>
-                </a>
-              ) : lead.lead_source === 'Messenger' ? (
-                <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
-                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
-                  <span>Messenger (Message)</span>
-                </a>
-              ) : (
-                lead.lead_source || '—'
-              )}
-            </Row>
+            {!isAgentUser && (
+              <>
+                <Row label="Source">{lead.source || '—'}</Row>
+                <Row label="Referrer">{lead.referrer || '—'}</Row>
+                <Row label="Lead source">
+                  {lead.lead_source === 'WhatsApp' ? (
+                    <a href={lead.phone ? `https://wa.me/${lead.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                      <span>WhatsApp (Message)</span>
+                    </a>
+                  ) : lead.lead_source === 'Messenger' ? (
+                    <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
+                      <span>Messenger (Message)</span>
+                    </a>
+                  ) : (
+                    lead.lead_source || '—'
+                  )}
+                </Row>
+              </>
+            )}
             <Row label="Follow-up">{lead.next_followup || '—'}</Row>
           </Card>
 

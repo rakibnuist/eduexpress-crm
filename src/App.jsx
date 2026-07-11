@@ -31,6 +31,8 @@ const Automation    = lazy(() => import('./pages/Automation'));
 const Destinations  = lazy(() => import('./pages/Destinations'));
 const DestinationPublic = lazy(() => import('./pages/DestinationPublic'));
 
+const AgentLogin    = lazy(() => import('./pages/AgentLogin'));
+
 function PageLoader() {
   return (
     <div className="flex items-center justify-center py-24">
@@ -68,6 +70,9 @@ export default function App() {
               <Route path="/s/:token" element={<StudentPortal />} />
               <Route path="/login" element={
                 user ? <Navigate to="/" replace /> : <Login onSuccess={u => setUser(normalizeUserRoles(u))} />
+              } />
+              <Route path="/partner" element={
+                user ? <Navigate to="/" replace /> : <AgentLogin onSuccess={u => setUser(normalizeUserRoles(u))} />
               } />
 
               <Route path="/*" element={

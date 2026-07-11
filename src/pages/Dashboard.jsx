@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -31,6 +31,7 @@ const PIPE_COLORS = {
 const DEST_COLORS = ['#60a5fa','#34d399','#f59e0b','#a78bfa','#f87171','#22d3ee','#fb923c','#818cf8'];
 
 export default function Dashboard({ user }) {
+  const isAgentUser = user?.roles?.includes('agent');
   useEffect(() => { document.title = 'Executive Dashboard | EduExpress Core'; }, []);
 
   const [data,       setData]       = useState(null);
@@ -98,6 +99,10 @@ export default function Dashboard({ user }) {
       </div>
     </div>
   );
+
+  if (isAgentUser) {
+    return <Navigate to="/leads" replace />;
+  }
 
   const { pipeline, total, followupToday, recentLeads, totalPaid,
           openConvs = 0, unreadMsgs = 0, newToday = 0, by_source = [], by_dest = [] } = data;

@@ -152,6 +152,16 @@ export const ROLE_DEFS = {
       PERMISSIONS.VIEW_ANALYTICS,
     ],
   },
+  agent: {
+    label: 'Partner Agency',
+    badgeColor: 'bg-orange-100 text-orange-700',
+    permissions: [
+      PERMISSIONS.VIEW_PERSONAL_DASHBOARD,
+      PERMISSIONS.MANAGE_OWN_LEADS,
+      PERMISSIONS.VIEW_LEADS,
+      PERMISSIONS.VIEW_APPLICATIONS,
+    ],
+  },
 };
 
 // ─── Navigation Items (route + icon key + label + required permission) ─────
@@ -170,7 +180,7 @@ export const NAV_ITEMS = [
     icon: 'LayoutDashboard',
     label: 'My Dashboard',
     permission: PERMISSIONS.VIEW_PERSONAL_DASHBOARD,
-    roles: ['consultant', 'application_manager', 'marketing_manager'],
+    roles: ['consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
   {
     id: 'cockpit',
@@ -202,7 +212,7 @@ export const NAV_ITEMS = [
     icon: 'Users',
     label: 'Leads & Pipeline',
     permission: PERMISSIONS.VIEW_LEADS,
-    roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
+    roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
   {
     id: 'applications',
@@ -210,7 +220,7 @@ export const NAV_ITEMS = [
     icon: 'Plane',
     label: 'Applications Hub',
     permission: PERMISSIONS.VIEW_APPLICATIONS,
-    roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
+    roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
   {
     id: 'add_application_china',
@@ -377,7 +387,7 @@ export function getNavForUser(user) {
  */
 export function getPrimaryRoleLabel(user) {
   if (!user?.roles || !Array.isArray(user.roles)) return 'User';
-  const priority = ['founder_ceo', 'managing_director', 'investor', 'application_manager', 'marketing_manager', 'consultant'];
+  const priority = ['founder_ceo', 'managing_director', 'investor', 'application_manager', 'marketing_manager', 'consultant', 'agent'];
   for (const r of priority) {
     if (user.roles.includes(r)) return ROLE_DEFS[r]?.label || r;
   }
@@ -389,7 +399,7 @@ export function getPrimaryRoleLabel(user) {
  */
 export function getPrimaryRoleBadgeClass(user) {
   if (!user?.roles || !Array.isArray(user.roles)) return 'bg-slate-100 text-slate-700';
-  const priority = ['founder_ceo', 'managing_director', 'investor', 'application_manager', 'marketing_manager', 'consultant'];
+  const priority = ['founder_ceo', 'managing_director', 'investor', 'application_manager', 'marketing_manager', 'consultant', 'agent'];
   for (const r of priority) {
     if (user.roles.includes(r)) return ROLE_DEFS[r]?.badgeColor || 'bg-slate-100 text-slate-700';
   }
@@ -576,5 +586,6 @@ export function rolesToLegacyRole(roles) {
   if (roles.includes('application_manager')) return 'manager';
   if (roles.includes('marketing_manager')) return 'manager';
   if (roles.includes('consultant')) return 'consultant';
+  if (roles.includes('agent')) return 'agent';
   return 'consultant';
 }

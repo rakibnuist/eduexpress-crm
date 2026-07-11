@@ -25,6 +25,7 @@ const mapStages = (stagesArray) => {
 import { canViewOwnLeadsOnly } from '../lib/roles';
 
 export default function LeadForm({ user, lead, settings, onSave }) {
+  const isAgentUser = user?.roles?.includes('agent');
   const [form, setForm] = useState(initial(lead, user));
   const [saving, setSaving] = useState(false);
   const [referrerList, setReferrerList] = useState([]);
@@ -124,7 +125,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
         <Row>
           <Field label="Passport number" value={form.passport} onChange={v => set('passport', v)} placeholder="A12345678" mono />
           <Field label="Age" type="number" value={form.age} onChange={v => set('age', v)} placeholder="e.g. 21" />
-          <Field label="Date added" type="date" value={form.date_added} onChange={v => set('date_added', v)} />
+          {!isAgentUser && <Field label="Date added" type="date" value={form.date_added} onChange={v => set('date_added', v)} />}
         </Row>
       </Section>
 
@@ -167,6 +168,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
       </Section>
 
       {/* ── Sales & Source ── */}
+      {!isAgentUser && (
       <Section icon={<Briefcase size={14}/>} title="Sales & Source" color="indigo">
         <Row>
           <SelectField label="Source (Remark)" value={form.source} onChange={v => set('source', v)} options={SOURCES} placeholder="— pick —" />
@@ -189,8 +191,10 @@ export default function LeadForm({ user, lead, settings, onSave }) {
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
       </Section>
+      )}
 
       {/* ── File & Application Status ── */}
+      {!isAgentUser && (
       <Section icon={<FolderOpen size={14}/>} title="File & Application Status" color="indigo">
             <Row cols={1}>
               <div>
@@ -222,8 +226,10 @@ export default function LeadForm({ user, lead, settings, onSave }) {
               </Row>
             )}
       </Section>
+      )}
 
       {/* ── Financial ── */}
+      {!isAgentUser && (
       <Section icon={<Wallet size={14}/>} title="Financial" color="emerald">
         <Row cols={4}>
           <Field label="Service fee (৳)" type="number" value={form.service_fee} onChange={v => set('service_fee', v)} placeholder="0" />
@@ -241,6 +247,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
             options={settings?.paymentStatuses || []} placeholder="— pick —" />
         </Row>
       </Section>
+      )}
 
       {/* ── Files & Notes ── */}
       <Section icon={<FolderOpen size={14}/>} title="Files & Notes" color="amber">

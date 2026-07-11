@@ -28,6 +28,7 @@ import { formatPhoneDisplay, getWAUrl } from '../lib/phone';
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 export default function Leads({ user }) {
+  const isAgentUser = user?.roles?.includes('agent');
   const [searchParams, setSearchParams] = useSearchParams();
   const urlView = searchParams.get('view');
 
@@ -345,14 +346,18 @@ export default function Leads({ user }) {
                 </button>
               </>
             )}
-            <button onClick={loadDuplicates} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
-              <Users size={15} /> Find Duplicates
-            </button>
-            <button onClick={exportCSV} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
-              <Download size={15} /> Export CSV
-            </button>
+            {!isAgentUser && (
+              <>
+                <button onClick={loadDuplicates} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
+                  <Users size={15} /> Find Duplicates
+                </button>
+                <button onClick={exportCSV} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
+                  <Download size={15} /> Export CSV
+                </button>
+              </>
+            )}
             <button onClick={() => setModal('add')} className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm select-none cursor-pointer">
-              <Plus size={15} /> Add Lead
+              <Plus size={15} /> {isAgentUser ? 'Add Student' : 'Add Lead'}
             </button>
           </div>
         </div>
