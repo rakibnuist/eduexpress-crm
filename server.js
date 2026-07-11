@@ -288,7 +288,13 @@ app.post('/api/auth/login', (req, res) => {
   // If neither config is set the check is skipped (safe for initial setup).
   // Admins may log in from anywhere — they are exempt from the office network
   // and geofence gates (their password has already been verified above).
-  const userRoles = JSON.parse(user.roles || '[]');
+  // Load multi-roles for token and enforcement
+  const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+  if (userRoles.length === 0) {
+    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
+    userRoles.push(roleMap[user.role] || user.role || 'consultant');
+  }
+
   const enforceLocation = !isFullAdmin(user) && !userRoles.includes('agent'); // Full admins & agents exempt from location enforcement
   const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
   const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
@@ -341,12 +347,7 @@ app.post('/api/auth/login', (req, res) => {
   // ── End enforcement ────────────────────────────────────────────────────────
 
   db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-  // Load multi-roles for token
-  const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
-  if (userRoles.length === 0) {
-    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
-    userRoles.push(roleMap[user.role] || user.role || 'consultant');
-  }
+  // Roles are loaded above
   const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
   setAuthCookie(res, token);
 
