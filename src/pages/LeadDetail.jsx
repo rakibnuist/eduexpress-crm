@@ -367,6 +367,8 @@ export default function LeadDetail({ user }) {
                     lead.lead_source || '—'
                   )}
                 </Row>
+                {lead.page_name && <Row label="Page Name">{lead.page_name}</Row>}
+                {lead.ad_name && <Row label="Ad Name">{lead.ad_name}</Row>}
               </>
             )}
             <Row label="Follow-up">{lead.next_followup || '—'}</Row>

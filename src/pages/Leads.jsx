@@ -635,7 +635,7 @@ export default function Leads({ user }) {
                       className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
                     />
                   </th>
-                  {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Source', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
+                  {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Source', 'Page', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -727,9 +727,6 @@ export default function Leads({ user }) {
                               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
                               <span>FB Ad</span>
                             </a>
-                            {l.page_name && (
-                              <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={l.page_name}>{l.page_name}</span>
-                            )}
                           </div>
                         ) : l.lead_source === 'Instagram Ad' ? (
                           <div className="flex flex-col gap-0.5">
@@ -737,13 +734,18 @@ export default function Leads({ user }) {
                               <span className="w-1.5 h-1.5 rounded-full bg-pink-500 flex-shrink-0"></span>
                               <span>IG Ad</span>
                             </span>
-                            {l.page_name && (
-                              <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={l.page_name}>{l.page_name}</span>
-                            )}
                           </div>
                         ) : (
                           l.lead_source || '—'
                         )}
+                      </td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[150px] truncate" title={l.page_name || ''}>
+                        {l.page_name ? (
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-slate-700 truncate">{l.page_name}</span>
+                            {l.ad_name && <span className="text-[10px] text-slate-400 truncate mt-0.5" title={l.ad_name}>{l.ad_name}</span>}
+                          </div>
+                        ) : '—'}
                       </td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
@@ -971,6 +973,11 @@ export default function Leads({ user }) {
                             <span>{l.destination}</span>
                             {l.last_education && <span className="text-slate-300">·</span>}
                             {l.last_education && <span className="text-slate-400 font-semibold">{l.last_education}</span>}
+                          </div>
+                        )}
+                        {l.page_name && (
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium truncate bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 w-fit mt-0.5" title={`Page: ${l.page_name}${l.ad_name ? ' | Ad: ' + l.ad_name : ''}`}>
+                            <span className="font-semibold text-slate-500">{l.page_name}</span>
                           </div>
                         )}
                         {l.assigned_consultant && (
