@@ -123,6 +123,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
         </Row>
         <Row>
           <Field label="Passport number" value={form.passport} onChange={v => set('passport', v)} placeholder="A12345678" mono />
+          <Field label="Age" type="number" value={form.age} onChange={v => set('age', v)} placeholder="e.g. 21" />
           <Field label="Date added" type="date" value={form.date_added} onChange={v => set('date_added', v)} />
         </Row>
       </Section>
@@ -265,7 +266,6 @@ export default function LeadForm({ user, lead, settings, onSave }) {
             <SelectField label="Blood group" value={form.blood_group} onChange={v => set('blood_group', v)}
               options={BLOOD} placeholder="—" />
             <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => set('date_of_birth', v)} />
-            <Field label="Age" type="number" value={form.age} onChange={v => set('age', v)} placeholder="e.g. 21" />
           </Row>
           <Row>
             <Field label="Height" value={form.height} onChange={v => set('height', v)} placeholder="e.g. 5'8&quot;" />
