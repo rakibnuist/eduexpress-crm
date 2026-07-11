@@ -716,25 +716,33 @@ function getApplicationStages() {
     return defaults;
   };
   const list = getList('settings_fileStages', [
-    'Documents Collecting',
-    'Documents Ready',
-    'Applied to University',
-    'Interview',
-    'Pre-Admission',
-    'University Initial Deposit',
-    'Admission/JW Received',
-    'Visa Applied',
-    'Passport Collection',
-    'Payment',
-    'Air Ticket',
-    'Fly'
+    'Document Collection',
+    'Document Verification',
+    'Application Submitted',
+    'University Interview',
+    'Conditional Offer',
+    'Tuition Deposit',
+    'Unconditional Offer & JW202',
+    'Visa Application',
+    'Visa Approval',
+    'Final Settlement',
+    'Pre-Departure & Flight',
+    'Arrival & Enrollment'
   ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    if (key === 'documents_collecting') key = 'documents';
-    if (key === 'documents_ready') key = 'ready';
-    if (key === 'applied_to_university') key = 'submitted';
-    if (key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
+    if (key === 'documents_collecting' || key === 'document_collection') key = 'documents';
+    if (key === 'documents_ready' || key === 'document_verification') key = 'ready';
+    if (key === 'applied_to_university' || key === 'application_submitted') key = 'submitted';
+    if (key === 'university_interview' || key === 'interview') key = 'interview';
+    if (key === 'conditional_offer' || key === 'pre_admission') key = 'pre_admission';
+    if (key === 'tuition_deposit' || key === 'university_initial_deposit') key = 'university_initial_deposit';
+    if (key === 'unconditional_offer_jw202' || key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
+    if (key === 'visa_application' || key === 'visa_applied') key = 'visa_applied';
+    if (key === 'visa_approval' || key === 'passport_collection') key = 'passport_collection';
+    if (key === 'final_settlement' || key === 'payment') key = 'payment';
+    if (key === 'pre_departure_flight' || key === 'air_ticket') key = 'air_ticket';
+    if (key === 'arrival_enrollment' || key === 'fly') key = 'fly';
     return { key, label, order };
   });
 }
