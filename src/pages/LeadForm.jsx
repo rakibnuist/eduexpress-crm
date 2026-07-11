@@ -160,7 +160,7 @@ export default function LeadForm({ user, lead, settings, onSave }) {
         </Row>
         <Row>
           <SelectField label="English Test" value={form.english_test_type} onChange={v => set('english_test_type', v)}
-            options={['IELTS', 'TOEFL', 'Duolingo', 'MOI', 'EFSET']} placeholder="— pick —" />
+            options={['IELTS', 'TOEFL', 'PTE', 'Duolingo', 'MOI', 'OET', 'Oxford ELLT', 'Cambridge', 'LanguageCert', 'EFSET']} placeholder="— pick —" />
           <Field label="Score" value={form.english_score} onChange={v => set('english_score', v)} placeholder="6.5" />
         </Row>
       </Section>
