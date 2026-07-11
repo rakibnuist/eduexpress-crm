@@ -822,7 +822,7 @@ app.get('/api/application/meta', (req, res) => {
     return defaults;
   };
   const destinations = getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']);
-  const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Referral']);
+  const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Messenger', 'Referral']);
   // Source markets align with business model (China = collect FROM China; Bangladesh = collect FROM Bangladesh)
   const sourceMarkets = [
     { key: 'all', label: 'All Markets' },
@@ -7434,7 +7434,7 @@ app.get('/api/settings', (req, res) => {
   res.json({
     consultants: combinedConsultants,
     employees: activeEmployees,
-    leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
+    leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Messenger','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
     destinations: getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
