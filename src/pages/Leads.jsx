@@ -309,40 +309,11 @@ export default function Leads({ user }) {
         <div className="space-y-1">
           <div className="flex items-center gap-4 flex-wrap">
             <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">
-              {view === 'kanban' ? 'Sales Pipeline' : 'All Leads'}
+              All Leads
             </h2>
-            
-            {/* View Switcher Toggle */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/50 shadow-inner">
-              <button
-                onClick={() => setView('table')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold select-none cursor-pointer transition-all duration-200 ${
-                  view === 'table'
-                    ? 'bg-white text-blue-600 shadow-sm font-bold scale-[1.02]'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <TableIcon size={13} />
-                All Leads
-              </button>
-              <button
-                onClick={() => setView('kanban')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold select-none cursor-pointer transition-all duration-200 ${
-                  view === 'kanban'
-                    ? 'bg-white text-blue-600 shadow-sm font-bold scale-[1.02]'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <LayoutGrid size={13} />
-                Pipeline Board
-              </button>
-            </div>
           </div>
           <p className="text-sm text-slate-500">
-            {view === 'kanban' 
-              ? `${Object.values(byStatus).flat().length} active prospects on board`
-              : `${data.total.toLocaleString()} total active records`
-            }
+            {`${data.total.toLocaleString()} total active records`}
           </p>
         </div>
         
@@ -607,7 +578,7 @@ export default function Leads({ user }) {
         )}
       </div>
 
-      {view === 'table' ? (
+
         /* TABLE VIEW VIEW */
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
           <div className="overflow-x-auto">
@@ -635,13 +606,14 @@ export default function Leads({ user }) {
                       className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
                     />
                   </th>
+                  <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
                   {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Source', 'Page', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.leads.map(l => {
+                {data.leads.map((l, index) => {
                   const isDueToday = l.next_followup === today;
                   const isOverdue = l.next_followup && l.next_followup < today && l.lead_status !== 'Enrolled' && l.lead_status !== 'Not Interested';
                   return (
@@ -659,6 +631,9 @@ export default function Leads({ user }) {
                           }}
                           className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
                         />
+                      </td>
+                      <td className="py-3 px-3.5 text-xs text-slate-400 font-semibold tabular-nums text-center">
+                        {(page - 1) * 50 + index + 1}
                       </td>
                       <td className="py-3 px-3.5 font-mono text-xs">
                         <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold">
@@ -739,13 +714,22 @@ export default function Leads({ user }) {
                           l.lead_source || '—'
                         )}
                       </td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[150px] truncate" title={l.page_name || ''}>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[150px]">
                         {l.page_name ? (
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-slate-700 truncate">{l.page_name}</span>
-                            {l.ad_name && <span className="text-[10px] text-slate-400 truncate mt-0.5" title={l.ad_name}>{l.ad_name}</span>}
+                          <div className="flex flex-col gap-1">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold truncate max-w-full w-fit">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
+                              <span className="truncate">{l.page_name}</span>
+                            </span>
+                            {l.ad_name && (
+                              <span className="inline-flex items-center text-[10px] text-slate-500 bg-slate-50 border border-slate-200/60 px-1.5 py-0.5 rounded w-fit truncate max-w-full" title={l.ad_name}>
+                                {l.ad_name}
+                              </span>
+                            )}
                           </div>
-                        ) : '—'}
+                        ) : (
+                          <span className="text-slate-300 italic">—</span>
+                        )}
                       </td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
@@ -850,225 +834,6 @@ export default function Leads({ user }) {
             </div>
           </div>
         </div>
-      ) : (
-        /* KANBAN BOARD VIEW */
-        <div className="flex gap-4 overflow-x-auto pb-5 -mx-2 px-2" style={{ minHeight: '66vh' }}>
-          {STAGES.map(({ status, col, border, ring }) => {
-            const leads = byStatus[status] || [];
-            const dueTodayCount = leads.filter(l => l.next_followup === today).length;
-            const totalValue   = leads.reduce((s, l) => s + (l.service_fee || 0), 0);
-            
-            const isExpanded = expanded[status];
-            const visible = isExpanded ? leads : leads.slice(0, 20);
-            
-            const isOver = overCol === status;
-            const isSource = dragging?.fromStatus === status;
-
-            return (
-              <div key={status}
-                onDragOver={(e) => { e.preventDefault(); setOverCol(status); }}
-                onDragLeave={() => setOverCol(p => p === status ? null : p)}
-                onDrop={() => onDrop(status)}
-                className={`flex-shrink-0 w-[310px] flex flex-col rounded-2xl border bg-slate-50/50 shadow-sm transition-all duration-200
-                  ${isOver ? `ring-4 ${ring} ${border} bg-white scale-[1.01] shadow-md` : 'border-slate-200/80'}
-                  ${isSource ? 'opacity-50 border-dashed bg-slate-100/50' : ''}`}>
-                
-                {/* Accent Line */}
-                <div className={`h-1.5 w-full ${col}`} />
-
-                {/* Column Header */}
-                <div className="px-4 py-3 bg-white border-b border-slate-100 flex flex-col">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-800 text-[14px] font-bold tracking-tight">{status}</span>
-                    <div className="flex items-center gap-1.5">
-                      {dueTodayCount > 0 && (
-                        <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold rounded-full px-1.5 py-0.5 flex items-center gap-0.5" title="Follow-ups due today">
-                          <Calendar size={10} className="text-amber-600"/> {dueTodayCount}
-                        </span>
-                      )}
-                      <span className="bg-slate-100 text-slate-600 border border-slate-200 text-xs font-bold rounded-full px-2 py-0.5">{leads.length}</span>
-                    </div>
-                  </div>
-                  {totalValue > 0 && (
-                    <p className="text-[11px] text-slate-400 font-medium mt-1">Est. Value: <strong className="text-slate-600 font-bold tabular-nums">{fmt(totalValue)}</strong></p>
-                  )}
-                </div>
-
-                {/* Card List Area */}
-                <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 min-h-[140px]">
-                  {visible.map(l => (
-                    <div key={l.id} draggable
-                      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(l, status); }}
-                      onDragEnd={onDragEnd}
-                      onClick={() => navigate(`/leads/${l.id}`)}
-                      className={`group relative rounded-2xl border p-3.5 transition-all bg-white hover:shadow-md cursor-pointer hover:border-slate-300
-                        ${l.next_followup === today ? 'border-amber-300 bg-amber-50/20 ring-1 ring-amber-200'
-                          : l.next_followup && l.next_followup < today && l.lead_status !== 'Enrolled' && l.lead_status !== 'Not Interested' ? 'border-rose-200 bg-rose-50/10 ring-1 ring-rose-100'
-                          : 'border-slate-100'}
-                        ${dragging?.lead?.id === l.id ? 'opacity-30 rotate-1 scale-95 border-dashed border-blue-400' : ''}`}
-                      style={{ contentVisibility: 'auto' }}>
-                      
-                      <div className="absolute top-3.5 right-3 opacity-0 group-hover:opacity-40 text-slate-400 transition-opacity pointer-events-none">
-                        <GripVertical size={13} />
-                      </div>
-
-                      <div className="flex items-start justify-between gap-1.5">
-                        <div className="min-w-0 flex-1 pr-3">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{l.client_name}</p>
-                            {l.lead_source === 'WhatsApp' && (
-                              <div className="flex items-center gap-1">
-                                <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
-                                  onClick={e => e.stopPropagation()}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors flex-shrink-0" title="Message on WhatsApp">
-                                  <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
-                                  WA
-                                </a>
-                                <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
-                                  onClick={e => e.stopPropagation()}
-                                  className="inline-flex items-center justify-center p-0.5 rounded text-blue-600 hover:bg-blue-50 transition-colors border border-blue-100" title="Open in CRM Inbox">
-                                  <MessageSquare size={11} />
-                                </Link>
-                              </div>
-                            )}
-                            {l.lead_source === 'Messenger' && (
-                              <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
-                                onClick={e => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-100 hover:bg-blue-100 transition-colors flex-shrink-0" title="Message on Messenger">
-                                <span className="w-1 h-1 rounded-full bg-blue-500 animate-pulse"></span>
-                                Msg
-                              </a>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-slate-400 font-mono font-semibold mt-0.5">{l.lead_id}</p>
-                        </div>
-                        <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => setModal(l)} className="p-1.5 text-slate-400 hover:text-blue-600 flex-shrink-0 rounded-lg hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer" aria-label="Edit lead">
-                            <Pencil size={12}/>
-                          </button>
-                          <button onClick={() => setDeleting(l.id)} className="p-1.5 text-slate-400 hover:text-rose-600 flex-shrink-0 rounded-lg hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer" aria-label="Delete lead">
-                            <Trash2 size={12}/>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 space-y-1">
-                        {l.phone && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-                            <Phone size={11} className="text-slate-400 flex-shrink-0"/>
-                            <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer" 
-                              className="text-slate-600 hover:text-emerald-600 hover:underline transition-colors inline-flex items-center gap-1" title="Chat on WhatsApp">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse"></span>
-                              {formatPhoneDisplay(l.phone, l.nationality)}
-                            </a>
-                            <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
-                              className="ml-1 text-blue-500 hover:text-blue-700 transition-colors" title="Open in CRM Inbox">
-                              <MessageSquare size={11} />
-                            </Link>
-                          </div>
-                        )}
-                        {l.destination && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium truncate">
-                            <MapPin size={11} className="text-slate-400 flex-shrink-0"/> 
-                            <span>{l.destination}</span>
-                            {l.last_education && <span className="text-slate-300">·</span>}
-                            {l.last_education && <span className="text-slate-400 font-semibold">{l.last_education}</span>}
-                          </div>
-                        )}
-                        {l.page_name && (
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium truncate bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 w-fit mt-0.5" title={`Page: ${l.page_name}${l.ad_name ? ' | Ad: ' + l.ad_name : ''}`}>
-                            <span className="font-semibold text-slate-500">{l.page_name}</span>
-                          </div>
-                        )}
-                        {l.assigned_consultant && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-blue-600 font-semibold bg-blue-50/50 px-2 py-0.5 rounded-lg w-fit mt-1 border border-blue-100/50">
-                            <User size={10} className="flex-shrink-0"/> {l.assigned_consultant}
-                          </div>
-                        )}
-                        {(l.lead_status === 'File Opened' || l.lead_status === 'Enrolled') && (
-                          <div className="mt-2" onClick={e => e.stopPropagation()}>
-                            <InlineStageSelect
-                              value={l.application_stage}
-                              stages={stages}
-                              onChange={async (newStage) => {
-                                try {
-                                  await api.updateStage(l.id, { stage: newStage });
-                                  toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
-                                  load();
-                                } catch (err) {
-                                  toast.error(`Failed to update stage: ${err.message}`);
-                                }
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      {l.service_fee > 0 && (
-                        <div className="mt-2.5 pt-2.5 border-t border-slate-50 flex items-center justify-between text-[11px] font-semibold">
-                          <span className="text-slate-400 tabular-nums">{fmt(l.service_fee)}</span>
-                          {l.paid > 0 ? (
-                            <span className="text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-100 tabular-nums">Paid {fmt(l.paid)}</span>
-                          ) : (
-                            <span className="text-slate-400 bg-slate-50 px-2 py-0.5 rounded-lg border border-slate-100">Unpaid</span>
-                          )}
-                        </div>
-                      )}
-
-                      {l.next_followup && (
-                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] font-bold rounded-lg px-2.5 py-1 border
-                          ${l.next_followup === today ? 'bg-amber-50 text-amber-800 border-amber-200' : l.next_followup < today ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-100'}`}>
-                          <Calendar size={11} className={l.next_followup === today ? 'text-amber-600 animate-pulse' : l.next_followup < today ? 'text-rose-500' : 'text-slate-400'}/>
-                          {l.next_followup === today ? 'Follow-up TODAY' : l.next_followup < today ? `Overdue · ${l.next_followup}` : `Follow-up: ${l.next_followup}`}
-                        </div>
-                      )}
-
-                      {/* Super Premium Inline Dropdown on Card for Frictionless Actions */}
-                      <div className="mt-3 pt-2.5 border-t border-slate-100">
-                        <select
-                          value={l.lead_status}
-                          onClick={e => e.stopPropagation()} // prevent routing click
-                          onChange={async (e) => {
-                            e.stopPropagation();
-                            const newStatus = e.target.value;
-                            try {
-                              await api.updateLead(l.id, { ...l, lead_status: newStatus });
-                              toast.success(`Updated ${l.client_name} → ${newStatus}`);
-                              load();
-                            } catch (err) {
-                              toast.error(`Failed to change status: ${err.message}`);
-                            }
-                          }}
-                          className="w-full text-[10px] font-extrabold py-1 px-2 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-blue-600 cursor-pointer focus:outline-none transition-all"
-                        >
-                          {settings?.leadStatuses?.map(st => (
-                            <option key={st} value={st} className="bg-white text-slate-800 font-semibold">{st}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {leads.length > 20 && (
-                    <button onClick={() => toggleExpand(status)}
-                      className="w-full py-2 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors text-center rounded-xl bg-white border border-slate-200/60 hover:border-blue-200 shadow-sm block select-none cursor-pointer">
-                      {isExpanded ? '▲ Hide extra cards' : `▼ Show ${leads.length - 20} more`}
-                    </button>
-                  )}
-
-                  {leads.length === 0 && (
-                    <div className="py-14 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center p-4">
-                      <Filter size={18} className="text-slate-300 mb-2" />
-                      <p className="font-semibold text-slate-600">No leads</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Drag cards here or adjust search filters</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {modal && (
         <Modal title={modal === 'add' ? '➕ Add New Lead' : `✏️ Edit Lead — ${modal.lead_id}`} onClose={() => setModal(null)} wide>

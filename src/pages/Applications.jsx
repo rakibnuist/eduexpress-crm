@@ -324,14 +324,7 @@ export default function Applications({ user }) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button onClick={() => setView('kanban')} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'kanban' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              <LayoutGrid size={13} /> Kanban
-            </button>
-            <button onClick={() => setView('table')} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-md ${view === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              <TableIcon size={13} /> Table
-            </button>
-          </div>
+
           <button onClick={load} disabled={loading} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -474,12 +467,7 @@ export default function Applications({ user }) {
           <option value="all">All Consultants</option>
           {consultants.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
-        {view === 'kanban' && (
-          <label className="flex items-center gap-1.5 h-10 px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white cursor-pointer select-none hover:bg-slate-50 transition-colors">
-            <input type="checkbox" checked={hideEmptyColumns} onChange={e => setHideEmptyColumns(e.target.checked)} className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
-            <span className="text-slate-600 font-semibold">Hide empty</span>
-          </label>
-        )}
+
         {isFilterActive && (
           <button onClick={() => { setSearchQuery(''); setFilterStage('all'); setFilterUniversity('all'); setFilterSource('all'); setFilterConsultant('all'); setDestinationFilter('all'); }}
             className="flex items-center gap-1 h-10 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold">
@@ -516,8 +504,6 @@ export default function Applications({ user }) {
         <div className="text-slate-400 text-center py-16">Loading…</div>
       ) : filtered.length === 0 ? (
         <EmptyState />
-      ) : view === 'kanban' ? (
-        <KanbanView stages={stages} rows={filtered} onPick={setSelected} hideEmptyColumns={hideEmptyColumns} user={user} />
       ) : (
         <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} user={user} sortConfig={sortConfig} setSortConfig={setSortConfig} />
       )}
@@ -647,114 +633,7 @@ function EmptyState() {
   );
 }
 
-/* ───────────────────────────── KANBAN ───────────────────────────── */
-function KanbanView({ stages, rows, onPick, hideEmptyColumns, user }) {
-  const byStage = useMemo(() => {
-    const map = Object.fromEntries(stages.map(s => [s.key, []]));
-    const defaultStage = stages[0]?.key || 'documents';
-    for (const r of rows) {
-      const key = stages.some(s => s.key === r.application_stage) ? r.application_stage : defaultStage;
-      (map[key] ||= []).push(r);
-    }
-    return map;
-  }, [rows, stages]);
 
-  const visibleStages = useMemo(() => {
-    if (!hideEmptyColumns) return stages;
-    return stages.filter(s => (byStage[s.key] || []).length > 0);
-  }, [stages, byStage, hideEmptyColumns]);
-
-  return (
-    <div className="overflow-x-auto pb-3">
-      <div className="flex gap-4 min-w-max">
-        {visibleStages.map((stage, index) => {
-          const items = byStage[stage.key] || [];
-          const color = STAGE_COLORS[stage.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
-          return (
-            <div key={stage.key} className={`w-[290px] flex-shrink-0 rounded-2xl border ${color.border} ${color.bg} shadow-sm transition-all duration-200 flex flex-col`}>
-              <div className={`h-1.5 w-full ${color.pill.split(' ')[0]}`} />
-              <div className="px-3.5 py-3 border-b border-white/60 flex items-center justify-between">
-                <span className="font-bold text-slate-800 text-sm tracking-tight">{stage.label}</span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${color.pill}`}>{items.length}</span>
-              </div>
-              <div className="p-2.5 space-y-2.5 max-h-[640px] overflow-y-auto min-h-[140px] flex-1">
-                {items.length === 0 ? (
-                  <div className="py-12 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200/80 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center">
-                    <FileText size={18} className="text-slate-300 mb-1.5" />
-                    <p className="font-semibold text-slate-500">No student files</p>
-                  </div>
-                ) : items.map(card => (
-                  <ApplicationCard key={card.id} card={card} onClick={() => onPick(card)} user={user} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ApplicationCard({ card, onClick, user }) {
-  const docPct = card.docs_total > 0 ? Math.round((card.docs_received / card.docs_total) * 100) : 0;
-  const visaSoon = card.visa_deadline && (new Date(card.visa_deadline) - new Date() < 30 * 86400000);
-  const isB2B = card.source === 'B2B' || card.source === 'Agent';
-  const isChinaSource = card.source === 'China';
-  return (
-    <button onClick={onClick} className="w-full text-left bg-white rounded-xl p-3 shadow-sm hover:shadow-md border border-slate-100 hover:border-blue-200 transition-all">
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <p className="font-semibold text-slate-800 text-sm truncate flex-1">{card.client_name}</p>
-        {visaSoon && <span title={`Visa deadline ${card.visa_deadline}`} className="text-rose-500 flex-shrink-0"><CalendarClock size={14} /></span>}
-      </div>
-      <p className="text-[11px] text-slate-400 truncate">{card.lead_id}</p>
-      <div className="flex items-center gap-1.5 flex-wrap mt-1">
-        {/* Source market badge */}
-        {isChinaSource && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 shadow-sm">
-            China Source
-          </span>
-        )}
-        {isB2B && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200 shadow-sm">
-            B2B
-          </span>
-        )}
-        {!isChinaSource && !isB2B && card.source && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm">
-            {card.source}
-          </span>
-        )}
-        {/* Destination badge */}
-        {card.destination && (
-          <span className="text-[10px] text-slate-500 flex items-center gap-0.5 bg-slate-50 px-1.5 py-0.5 rounded-full border border-slate-100">
-            <MapPin size={9} /> {card.destination}
-          </span>
-        )}
-        {card.degree && (<span className="text-[10px] text-slate-500">{card.degree}</span>)}
-      </div>
-      {card.uni_list && (
-        <p className="text-[11px] text-slate-500 mt-1.5 truncate" title={card.uni_list}>
-          <Building2 size={9} className="inline mr-0.5" />{card.uni_list}
-          {card.uni_admitted > 0 && <span className="ml-1 text-emerald-600 font-semibold">· {card.uni_admitted} admit</span>}
-        </p>
-      )}
-      {card.docs_total > 0 && (
-        <div className="mt-2">
-          <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
-            <span>Docs</span><span>{card.docs_received}/{card.docs_total}</span>
-          </div>
-          <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${docPct}%` }} />
-          </div>
-        </div>
-      )}
-      <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
-        <span className="truncate">{card.referrer || card.employee_name || card.assigned_consultant || '—'}</span>
-        {card.intake_term && <span>{card.intake_term}</span>}
-      </div>
-    </button>
-  );
-}
 
 /* ───────────────────────────── TABLE ───────────────────────────── */
 function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, sortConfig, setSortConfig }) {
