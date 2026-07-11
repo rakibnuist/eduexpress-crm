@@ -100,8 +100,7 @@ export default function Settings() {
               <span>These lists power all dropdown menus across the CRM. Changes take effect immediately for all users.</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <EditableCard icon={<Users size={16} />} title="Consultants" color="violet"
-                listKey="settings_consultants" items={settings.consultants || []} onSaved={reloadSettings} />
+
               <EditableCard icon={<Funnel size={16} />} title="Lead Sources" color="orange"
                 listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
               <EditableCard icon={<Tag size={16} />} title="Lead Statuses" color="sky"

@@ -137,7 +137,10 @@ export default function Applications({ user }) {
 
   // Load meta + settings + employees once on mount
   useEffect(() => {
-    api.settings().then(setSettings).catch(() => {});
+    api.settings().then(s => {
+      setSettings(s);
+      if (s && s.employees) setEmployees(s.employees);
+    }).catch(() => {});
 
     api.applicationMeta().then(m => {
       setMeta(m || { stages: [], destinations: [], sources: [], bdChannels: [] });
@@ -148,11 +151,6 @@ export default function Applications({ user }) {
         return prev;
       });
     }).catch(() => {});
-
-    fetch('/api/employees/active', { credentials: 'include', headers: { 'Content-Type': 'application/json' } })
-      .then(r => r.ok ? r.json() : [])
-      .then(setEmployees)
-      .catch(() => setEmployees([]));
   }, [user]);
 
   useEffect(() => { localStorage.setItem('app_source_market', sourceMarket); }, [sourceMarket]);

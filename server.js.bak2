@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { createRequire } from 'module';
 import { initDatabase, isDead } from './sqldb.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 
 const require = createRequire(import.meta.url);
 
@@ -19,29 +21,16 @@ const LOCAL_DB_PATH = join(__dirname, 'crm.db');
 let DB_PATH = process.env.DB_PATH;
 
 if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
-  const persistentDir = join(PERSISTENT_HOME, 'crm-data');
-  if (!existsSync(persistentDir)) {
-    mkdirSync(persistentDir, { recursive: true });
-  }
-  DB_PATH = join(persistentDir, 'crm.db');
-  
-  const restoreDbPath = join(__dirname, 'restore.db');
-  if (existsSync(restoreDbPath)) {
-    try {
-      copyFileSync(restoreDbPath, DB_PATH);
-      console.log(`[database] Restored database from ${restoreDbPath} to ${DB_PATH}`);
-      unlinkSync(restoreDbPath);
-    } catch (err) {
-      console.error(`[database] Restore failed:`, err.message);
-    }
-  } else if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH)) {
-    try {
-      copyFileSync(LOCAL_DB_PATH, DB_PATH);
-      console.log(`[database] Copied bundled database to ${DB_PATH}`);
-    } catch (err) {}
-  }
-} else if (!DB_PATH) {
   DB_PATH = LOCAL_DB_PATH;
+  const oldDbPath = join(PERSISTENT_HOME, 'crm-data', 'crm.db');
+  if (existsSync(oldDbPath) && !existsSync(LOCAL_DB_PATH)) {
+    try {
+      copyFileSync(oldDbPath, LOCAL_DB_PATH);
+      console.log(`[database] Auto-migrated database from ${oldDbPath} to ${LOCAL_DB_PATH}`);
+    } catch (err) {
+      console.error(`[database] Migration from legacy path failed:`, err.message);
+    }
+  }
 }
 const DB_DIR = dirname(DB_PATH);
 
@@ -97,27 +86,6 @@ const uploadLimiter = rateLimit({
   message: { error: 'Upload quota exceeded, please try again later.' },
 });
 app.use(standardLimiter);
-app.get('/api/auth/emergency-reset', (req, res) => {
-  const newHash = hashPassword('eduexpress2026');
-  
-  // First, check if admin exists
-  const existingAdmin = db.prepare("SELECT id FROM users WHERE email = 'admin@eduexpressint.com'").get();
-  
-  if (!existingAdmin) {
-    const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, active) VALUES (?, ?, ?, ?, ?)`).run(
-      'admin@eduexpressint.com', 'Administrator', newHash, 'admin', 1
-    );
-    db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, ?)`).run(info.lastInsertRowid, 'founder_ceo');
-  } else {
-    db.prepare("UPDATE users SET password_hash = ?, active = 1 WHERE email = 'admin@eduexpressint.com'").run(newHash);
-  }
-
-  const allUsers = db.prepare("SELECT id, email, name, role, active FROM users").all();
-  res.json({
-    message: 'Admin account has been recreated and password set to eduexpress2026.',
-    usersFound: allUsers
-  });
-});
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/logout', authLimiter);
 app.use('/api/upload', uploadLimiter);
@@ -239,9 +207,7 @@ app.get('/diagnose-db', (req, res) => {
     const size = existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const integrity = db.prepare("PRAGMA integrity_check").get();
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-    const userCount = db.prepare("SELECT COUNT(*) as c FROM users").get().c;
-    const leadsCount = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
-    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, userCount, leadsCount, tables });
+    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, tables });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
@@ -263,111 +229,13 @@ app.use((req, res, next) => {
 });
 
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
-app.post('/api/auth/login', (req, res) => {
-  const { email, password, lat, lng, ssid, device_id } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
-  
-  const queryVal = String(email).trim().toLowerCase();
-  // Find user matching email, name, consultant_name, or emp_id (case-insensitive lookup)
-  const user = db.prepare(`
-    SELECT * FROM users 
-    WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(consultant_name) = ? OR LOWER(emp_id) = ?) 
-      AND active = 1
-  `).get(queryVal, queryVal, queryVal, queryVal);
+app.use('/api/auth', authRouter({
+  getDb: () => db, verifyPassword, isFullAdmin, getConfig, haversineMeters, signToken, setAuthCookie, autoCheckIn, clearAuthCookie, verifyToken, getCookie, AUTH_COOKIE
+}));
 
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Invalid username/email or password' });
-  }
-
-  // ── Network & Location enforcement ────────────────────────────────────────
-  // Login is only permitted from the office network and/or office location.
-  // • SSID check  — enforced when client sends an SSID value AND allowed list is configured.
-  //                 (Browsers cannot detect SSID, so this only fires from a native/PWA app.)
-  // • Geo check   — enforced when office lat/lng are stored in config.
-  //                 All browsers that grant location permission are gated by this.
-  // If neither config is set the check is skipped (safe for initial setup).
-  // Admins may log in from anywhere — they are exempt from the office network
-  // and geofence gates (their password has already been verified above).
-  const enforceLocation = !isFullAdmin(user); // Full admins exempt from location enforcement
-  const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
-  const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
-
-  // Build allowed SSIDs list: JSON array in office_allowed_ssids, fallback to single office_wifi_ssid
-  let allowedSSIDs = [];
-  try { allowedSSIDs = JSON.parse(getConfig('office_allowed_ssids') || '[]'); } catch {}
-  if (!Array.isArray(allowedSSIDs) || allowedSSIDs.length === 0) {
-    const single = getConfig('office_wifi_ssid');
-    if (single) allowedSSIDs = [single];
-  }
-
-  const officeLat = parseFloat(getConfig('office_lat'));
-  const officeLng = parseFloat(getConfig('office_lng'));
-  const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
-
-  if (enforceLocation) {
-    let ssidPassed = false;
-    let ssidFailed = false;
-    if (ssid && allowedSSIDs.length > 0) {
-      ssidPassed = allowedSSIDs.some(s =>
-        String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
-      );
-      if (!ssidPassed) ssidFailed = true;
-    }
-
-    let geoPassed = false;
-    let geoFailed = false;
-    let distFromOffice = null;
-    if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
-      if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
-        distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
-        if (distFromOffice <= officeRadius) {
-          geoPassed = true;
-        } else {
-          geoFailed = true;
-        }
-      } else {
-        console.warn(`[login] User ${email} logged in without location coordinates`);
-      }
-    }
-
-    // Allow login to proceed. Geofence is only for auto-attendance.
-    if (!ssidPassed && !geoPassed) {
-      if (geoFailed) {
-        console.warn(`[login] User ${email} logged in from outside office radius. Geofence is for attendance only, allowing login.`);
-      }
-    }
-  }
-  // ── End enforcement ────────────────────────────────────────────────────────
-
-  db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-  // Load multi-roles for token
-  const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
-  if (userRoles.length === 0) {
-    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
-    userRoles.push(roleMap[user.role] || user.role || 'consultant');
-  }
-  const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
-  setAuthCookie(res, token);
-
-  // Auto attendance (best-effort; never blocks login if it fails)
-  let attendance = null;
-  try {
-    attendance = autoCheckIn(user, {
-      lat: Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : undefined,
-      lng: Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : undefined,
-      ssid,
-      device_id,
-    });
-  } catch (e) { console.error('[auto-attendance]', e.message); }
-
-  res.json({
-    id: user.id, email: user.email, name: user.name, role: user.role, roles: userRoles,
-    consultant_name: user.consultant_name, emp_id: user.emp_id,
-    attendance, // { ok, created/alreadyIn/reason, time, status }
-  });
-});
-
-app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
+app.use('/api/users', usersRouter({
+  getDb: () => db, requireAdmin, hashPassword, logActivity
+}));
 
 app.get('/api/admin/logs', (req, res) => {
   const apiKey = req.headers['x-api-key'] || req.query.key;
@@ -389,68 +257,15 @@ app.get('/api/admin/logs', (req, res) => {
   }
 });
 
-app.get('/api/auth/me', (req, res) => {
-  console.log('[api/auth/me] Starting...');
-  const cookie = getCookie(req, AUTH_COOKIE);
-  console.log('[api/auth/me] Cookie retrieved:', cookie ? 'exists' : 'null');
-  let payload;
-  try {
-    payload = verifyToken(cookie);
-  } catch (err) {
-    console.error('[api/auth/me] Token verification crashed:', err.message);
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  console.log('[api/auth/me] Token verified. Payload:', payload);
-  if (!payload) {
-    console.log('[api/auth/me] Unauthorized (no payload)');
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  console.log('[api/auth/me] Querying users for id:', payload.id);
-  let user;
-  try {
-    user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
-  } catch (err) {
-    console.error('[api/auth/me] User query crashed:', err.message);
-    return res.status(500).json({ error: err.message });
-  }
-  console.log('[api/auth/me] User query result:', user ? user.email : 'null');
-  if (!user) {
-    console.log('[api/auth/me] Unauthorized (user not found)');
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  console.log('[api/auth/me] Querying roles for id:', user.id);
-  let roles;
-  try {
-    roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
-  } catch (err) {
-    console.error('[api/auth/me] Roles query crashed:', err.message);
-    return res.status(500).json({ error: err.message });
-  }
-  console.log('[api/auth/me] Roles query result:', roles);
-  if (roles.length === 0) {
-    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
-    roles.push(roleMap[user.role] || user.role || 'consultant');
-  }
-  user.roles = roles;
-  console.log('[api/auth/me] Sending user response...');
-  res.json(user);
-  console.log('[api/auth/me] Done!');
-});
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset'];
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
 
-app.use(async (req, res, next) => {
+app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
-  
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.setHeader('Surrogate-Control', 'no-store');
-
   if (AUTH_FREE.includes(req.path)) return next();
   if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
   // Service-account bypass: trusted internal key (no location restriction)
@@ -625,59 +440,6 @@ function generatePublicToken() {
 }
 
 // ─── USER MANAGEMENT (admin only) ───────────────────────────────────────────
-app.get('/api/users', (req, res) => requireAdmin(req, res, () => {
-  const users = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active,created_at,last_login FROM users ORDER BY id").all();
-  // Attach roles array to each user
-  for (const u of users) {
-    const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(u.id).map(r => r.role);
-    u.roles = roles.length ? roles : [u.role === 'admin' ? 'founder_ceo' : u.role === 'manager' ? 'application_manager' : 'consultant'];
-  }
-  res.json(users);
-}));
-app.post('/api/users', (req, res) => requireAdmin(req, res, () => {
-  const { email, name, password, role = 'consultant', roles = [], consultant_name = null, emp_id = null } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-  try {
-    const safeRole = ['admin', 'manager', 'consultant'].includes(role) ? role : 'consultant';
-    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id) VALUES (?,?,?,?,?,?)`)
-      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id);
-    const newUserId = info.lastInsertRowid;
-    // Insert into user_roles if roles provided
-    const newRoles = Array.isArray(roles) && roles.length ? roles : [safeRole === 'admin' ? 'founder_ceo' : safeRole === 'manager' ? 'application_manager' : 'consultant'];
-    const insertRole = db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)`);
-    for (const r of newRoles) insertRole.run(newUserId, r);
-    const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(newUserId);
-    u.roles = newRoles;
-    logActivity({ type: 'user_created', actor: req.user, to: u.email, details: { role: u.role, roles: newRoles, consultant_name: u.consultant_name } });
-    res.json(u);
-  } catch (e) {
-    res.status(400).json({ error: e.message.includes('UNIQUE') ? 'That email is already in use' : e.message });
-  }
-}));
-app.put('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
-  const { name, role, roles, consultant_name, emp_id, active, password } = req.body || {};
-  const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
-  if (!cur) return res.status(404).json({ error: 'Not found' });
-  const newHash = password ? hashPassword(password) : cur.password_hash;
-  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=? WHERE id=?`)
-    .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, req.params.id);
-  // Update user_roles if roles array provided
-  if (Array.isArray(roles)) {
-    db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
-    const insertRole = db.prepare("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)");
-    for (const r of roles) insertRole.run(req.params.id, r);
-  }
-  const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(req.params.id);
-  const updatedRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(req.params.id).map(r => r.role);
-  u.roles = updatedRoles.length ? updatedRoles : [role === 'admin' ? 'founder_ceo' : role === 'manager' ? 'application_manager' : 'consultant'];
-  res.json(u);
-}));
-app.delete('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
-  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
-  db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
-  db.prepare("DELETE FROM users WHERE id=?").run(req.params.id);
-  res.json({ ok: true });
-}));
 
 // ─── OFFICE CONFIG (open/close hours + geofence) ────────────────────────────
 const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m', 'office_wifi_ssid', 'office_allowed_ssids'];
@@ -701,33 +463,26 @@ function getApplicationStages() {
     return defaults;
   };
   const list = getList('settings_fileStages', [
-    'Document Collection',
-    'Document Verification',
-    'Application Submitted',
-    'University Interview',
-    'Conditional Offer',
-    'Tuition Deposit',
-    'Unconditional Offer & JW202',
-    'Visa Application',
-    'Visa Approval',
-    'Final Settlement',
-    'Pre-Departure & Flight',
-    'Arrival & Enrollment'
+    'Documents Collecting',
+    'Documents Ready',
+    'Applied to University',
+    'Interview',
+    'Pre-Admission',
+    'Deposit',
+    'Admission/JW Received',
+    'Visa Applied',
+    'Visa Approved',
+    'Visa Rejected',
+    'Enrolled',
+    'Cancelled',
+    'Withdraw'
   ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    if (key === 'documents_collecting' || key === 'document_collection') key = 'documents';
-    if (key === 'documents_ready' || key === 'document_verification') key = 'ready';
-    if (key === 'applied_to_university' || key === 'application_submitted') key = 'submitted';
-    if (key === 'university_interview' || key === 'interview') key = 'interview';
-    if (key === 'conditional_offer' || key === 'pre_admission') key = 'pre_admission';
-    if (key === 'tuition_deposit' || key === 'university_initial_deposit') key = 'university_initial_deposit';
-    if (key === 'unconditional_offer_jw202' || key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
-    if (key === 'visa_application' || key === 'visa_applied') key = 'visa_applied';
-    if (key === 'visa_approval' || key === 'passport_collection') key = 'passport_collection';
-    if (key === 'final_settlement' || key === 'payment') key = 'payment';
-    if (key === 'pre_departure_flight' || key === 'air_ticket') key = 'air_ticket';
-    if (key === 'arrival_enrollment' || key === 'fly') key = 'fly';
+    if (key === 'documents_collecting') key = 'documents';
+    if (key === 'documents_ready') key = 'ready';
+    if (key === 'applied_to_university') key = 'submitted';
+    if (key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
     return { key, label, order };
   });
 }
@@ -822,7 +577,7 @@ app.get('/api/application/meta', (req, res) => {
     return defaults;
   };
   const destinations = getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']);
-  const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Messenger', 'Referral']);
+  const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Referral']);
   // Source markets align with business model (China = collect FROM China; Bangladesh = collect FROM Bangladesh)
   const sourceMarkets = [
     { key: 'all', label: 'All Markets' },
@@ -1327,15 +1082,6 @@ app.get('/api/activity', (req, res) => {
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const rows = db.prepare(`SELECT * FROM activity_log ${ws} ORDER BY id DESC LIMIT ${Math.min(parseInt(limit) || 100, 500)}`).all(...params);
   res.json(rows);
-});
-
-app.get('/api/debug/webhooks', (req, res) => {
-  try {
-    const logs = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 50").all();
-    res.json(logs.map(l => ({ ...l, payload: JSON.parse(l.payload) })));
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
 });
 
 // Start HTTP server IMMEDIATELY so Hostinger health check passes
@@ -2286,16 +2032,6 @@ function runMigrations() {
     `ALTER TABLE lead_documents ADD COLUMN requested_by_student INTEGER DEFAULT 0`,
     `ALTER TABLE lead_documents ADD COLUMN student_uploaded_url TEXT`,
     `ALTER TABLE lead_documents ADD COLUMN student_uploaded_at TEXT`,
-    // Academic & Medical fields
-    `ALTER TABLE leads      ADD COLUMN passing_year TEXT`,
-    `ALTER TABLE leads      ADD COLUMN last_education_major TEXT`,
-    `ALTER TABLE leads      ADD COLUMN height TEXT`,
-    `ALTER TABLE leads      ADD COLUMN weight TEXT`,
-    `ALTER TABLE leads      ADD COLUMN english_test_type TEXT`,
-    `ALTER TABLE leads      ADD COLUMN payment_agreement TEXT`,
-    `ALTER TABLE leads      ADD COLUMN hardcopy_status TEXT`,
-    `ALTER TABLE leads      ADD COLUMN hardcopy_documents TEXT`,
-    `ALTER TABLE leads      ADD COLUMN age INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
@@ -2369,7 +2105,6 @@ function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_channel_access_user ON channel_access(user_id);
       CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
-      CREATE TABLE IF NOT EXISTS webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
     `);
 
     // Migrate legacy single-role users to user_roles junction table
@@ -2425,28 +2160,25 @@ function runMigrations() {
     console.error("[migration] Payroll update failed:", e.message);
   }
 
-  // Dynamic self-healing migration to reset and force file stages config to the updated professional pipeline
+  // Dynamic self-healing migration to reset and force file stages config to the updated user pipeline
   try {
-    const currentStagesRaw = db.prepare("SELECT value FROM meta_config WHERE key = 'settings_fileStages'").get()?.value;
-    if (currentStagesRaw && currentStagesRaw.includes('Documents Collecting')) {
-      const newStages = [
-        'Document Collection',
-        'Document Verification',
-        'Application Submitted',
-        'University Interview',
-        'Conditional Offer',
-        'Tuition Deposit',
-        'Unconditional Offer & JW202',
-        'Visa Application',
-        'Visa Approval',
-        'Final Settlement',
-        'Pre-Departure & Flight',
-        'Arrival & Enrollment'
-      ];
-      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
-      console.log("[migration] Updated settings_fileStages in database to professional requested default flow.");
-    }
-
+    const newStages = [
+      'Documents Collecting',
+      'Documents Ready',
+      'Applied to University',
+      'Interview',
+      'Pre-Admission',
+      'Deposit',
+      'Admission/JW Received',
+      'Visa Applied',
+      'Visa Approved',
+      'Visa Rejected',
+      'Enrolled',
+      'Cancelled',
+      'Withdraw'
+    ];
+    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
+    console.log("[migration] Updated settings_fileStages in database to user requested default flow.");
 
     // Migrate any existing legacy application stages in leads table to their closest new counterparts
     db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'in_review'").run();
@@ -3359,17 +3091,17 @@ function forwardToN8N(data) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function saveMessage(convId, direction, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
+function saveInboundMessage(convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) {
   try {
     const info = db.prepare(`INSERT INTO messages (conversation_id,direction,type,content,wa_message_id,media_url,caption,status)
-      VALUES (?,?,?,?,?,?,?,'delivered')`).run(convId, direction, type, content, waMessageId, mediaUrl, caption);
+      VALUES (?,?,?,?,?,?,?,'delivered')`).run(convId, 'in', type, content, waMessageId, mediaUrl, caption);
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(info.lastInsertRowid);
     db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), unread_count=unread_count+1 WHERE id=?").run(content || `[${type}]`, convId);
     const conv = db.prepare("SELECT conversations.*, contacts.name as contact_name, contacts.phone as contact_phone, channels.name as channel_name, channels.type as channel_type FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id WHERE conversations.id=?").get(convId);
     broadcast('new_message', {
       ...msg,
       conversation_id: convId,
-      direction: direction === 'in' ? 'inbound' : 'outbound',
+      direction: 'inbound',
       contact_name: conv?.contact_name,
       channel_type: conv?.channel_type,
     }, (u) => userHasAccessToConversation(u, convId));
@@ -3386,40 +3118,6 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
           phone: conv?.contact_phone || undefined,
           event_source_url: undefined,
         }).catch(() => {});
-      }
-
-      // Auto-Lead Creation from Message Content (Bangladeshi numbers)
-      if (direction === 'in' && type === 'text' && content && !conv.lead_id) {
-        const bdPhoneRegex = /(?:\+?88)?01[3-9]\d{8}/;
-        const match = content.match(bdPhoneRegex);
-        if (match) {
-          const extractedPhone = match[0];
-          // Check if lead exists
-          const existing = db.prepare("SELECT id FROM leads WHERE phone LIKE ?").get(`%${extractedPhone.slice(-10)}`);
-          if (!existing) {
-            // Create new lead
-            const leadParamsObj = leadParams({
-              client_name: conv.contact_name || 'Chat Lead',
-              phone: extractedPhone,
-              lead_source: conv.channel_type || 'Inbox',
-              lead_status: 'New Lead',
-              notes: 'Auto-created from chat message phone number.',
-              destination: 'Bangladesh',
-              source: 'In-House'
-            }, nextLeadId(), 0);
-            const lInfo = db.prepare(LEAD_INSERT_SQL).run(leadParamsObj);
-            const newLeadId = lInfo.lastInsertRowid;
-            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(newLeadId, convId);
-            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(newLeadId, conv.contact_id);
-            const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(newLeadId);
-            broadcast('new_lead', { lead: newLead });
-            logActivity({ type: 'lead_created', actor: { name: 'Auto-Lead Bot' }, lead: newLead, details: { source: 'Chat Extraction' } });
-          } else {
-            // Link to existing
-            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(existing.id, convId);
-            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(existing.id, conv.contact_id);
-          }
-        }
       }
     }
 
@@ -4022,17 +3720,9 @@ function leadParams(d, lead_id, balance) {
     degree: txt(d.degree), major: txt(d.major),
     intake_term: txt(d.intake_term), university: txt(d.university),
     drive_link: txt(d.drive_link), deposit: num(d.deposit),
-    // Academic additions
-    passing_year: txt(d.passing_year), last_education_major: txt(d.last_education_major),
-    english_test_type: txt(d.english_test_type),
     // Medical
     blood_group: txt(d.blood_group), date_of_birth: txt(d.date_of_birth),
     medical_notes: txt(d.medical_notes), emergency_contact: txt(d.emergency_contact),
-    height: txt(d.height), weight: txt(d.weight),
-    payment_agreement: txt(d.payment_agreement),
-    hardcopy_status: txt(d.hardcopy_status),
-    hardcopy_documents: txt(d.hardcopy_documents),
-    age: num(d.age),
     // Active application stage
     application_stage: txt(d.application_stage),
   };
@@ -4045,8 +3735,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
-  application_stage, passing_year, last_education_major, height, weight, english_test_type,
-  payment_agreement, hardcopy_status, hardcopy_documents, age
+  application_stage
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -4054,8 +3743,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
-  @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
-  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age
+  @application_stage
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -4068,11 +3756,7 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   drive_link=@drive_link, deposit=@deposit,
   blood_group=@blood_group, date_of_birth=@date_of_birth, medical_notes=@medical_notes,
   emergency_contact=@emergency_contact,
-  application_stage=@application_stage, passing_year=@passing_year,
-  last_education_major=@last_education_major, height=@height, weight=@weight,
-  english_test_type=@english_test_type, payment_agreement=@payment_agreement,
-  hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents,
-  age=@age
+  application_stage=@application_stage
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
@@ -4181,90 +3865,6 @@ app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-}));
-
-app.get('/api/leads/duplicates', (req, res) => requireManagerOrAdmin(req, res, () => {
-  try {
-    const query = `
-      SELECT * FROM leads 
-      WHERE phone IN (
-        SELECT phone FROM leads WHERE phone IS NOT NULL AND phone != '' GROUP BY phone HAVING count(*) > 1
-      )
-      OR email IN (
-        SELECT email FROM leads WHERE email IS NOT NULL AND email != '' GROUP BY email HAVING count(*) > 1
-      )
-      ORDER BY phone, email, id ASC
-    `;
-    const dupes = db.prepare(query).all();
-    const groups = {};
-    for (const lead of dupes) {
-      const key = lead.phone || lead.email;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(lead);
-    }
-    res.json({ ok: true, groups: Object.values(groups) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-}));
-
-app.post('/api/leads/merge', (req, res) => requireManagerOrAdmin(req, res, () => {
-  const { primary_id, secondary_ids } = req.body;
-  if (!primary_id || !secondary_ids || !secondary_ids.length) return res.status(400).json({ error: 'Missing primary or secondary IDs' });
-  
-  try {
-    db.transaction(() => {
-      const qs = secondary_ids.map(() => '?').join(',');
-      db.prepare(`UPDATE activity_log SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
-      db.prepare(`UPDATE lead_documents SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
-      db.prepare(`UPDATE lead_university_applications SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
-      db.prepare(`UPDATE conversations SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
-      db.prepare(`UPDATE contacts SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
-      
-      db.prepare(`DELETE FROM leads WHERE id IN (${qs})`).run(...secondary_ids);
-      
-      const primaryLead = db.prepare('SELECT * FROM leads WHERE id=?').get(primary_id);
-      if (primaryLead) {
-        logActivity({ type: 'lead_merged', actor: req.user, lead: primaryLead, details: { merged_ids: secondary_ids } });
-      }
-    })();
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-}));
-
-app.post('/api/leads/bulk-status', (req, res) => requireManagerOrAdmin(req, res, () => {
-  const { ids, status } = req.body;
-  if (!ids || !ids.length || !status) return res.status(400).json({ error: 'Missing ids or status' });
-  
-  try {
-    const updated = [];
-    db.transaction(() => {
-      for (const id of ids) {
-        const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
-        if (oldLead && oldLead.lead_status !== status) {
-          db.prepare("UPDATE leads SET lead_status=? WHERE id=?").run(status, id);
-          const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
-          logActivity({ type: 'lead_status_changed', actor: req.user, lead: newLead, from: oldLead.lead_status, to: status });
-          updated.push(newLead);
-        }
-      }
-    })();
-    res.json({ ok: true, updated: updated.length, leads: updated });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-}));
-
-app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res, () => {
-  try {
-    const staleLeads = db.prepare("SELECT * FROM leads WHERE lead_status='New Lead' AND date_added <= date('now', '-3 days')").all();
-    const updated = [];
-    db.transaction(() => {
-      for (const lead of staleLeads) {
-        db.prepare("UPDATE leads SET lead_status='Follow-up' WHERE id=?").run(lead.id);
-        const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(lead.id);
-        logActivity({ type: 'lead_status_changed', actor: { name: 'Auto-Cleanup Bot' }, lead: newLead, from: 'New Lead', to: 'Follow-up' });
-        updated.push(newLead);
-      }
-    })();
-    res.json({ ok: true, cleaned: updated.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
 app.delete('/api/leads/:id', (req, res) => {
@@ -4606,25 +4206,6 @@ app.post('/api/health/backup', (req, res) => requireAdmin(req, res, () => {
   }
 }));
 
-app.post('/api/health/restore', express.raw({ type: 'application/octet-stream', limit: '100mb' }), (req, res) => requireAdmin(req, res, () => {
-  try {
-    if (!req.body || !Buffer.isBuffer(req.body)) {
-      return res.status(400).json({ error: 'No database file provided or invalid format.' });
-    }
-    const restorePath = join(__dirname, 'restore.db');
-    writeFileSync(restorePath, req.body);
-    res.json({ message: 'Backup file received. Server is restarting to apply changes...' });
-    
-    // Give response time to flush before exiting
-    setTimeout(() => {
-      console.log('[restore] Initiating database restore and server restart...');
-      process.exit(0);
-    }, 1000);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-}));
-
 app.get('/api/health/export-json', (req, res) => requireAdmin(req, res, () => {
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
@@ -4861,14 +4442,7 @@ app.get('/api/public/student/:token', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
   if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
 
-  const uniApps = db.prepare(`
-    SELECT l.id, l.university, l.program, l.status, l.application_id, l.submitted_on, l.decision_on, l.notes,
-           k.country
-    FROM lead_university_applications l
-    LEFT JOIN kb_universities k ON l.university = k.name
-    WHERE l.lead_id=? 
-    ORDER BY l.id
-  `).all(lead.id);
+  const uniApps = db.prepare("SELECT id, university, program, status, application_id, submitted_on, decision_on, notes FROM lead_university_applications WHERE lead_id=? ORDER BY id").all(lead.id);
   const docs = db.prepare(`SELECT id, doc_type, status, notes, file_url, student_uploaded_url, student_uploaded_at, requested_by_student, received_on
                            FROM lead_documents
                            WHERE lead_id=?
@@ -4890,10 +4464,6 @@ app.get('/api/public/student/:token', (req, res) => {
       assigned_consultant: lead.assigned_consultant,
       drive_link: lead.drive_link,
       blood_group: lead.blood_group,
-      email: lead.email,
-      phone: lead.phone,
-      date_of_birth: lead.date_of_birth,
-      passport: lead.passport,
     },
     stages: getApplicationStages(),
     universities: uniApps,
@@ -5875,15 +5445,6 @@ async function syncChannelMetadata(channelId) {
         db.prepare("UPDATE channels SET name = ?, avatar_url = ? WHERE id = ?").run(data.name, avatarUrl, channelId);
         console.log(`[channel-metadata] Updated messenger/instagram channel ${channelId} (${data.name}) avatar: ${avatarUrl ? 'yes' : 'no'}`);
       }
-
-      // Auto-subscribe the Page to our webhook to ensure messages arrive instantly
-      try {
-        const subRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,messaging_optins,leadgen&access_token=${effectiveToken}`, { method: 'POST' });
-        const subData = await subRes.json();
-        console.log(`[channel-metadata] Auto-subscribed webhook for page ${pageId}:`, subData.success ? 'Success' : `Failed (${subData.error?.message})`);
-      } catch (err) {
-        console.warn(`[channel-metadata] Webhook auto-subscribe error for page ${pageId}:`, err.message);
-      }
     } catch (err) {
       console.warn(`[channel-metadata] Error syncing messenger/instagram channel ${channelId}:`, err.message);
     }
@@ -6314,8 +5875,9 @@ app.get('/api/conversations', (req, res) => {
     return { ...c, sla_status, priority };
   });
 
-  // Sort strictly by last_message_at desc
+  // Sort by priority first, then by last_message_at desc
   convWithMeta.sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority;
     return (b.last_message_at || '').localeCompare(a.last_message_at || '');
   });
 
@@ -6805,80 +6367,73 @@ app.get('/webhook/meta', (req, res) => {
 app.post('/webhook/meta', async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
-  
-  try {
-    db.prepare("INSERT INTO webhook_logs (payload) VALUES (?)").run(JSON.stringify(body));
-  } catch (err) {
-    console.error("Failed to log webhook", err.message);
-  }
 
   // ── WhatsApp Cloud API ─────────────────────────────────
   if (body.object === 'whatsapp_business_account') {
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         if (change.field !== 'messages') continue;
-        try {
-          const val = change.value;
-          const phoneNumberId = String(val.metadata?.phone_number_id).trim();
-          const channel = db.prepare("SELECT * FROM channels WHERE trim(phone_number_id)=? AND type='whatsapp'").get(phoneNumberId);
-          if (!channel) { console.log('⚠️ Unknown WA channel:', phoneNumberId); continue; }
+        const val = change.value;
+        const phoneNumberId = val.metadata?.phone_number_id;
+        const channel = db.prepare("SELECT * FROM channels WHERE phone_number_id=? AND type='whatsapp'").get(phoneNumberId);
+        if (!channel) { console.log('⚠️ Unknown WA channel:', phoneNumberId); continue; }
 
-          // Delivery/read status updates
-          for (const status of val.statuses || []) {
-            try {
-              db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
-              const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
-              if (msg) {
-                broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
-              } else {
-                broadcast('message_status', { wa_message_id: status.id, status: status.status });
-              }
-            } catch(e) { console.error('WA status update error:', e.message); }
+        // Delivery/read status updates
+        for (const status of val.statuses || []) {
+          db.prepare("UPDATE messages SET status=? WHERE wa_message_id=?").run(status.status, status.id);
+          const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
+          if (msg) {
+            broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
+          } else {
+            broadcast('message_status', { wa_message_id: status.id, status: status.status });
+          }
+        }
+
+        // Incoming messages
+        for (const msg of val.messages || []) {
+          const profileName = val.contacts?.find(c=>c.wa_id===msg.from)?.profile?.name || msg.from;
+          const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
+          const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
+
+          // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
+          if (msg.referral && !contact.lead_id) {
+            createLeadFromReferral({
+              contact,
+              channel,
+              referralData: msg.referral,
+              sourcePlatform: 'whatsapp'
+            });
+            const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+            if (updatedContact) contact.lead_id = updatedContact.lead_id;
           }
 
-          // Incoming messages
-          for (const msg of val.messages || []) {
-            const profileName = val.contacts?.find(c=>c.wa_id===msg.from)?.profile?.name || msg.from;
-            const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
-            const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
+          let content, type = msg.type, mediaUrl = null, caption = null;
+          if (msg.type === 'text')     { content = msg.text?.body; }
+          else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
+          else if (msg.type === 'audio')    { mediaUrl = msg.audio?.id;    content = '[Voice Message]'; }
+          else if (msg.type === 'video')    { mediaUrl = msg.video?.id;    caption = msg.video?.caption; content = '[Video]'; }
+          else if (msg.type === 'document') { mediaUrl = msg.document?.id; content = `[Document: ${msg.document?.filename||''}]`; }
+          else if (msg.type === 'location') { content = `📍 Location: ${msg.location?.latitude},${msg.location?.longitude}`; }
+          else if (msg.type === 'button')   { content = msg.button?.text; type='text'; }
+          else { content = `[${msg.type}]`; }
 
-            // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
-            if (msg.referral && !contact.lead_id) {
-              createLeadFromReferral({
-                contact,
-                channel,
-                referralData: msg.referral,
-                sourcePlatform: 'whatsapp'
-              });
-              const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
-              if (updatedContact) contact.lead_id = updatedContact.lead_id;
-            }
-
-            let content, type = msg.type, mediaUrl = null, caption = null;
-            if (msg.type === 'text')     { content = msg.text?.body; }
-            else if (msg.type === 'image')    { mediaUrl = msg.image?.id;    caption = msg.image?.caption; content = '[Image]'; }
-            else if (msg.type === 'audio')    { mediaUrl = msg.audio?.id;    content = '[Voice Message]'; }
-            else if (msg.type === 'video')    { mediaUrl = msg.video?.id;    caption = msg.video?.caption; content = '[Video]'; }
-            else if (msg.type === 'document') { mediaUrl = msg.document?.id; content = `[Document: ${msg.document?.filename||''}]`; }
-            else if (msg.type === 'location') { content = `📍 Location: ${msg.location?.latitude},${msg.location?.longitude}`; }
-            else if (msg.type === 'button')   { content = msg.button?.text; type='text'; }
-            else { content = `[${msg.type}]`; }
-
-            saveMessage(conv.id, 'in', content, type, msg.id, mediaUrl, caption);
-            // Run automation rules on the incoming message
-            const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
-            if (savedMsg) {
-              // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
-            }
-            const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
-            if (waInCount === 1) {
-              // Forward to n8n — Gemini generates personalised AI welcome
-              /* setImmediate(() => forwardToN8N({ ... })); */
-            }
-            console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
+          saveInboundMessage(conv.id, content, type, msg.id, mediaUrl, caption);
+          // Run automation rules on the incoming message
+          const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+          if (savedMsg) {
+            executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
           }
-        } catch (outerErr) {
-          console.error('WA webhook outer error:', outerErr.message);
+          const waInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+          if (waInCount === 1) {
+            // Forward to n8n — Gemini generates personalised AI welcome
+            setImmediate(() => forwardToN8N({
+              platform: 'whatsapp',
+              conversationId: conv.id,
+              senderName: profileName,
+              messageText: content || ''
+            }));
+          }
+          console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
         }
       }
     }
@@ -6966,71 +6521,65 @@ app.post('/webhook/meta', async (req, res) => {
 
       // Messenger messages
       for (const messaging of entry.messaging || []) {
+        if (!messaging.message || messaging.message.is_echo) continue;
+        const senderId = messaging.sender.id;
+        const channel = db.prepare("SELECT * FROM channels WHERE page_id=? AND type='messenger'").get(pageId);
+        if (!channel) continue;
+
+        const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(senderId) || upsertContact({ name: `Messenger User`, messenger_id: senderId });
+        // Fetch name + profile picture from Messenger API
         try {
-          console.log(`[webhook] Received Messenger webhook:`, JSON.stringify(messaging));
-          if (!messaging.message) continue;
-          const isEcho = messaging.message.is_echo;
-          const customerId = isEcho ? messaging.recipient.id : messaging.sender.id;
-          const channel = db.prepare("SELECT * FROM channels WHERE trim(page_id)=? AND type='messenger'").get(String(pageId).trim());
-          if (!channel) continue;
+          const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
+          const nr = await fetch(`https://graph.facebook.com/v19.0/${senderId}?fields=name,profile_pic&access_token=${pageToken}`);
+          const nd = await nr.json();
+          if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
+          if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
+        } catch {}
 
-          const contact = db.prepare("SELECT * FROM contacts WHERE messenger_id=?").get(customerId) || upsertContact({ name: `Messenger User`, messenger_id: customerId });
-          // Fetch name + profile picture from Messenger API
-          try {
-            const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
-            const nr = await fetch(`https://graph.facebook.com/v19.0/${customerId}?fields=name,profile_pic&access_token=${pageToken}`);
-            const nd = await nr.json();
-            if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
-            if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
-          } catch {}
+        const conv = upsertConversation(contact.id, channel.id, 'messenger');
 
-          const conv = upsertConversation(contact.id, channel.id, 'messenger');
-
-          const referral = messaging.referral || messaging.message?.referral;
-          // If message is from a Meta Paid Ad (Click-to-Messenger referral), auto-create a lead
-          if (referral && !contact.lead_id) {
-            createLeadFromReferral({
-              contact,
-              channel,
-              referralData: referral,
-              sourcePlatform: 'messenger'
-            });
-            const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
-            if (updatedContact) contact.lead_id = updatedContact.lead_id;
-          }
-
-          // Extract text or media attachment
-          let text = messaging.message.text, mtype = 'text', murl = null;
-          const att = messaging.message.attachments?.[0];
-          if (!text && att) {
-            murl = att.payload?.url || null;
-            if (att.type === 'image')      { text = '📷 Photo';  mtype = 'image'; }
-            else if (att.type === 'video') { text = '🎥 Video';  mtype = 'video'; }
-            else if (att.type === 'audio') { text = '🎵 Audio';  mtype = 'audio'; }
-            else if (att.type === 'file')  { text = '📎 File';   mtype = 'file'; }
-            else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
-          }
-          if (!text) text = '[message]';
-          saveMessage(conv.id, isEcho ? 'out' : 'in', text, mtype, messaging.message.mid, murl);
-          // Run automation rules
-          const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
-          if (savedMsg) {
-            // executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
-          }
-          const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
-          if (msInCount === 1) {
-            // Forward to n8n — Gemini generates personalised AI welcome
-            /* setImmediate(() => forwardToN8N({
-              platform: 'messenger',
-              conversationId: conv.id,
-              senderName: 'Messenger User', // DB will have real name shortly after
-              messageText: text || ''
-            })); */
-          }
-          console.log(`💬 Messenger [${channel.name}]: ${text}`);
-        } catch (msgErr) {
-          console.error('Messenger webhook error:', msgErr.message);
+        const referral = messaging.referral || messaging.message?.referral;
+        // If message is from a Meta Paid Ad (Click-to-Messenger referral), auto-create a lead
+        if (referral && !contact.lead_id) {
+          createLeadFromReferral({
+            contact,
+            channel,
+            referralData: referral,
+            sourcePlatform: 'messenger'
+          });
+          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+          if (updatedContact) contact.lead_id = updatedContact.lead_id;
         }
+
+        // Extract text or media attachment
+        let text = messaging.message.text, mtype = 'text', murl = null;
+        const att = messaging.message.attachments?.[0];
+        if (!text && att) {
+          murl = att.payload?.url || null;
+          if (att.type === 'image')      { text = '📷 Photo';  mtype = 'image'; }
+          else if (att.type === 'video') { text = '🎥 Video';  mtype = 'video'; }
+          else if (att.type === 'audio') { text = '🎵 Audio';  mtype = 'audio'; }
+          else if (att.type === 'file')  { text = '📎 File';   mtype = 'file'; }
+          else                           { text = `[${att.type}]`; mtype = att.type || 'text'; }
+        }
+        if (!text) text = '[message]';
+        saveInboundMessage(conv.id, text, mtype, messaging.message.mid, murl);
+        // Run automation rules
+        const savedMsg = db.prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(conv.id);
+        if (savedMsg) {
+          executeAutomationRules({ conversation: conv, message: savedMsg, channel, contact });
+        }
+        const msInCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(conv.id).n;
+        if (msInCount === 1) {
+          // Forward to n8n — Gemini generates personalised AI welcome
+          setImmediate(() => forwardToN8N({
+            platform: 'messenger',
+            conversationId: conv.id,
+            senderName: 'Messenger User', // DB will have real name shortly after
+            messageText: text || ''
+          }));
+        }
+        console.log(`💬 Messenger [${channel.name}]: ${text}`);
       }
     }
     return;
@@ -7040,9 +6589,8 @@ app.post('/webhook/meta', async (req, res) => {
   if (body.object === 'instagram') {
     for (const entry of body.entry || []) {
       for (const msg of entry.messaging || []) {
-        if (!msg.message) continue;
-        const isEcho = msg.message.is_echo;
-        const senderId = isEcho ? msg.recipient.id : msg.sender.id;
+        if (!msg.message || msg.message.is_echo) continue;
+        const senderId = msg.sender.id;
         const igAccountId = entry.id;
         const channel = db.prepare("SELECT * FROM channels WHERE ig_account_id=? AND type='instagram'").get(igAccountId);
         if (!channel) continue;
@@ -7070,7 +6618,7 @@ app.post('/webhook/meta', async (req, res) => {
           if (updatedContact) contact.lead_id = updatedContact.lead_id;
         }
         const text = msg.message.text || '[message]';
-        saveMessage(conv.id, isEcho ? 'out' : 'in', text, 'text', msg.message.mid);
+        saveInboundMessage(conv.id, text, 'text', msg.message.mid);
         console.log(`📸 Instagram [${channel.name}]: ${text}`);
       }
     }
@@ -7421,7 +6969,8 @@ app.get('/api/settings', (req, res) => {
   } catch (e) {
     console.error("Could not fetch active employees for settings:", e);
   }
-  const combinedConsultants = Array.from(new Set(activeEmployees.map(e => e.name))).filter(Boolean).sort();
+  const customConsultants = getList('settings_consultants', ['Ema','Afsana','Sakib','Mukta','Rafi','Admin']);
+  const combinedConsultants = Array.from(new Set([...activeEmployees.map(e => e.name), ...customConsultants])).filter(Boolean).sort();
 
   // Document templates from settings (object keyed by destination)
   let docTemplates = DOC_TEMPLATES;
@@ -7433,22 +6982,23 @@ app.get('/api/settings', (req, res) => {
   res.json({
     consultants: combinedConsultants,
     employees: activeEmployees,
-    leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Messenger','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
+    leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
     destinations: getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']),
-    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
+    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
       'Documents Collecting',
       'Documents Ready',
       'Applied to University',
       'Interview',
       'Pre-Admission',
-      'University Initial Deposit',
+      'Deposit',
       'Admission/JW Received',
       'Visa Applied',
-      'Passport Collection',
-      'Payment',
-      'Air Ticket',
-      'Fly'
+      'Visa Approved',
+      'Visa Rejected',
+      'Enrolled',
+      'Cancelled',
+      'Withdraw'
     ]),
     paymentStatuses: getList('settings_paymentStatuses', ['Pending','Partial','Paid','Refunded']),
     incomeCategories: getList('settings_incomeCategories', ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income']),
@@ -7463,6 +7013,7 @@ app.post('/api/settings', (req, res) => requireAdmin(req, res, () => {
     return res.status(400).json({ error: 'key is required' });
   }
   const allowedKeys = [
+    'settings_consultants',
     'settings_leadSources',
     'settings_destinations',
     'settings_leadStatuses',
@@ -8791,37 +8342,3 @@ setInterval(async () => {
     isBackgroundSyncing = false;
   }
 }, 15000);
-
-// ── Automated Daily Backups ───────────────────────────────────────
-setInterval(() => {
-  try {
-    if (!dbReady || !db) return;
-    const backupsDir = join(DB_DIR, 'backups');
-    if (!existsSync(backupsDir)) {
-      mkdirSync(backupsDir, { recursive: true });
-    }
-    
-    // Create new backup
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const backupPath = join(backupsDir, `crm_backup_${dateStr}.db`);
-    db.flush();
-    const data = db.export();
-    writeFileSync(backupPath, Buffer.from(data));
-    console.log(`[backup] Automated backup created: ${backupPath}`);
-    
-    // Cleanup backups older than 7 days
-    const files = readdirSync(backupsDir);
-    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    const fs = require('fs');
-    files.forEach(file => {
-      const filePath = join(backupsDir, file);
-      const stat = fs.statSync(filePath);
-      if (stat.mtimeMs < sevenDaysAgo && file.endsWith('.db')) {
-        fs.unlinkSync(filePath);
-        console.log(`[backup] Deleted old automated backup: ${file}`);
-      }
-    });
-  } catch (err) {
-    console.error('[backup] Automated backup failed:', err.message);
-  }
-}, 24 * 60 * 60 * 1000); // 24 hours
