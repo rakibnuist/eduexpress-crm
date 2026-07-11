@@ -721,14 +721,13 @@ function getApplicationStages() {
     'Applied to University',
     'Interview',
     'Pre-Admission',
-    'Deposit',
+    'University Initial Deposit',
     'Admission/JW Received',
     'Visa Applied',
-    'Visa Approved',
-    'Visa Rejected',
-    'Enrolled',
-    'Cancelled',
-    'Withdraw'
+    'Passport Collection',
+    'Payment',
+    'Air Ticket',
+    'Fly'
   ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');

@@ -151,39 +151,54 @@ export default function StudentPortal() {
         </section>
 
         {/* Stage progress */}
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-              <Plane size={16} /> Where you are in the journey
-            </h2>
-            <span className="text-xs font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-full">
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <Plane size={20} className="text-blue-500" /> Application Journey
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">Track your progress from start to finish</p>
+            </div>
+            <span className="text-sm font-semibold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full border border-blue-100">
               Current: {currentStage?.label || '—'}
             </span>
           </div>
-          <ol className="space-y-3">
+          
+          <div className="relative pl-4 mt-4 space-y-6">
+            {/* The continuous vertical line background */}
+            <div className="absolute top-4 bottom-4 left-[27px] w-0.5 bg-slate-100 rounded-full" />
+            
             {stages.map((s, i) => {
               const past = i < stageIdx, here = i === stageIdx;
+              
               return (
-                <li key={s.key} className="flex items-start gap-3">
-                  <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center
-                    ${past ? 'bg-emerald-500 text-white' : here ? 'bg-blue-600 text-white ring-4 ring-blue-100' : 'bg-slate-200 text-slate-400'}`}>
-                    {past ? <CheckCircle2 size={14} /> : <span className="text-xs font-bold">{i + 1}</span>}
+                <div key={s.key} className="relative flex items-start gap-5 group">
+                  {/* The dot */}
+                  <div className={`relative z-10 flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center border-4 border-white shadow-sm transition-all duration-300
+                    ${past ? 'bg-emerald-500 text-white' : here ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-slate-200 text-slate-400 group-hover:bg-slate-300'}`}>
+                    {past ? <CheckCircle2 size={12} strokeWidth={3} /> : <span className="text-[10px] font-bold">{i + 1}</span>}
                   </div>
-                  <div className="flex-1 pt-0.5">
-                    <p className={`text-sm font-medium ${here ? 'text-blue-700' : past ? 'text-slate-600' : 'text-slate-400'}`}>
+                  
+                  {/* The content box */}
+                  <div className={`flex-1 min-w-0 transition-all duration-300 ${here ? '-mt-2 p-4 bg-blue-50/50 rounded-xl border border-blue-100/60' : 'pt-0.5'}`}>
+                    <p className={`text-sm md:text-base font-semibold ${here ? 'text-blue-700' : past ? 'text-slate-800' : 'text-slate-400'}`}>
                       {s.label}
                     </p>
                     {here && student.visa_deadline && s.key.includes('visa') && (
-                      <p className="text-xs text-rose-600 mt-0.5"><AlertTriangle size={11} className="inline mr-0.5" /> Visa deadline: {student.visa_deadline}</p>
+                      <div className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-600 bg-rose-50 border border-rose-100 px-2 py-1 rounded w-fit">
+                        <AlertTriangle size={12} /> Deadline: {student.visa_deadline}
+                      </div>
                     )}
-                    {here && student.departure_date && s.key === 'departed' && (
-                      <p className="text-xs text-slate-500 mt-0.5">Departure: {student.departure_date}</p>
+                    {here && student.departure_date && s.key === 'fly' && (
+                      <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded w-fit shadow-sm">
+                        <Plane size={12} /> Departure: {student.departure_date}
+                      </div>
                     )}
                   </div>
-                </li>
+                </div>
               );
             })}
-          </ol>
+          </div>
         </section>
 
         {/* Universities */}
