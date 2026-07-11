@@ -263,6 +263,14 @@ export const NAV_ITEMS = [
     roles: ['founder_ceo', 'managing_director'],
   },
   {
+    id: 'destinations',
+    to: '/destinations',
+    icon: 'Globe',
+    label: 'Destinations',
+    permission: PERMISSIONS.MANAGE_SETTINGS,
+    roles: ['founder_ceo', 'managing_director'],
+  },
+  {
     id: 'settings',
     to: '/settings',
     icon: 'Settings',
@@ -277,7 +285,7 @@ export const NAV_ITEMS = [
 export const ICON_NAMES = [
   'LayoutDashboard', 'Eye', 'FileBarChart', 'Sun', 'Users', 'Plane',
   'PlusCircle', 'MessageSquare', 'Megaphone', 'Zap', 'DollarSign',
-  'UserCheck', 'Settings',
+  'UserCheck', 'Settings', 'Globe',
 ];
 
 // ─── Permission Helpers ─────────────────────────────────────────────────────

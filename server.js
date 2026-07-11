@@ -821,7 +821,13 @@ app.get('/api/application/meta', (req, res) => {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
-  const destinations = getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']);
+  const destinations = (function(){
+    try {
+      const rows = db.prepare("SELECT name FROM destinations").all();
+      if(rows.length > 0) return rows.map(r => r.name);
+    } catch(e){}
+    return ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand'];
+  })();
   const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Messenger', 'Referral']);
   // Source markets align with business model (China = collect FROM China; Bangladesh = collect FROM Bangladesh)
   const sourceMarkets = [
@@ -1476,6 +1482,20 @@ function setupSchema() { db.exec(`
     target_enrolled INTEGER DEFAULT 0,
     target_revenue REAL DEFAULT 0,
     UNIQUE(consultant, month)
+  );
+
+  CREATE TABLE IF NOT EXISTS destinations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT UNIQUE,
+    name TEXT UNIQUE,
+    requirements TEXT,
+    programs TEXT,
+    fees TEXT,
+    embassy_documents TEXT,
+    application_processing TEXT,
+    other_details TEXT,
+    is_public INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS meta_config (
@@ -7444,6 +7464,73 @@ app.get('/api/automation/stats', (req, res) => requireManagerOrAdmin(req, res, (
 // ─────────────────────────────────────────────────────────
 // SETTINGS
 // ─────────────────────────────────────────────────────────
+// ==========================================
+// DESTINATIONS API
+// ==========================================
+app.get('/api/destinations', (req, res) => {
+  try {
+    const destinations = db.prepare("SELECT * FROM destinations ORDER BY name ASC").all();
+    res.json(destinations);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/public/destinations/:slug', (req, res) => {
+  try {
+    const dest = db.prepare("SELECT * FROM destinations WHERE slug=? AND is_public=1").get(req.params.slug);
+    if (!dest) return res.status(404).json({ error: 'Destination not found' });
+    res.json(dest);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/destinations', (req, res) => requireAdmin(req, res, () => {
+  try {
+    const { name, requirements, programs, fees, embassy_documents, application_processing, other_details, is_public } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    
+    let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    let existingSlug = db.prepare("SELECT id FROM destinations WHERE slug=?").get(slug);
+    if (existingSlug) {
+      slug = slug + '-' + Date.now().toString().slice(-4);
+    }
+    
+    const info = db.prepare(`
+      INSERT INTO destinations (slug, name, requirements, programs, fees, embassy_documents, application_processing, other_details, is_public)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(slug, name, requirements || '', programs || '', fees || '', embassy_documents || '', application_processing || '', other_details || '', is_public ? 1 : 0);
+    
+    res.json({ success: true, id: info.lastInsertRowid });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}));
+
+app.put('/api/destinations/:id', (req, res) => requireAdmin(req, res, () => {
+  try {
+    const { name, requirements, programs, fees, embassy_documents, application_processing, other_details, is_public } = req.body;
+    db.prepare(`
+      UPDATE destinations 
+      SET name=?, requirements=?, programs=?, fees=?, embassy_documents=?, application_processing=?, other_details=?, is_public=?
+      WHERE id=?
+    `).run(name, requirements || '', programs || '', fees || '', embassy_documents || '', application_processing || '', other_details || '', is_public ? 1 : 0, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}));
+
+app.delete('/api/destinations/:id', (req, res) => requireAdmin(req, res, () => {
+  try {
+    db.prepare("DELETE FROM destinations WHERE id=?").run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}));
+
 app.get('/api/settings', (req, res) => {
   const getList = (key, defaults) => {
     const val = getConfig(key);
@@ -7471,7 +7558,13 @@ app.get('/api/settings', (req, res) => {
     consultants: combinedConsultants,
     employees: activeEmployees,
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Messenger','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
-    destinations: getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']),
+    destinations: (function(){
+      try {
+        const rows = db.prepare("SELECT name FROM destinations").all();
+        if(rows.length > 0) return rows.map(r => r.name);
+      } catch(e){}
+      return ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand'];
+    })(),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
       'Documents Collecting',
@@ -7501,7 +7594,6 @@ app.post('/api/settings', (req, res) => requireAdmin(req, res, () => {
   }
   const allowedKeys = [
     'settings_leadSources',
-    'settings_destinations',
     'settings_leadStatuses',
     'settings_fileStages',
     'settings_paymentStatuses',

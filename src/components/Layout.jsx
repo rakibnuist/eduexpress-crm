@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone, Zap, Moon, PlusCircle
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone, Zap, Moon, PlusCircle, Globe
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
@@ -25,6 +25,7 @@ const ICON_MAP = {
   DollarSign,
   UserCheck,
   Settings,
+  Globe,
 };
 
 export default function Layout({ children, user, onLogout }) {

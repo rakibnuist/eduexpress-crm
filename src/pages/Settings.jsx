@@ -105,8 +105,6 @@ export default function Settings() {
                 listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
               <EditableCard icon={<Tag size={16} />} title="Lead Statuses" color="sky"
                 listKey="settings_leadStatuses" items={settings.leadStatuses || []} onSaved={reloadSettings} />
-              <EditableCard icon={<Globe size={16} />} title="Destinations" color="emerald"
-                listKey="settings_destinations" items={settings.destinations || []} onSaved={reloadSettings} />
               <EditableCard icon={<CreditCard size={16} />} title="Payment Statuses" color="rose"
                 listKey="settings_paymentStatuses" items={settings.paymentStatuses || []} onSaved={reloadSettings} />
               <EditableCard icon={<Clock size={16} />} title="File Stages" color="amber"

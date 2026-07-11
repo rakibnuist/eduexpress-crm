@@ -28,6 +28,8 @@ const StudentPortal = lazy(() => import('./pages/StudentPortal'));
 const Conversations = lazy(() => import('./pages/Conversations'));
 const Marketing     = lazy(() => import('./pages/Marketing'));
 const Automation    = lazy(() => import('./pages/Automation'));
+const Destinations  = lazy(() => import('./pages/Destinations'));
+const DestinationPublic = lazy(() => import('./pages/DestinationPublic'));
 
 function PageLoader() {
   return (
@@ -62,6 +64,7 @@ export default function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/privacy" element={<LegalNotice />} />
+              <Route path="/d/:slug" element={<DestinationPublic />} />
               <Route path="/s/:token" element={<StudentPortal />} />
               <Route path="/login" element={
                 user ? <Navigate to="/" replace /> : <Login onSuccess={u => setUser(normalizeUserRoles(u))} />
@@ -87,6 +90,7 @@ export default function App() {
                         {canViewAutomation(user) && <Route path="/automation" element={<Automation />} />}
                         {hasPermission(user, PERMISSIONS.VIEW_FINANCE) && <Route path="/finance" element={<Finance />} />}
                         {hasPermission(user, PERMISSIONS.VIEW_HR) && <Route path="/hr" element={<HR user={user} />} />}
+                        {isFullAdmin(user) && <Route path="/destinations" element={<Destinations />} />}
                         {isFullAdmin(user) && <Route path="/settings" element={<Settings />} />}
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>
