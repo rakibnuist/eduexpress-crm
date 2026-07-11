@@ -4080,7 +4080,7 @@ app.get('/api/dashboard', (req, res) => {
 // LEADS
 // ─────────────────────────────────────────────────────────
 // Ad Performance: which FB page / ad is generating the most leads (admin/CEO only)
-app.get('/api/leads/source-stats', requireAuth, (req, res) => {
+app.get('/api/leads/source-stats', (req, res) => {
   const u = req.user;
   const isAdminOrCEO = u?.role === 'admin' ||
     (Array.isArray(u?.roles) && (u.roles.includes('founder_ceo') || u.roles.includes('managing_director')));
