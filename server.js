@@ -330,25 +330,10 @@ app.post('/api/auth/login', (req, res) => {
       }
     }
 
-    // Allow login if either condition explicitly passed.
+    // Allow login to proceed. Geofence is only for auto-attendance.
     if (!ssidPassed && !geoPassed) {
-      if (geoFailed && ssidFailed) {
-        return res.status(403).json({
-          error: `Not connected to office Wi-Fi and you are ${Math.round(distFromOffice)}m away.`,
-          code: 'OUTSIDE_OFFICE',
-          distance: Math.round(distFromOffice),
-        });
-      } else if (geoFailed && !ssid) {
-        return res.status(403).json({
-          error: `You must be at the office to log in. You are currently ${Math.round(distFromOffice)}m away.`,
-          code: 'OUTSIDE_OFFICE',
-          distance: Math.round(distFromOffice),
-        });
-      } else if (ssidFailed && (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng))) {
-        return res.status(403).json({
-          error: 'Not connected to the office network. Please connect to the EduExpress or HTA Wi-Fi and try again.',
-          code: 'WRONG_NETWORK',
-        });
+      if (geoFailed) {
+        console.warn(`[login] User ${email} logged in from outside office radius. Geofence is for attendance only, allowing login.`);
       }
     }
   }
