@@ -364,6 +364,7 @@ export default function Applications({ user }) {
           SOURCE MARKET TABS (Business Model: China vs Bangladesh)
           ═══════════════════════════════════════════════════════ */}
       {!isAgentUser && (
+      <>
       <div className="flex gap-2 border-b border-slate-200 pb-0">
         <button onClick={() => { setSourceMarket('all'); setBdChannel('office'); }}
           className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'all' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
@@ -398,6 +399,7 @@ export default function Applications({ user }) {
           <div className="h-px flex-1 bg-slate-100" />
         </div>
       )}
+      </>
       )}
 
       {/* ═══════════════════════════════════════════════════════
