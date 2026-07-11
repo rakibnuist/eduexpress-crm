@@ -184,22 +184,42 @@ export default function StudentPortal() {
                 </h2>
               </div>
               
-              <div className="relative ml-3 space-y-6">
+              <div className="relative ml-3 space-y-7">
                 <div className="absolute top-2 bottom-2 left-[11px] w-[2px] bg-slate-100 rounded-full" />
                 
                 {stages.map((s, i) => {
                   const past = i < stageIdx, here = i === stageIdx;
                   
+                  // Meaningful descriptions for the 12 stages
+                  const descriptions = {
+                    'documents': 'Gathering required files',
+                    'ready': 'Files verified & ready',
+                    'submitted': 'Submitted to universities',
+                    'interview': 'University interview phase',
+                    'pre_admission': 'Pending admission letter',
+                    'university_initial_deposit': 'Initial tuition deposit',
+                    'admitted': 'Admission/JW202 received',
+                    'visa_applied': 'Visa application filed',
+                    'passport_collection': 'Passport ready for pickup',
+                    'payment': 'Final payment clearance',
+                    'air_ticket': 'Flight booking',
+                    'fly': 'Ready for departure'
+                  };
+                  const desc = descriptions[s.key] || 'Stage in progress';
+                  
                   return (
-                    <div key={s.key} className="relative flex items-start gap-4 group">
-                      <div className={`relative z-10 flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ring-4 ring-white transition-all duration-300
-                        ${past ? 'bg-slate-800 text-white shadow-md' : here ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 ring-blue-50' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
+                    <div key={s.key} className="relative flex items-start gap-5 group">
+                      <div className={`relative z-10 flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ring-4 ring-white transition-all duration-300 mt-0.5
+                        ${past ? 'bg-emerald-500 text-white shadow-sm' : here ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 ring-blue-50 scale-110' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
                         {past ? <CheckCircle2 size={12} strokeWidth={3} /> : <span className="text-[9px] font-bold">{i + 1}</span>}
                       </div>
                       
-                      <div className={`flex-1 min-w-0 transition-all duration-300 ${here ? '-mt-1.5 p-3 bg-blue-50/50 rounded-xl border border-blue-100' : 'pt-0.5'}`}>
-                        <p className={`text-sm font-bold tracking-tight ${here ? 'text-blue-800' : past ? 'text-slate-700' : 'text-slate-400'}`}>
+                      <div className={`flex-1 min-w-0 transition-all duration-300 ${here ? '-mt-2 p-3.5 bg-gradient-to-br from-blue-50 to-indigo-50/30 rounded-2xl border border-blue-100/60 shadow-sm' : ''}`}>
+                        <p className={`text-sm font-bold tracking-tight ${here ? 'text-blue-900' : past ? 'text-slate-800' : 'text-slate-400'}`}>
                           {s.label}
+                        </p>
+                        <p className={`text-[11px] mt-0.5 font-medium ${here ? 'text-blue-600' : past ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {desc}
                         </p>
                         {here && student.visa_deadline && s.key.includes('visa') && (
                           <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-rose-700 bg-rose-50 border border-rose-100 px-2 py-1 rounded-md w-fit">
@@ -236,8 +256,9 @@ export default function StudentPortal() {
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                         <div className="flex-1">
                           <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{u.university}</h3>
-                          <div className="mt-1 flex items-center gap-3 text-sm text-slate-600 font-medium">
-                            <span>{u.program || 'General Program'}</span>
+                          <div className="mt-1.5 flex items-center gap-2 text-sm text-slate-600 font-medium bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-lg w-fit">
+                            <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Major:</span>
+                            <span>{u.program || student.major || 'General Program'}</span>
                           </div>
                           
                           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
