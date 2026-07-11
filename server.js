@@ -9177,3 +9177,52 @@ setInterval(() => {
     console.error('[backup] Automated backup failed:', err.message);
   }
 }, 24 * 60 * 60 * 1000); // 24 hours
+
+// ---------------------------------------------------------
+// ONE-TIME RETROACTIVE SCAN: Find BD phone numbers in old chats and create leads
+// ---------------------------------------------------------
+function scanOldChatsForLeads() {
+  try {
+    console.log('--- STARTING RETROACTIVE CHAT SCAN ---');
+    const bdPhoneRegex = /(?:\+?88[\s-]*)?01[3-9](?:[\s-]*\d){8}/;
+    
+    // Find contacts with no lead_id and no phone
+    const contacts = db.prepare("SELECT * FROM contacts WHERE lead_id IS NULL AND (phone IS NULL OR phone = '')").all();
+    let foundCount = 0;
+
+    for (const contact of contacts) {
+      // Find all incoming messages for this contact
+      const msgs = db.prepare(`
+        SELECT m.content, m.conversation_id 
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE c.contact_id = ? AND m.direction = 'in' AND m.type = 'text' AND m.content IS NOT NULL
+        ORDER BY m.id ASC
+      `).all(contact.id);
+
+      for (const msg of msgs) {
+        const match = msg.content.match(bdPhoneRegex);
+        if (match) {
+          const extractedPhone = match[0];
+          console.log(`[Retro Scan] Found phone ${extractedPhone} for contact ${contact.name}`);
+          
+          // Update contact phone
+          db.prepare("UPDATE contacts SET phone=? WHERE id=? AND (phone IS NULL OR phone = '')").run(extractedPhone, contact.id);
+          
+          // Re-fetch contact and create lead
+          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
+          if (updatedContact) {
+            autoLinkOrCreateLead(updatedContact);
+            foundCount++;
+          }
+          break; // Stop scanning messages for this contact once a phone is found
+        }
+      }
+    }
+    console.log(`--- FINISHED RETROACTIVE SCAN. Created ${foundCount} leads! ---`);
+  } catch(e) {
+    console.error('Retro scan error:', e.message);
+  }
+}
+// Run immediately after server starts
+setTimeout(scanOldChatsForLeads, 3000);
