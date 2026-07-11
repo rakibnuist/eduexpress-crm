@@ -187,8 +187,10 @@ export default function LeadForm({ user, lead, settings, onSave }) {
             employees={employees} placeholder="— pick —" disabled={canViewOwnLeadsOnly(user)} />
           <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => set('next_followup', v)} />
         </Row>
-        {(form.lead_status === 'File Opened' || form.lead_status === 'Enrolled') && (
-          <>
+      </Section>
+
+      {/* ── File & Application Status ── */}
+      <Section icon={<FolderOpen size={14}/>} title="File & Application Status" color="indigo">
             <Row cols={1}>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -218,8 +220,6 @@ export default function LeadForm({ user, lead, settings, onSave }) {
                   placeholder="e.g. Original Passport, SSC Certificate, HSC Marksheet..." rows={2} />
               </Row>
             )}
-          </>
-        )}
       </Section>
 
       {/* ── Financial ── */}
