@@ -3177,10 +3177,13 @@ function autoLinkOrCreateLead(contact) {
   if (!contact.phone || contact.lead_id) return contact;
   let phone = String(contact.phone).trim();
   const digits = phone.replace(/[^\d]/g, '');
+  let isBD = false;
   if (digits.startsWith('01') && digits.length === 11) {
     phone = '+88' + digits;
+    isBD = true;
   } else if (digits.startsWith('8801') && digits.length === 13) {
     phone = '+' + digits;
+    isBD = true;
   }
   const last10 = digits.slice(-10);
   if (!last10 || last10.length < 10) return contact;
@@ -3191,6 +3194,7 @@ function autoLinkOrCreateLead(contact) {
     db.prepare("UPDATE conversations SET lead_id=? WHERE contact_id=?").run(existingLead.id, contact.id);
     contact.lead_id = existingLead.id;
   } else {
+    if (!isBD) return contact;
     const year = new Date().getFullYear().toString().slice(-2);
     const count = db.prepare("SELECT COUNT(*) as n FROM leads WHERE lead_id LIKE ?").get(`L${year}%`).n + 1;
     const nextId = `L${year}${String(count).padStart(4, '0')}`;
