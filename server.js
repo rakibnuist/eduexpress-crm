@@ -2294,6 +2294,12 @@ function runMigrations() {
     `ALTER TABLE lead_documents ADD COLUMN requested_by_student INTEGER DEFAULT 0`,
     `ALTER TABLE lead_documents ADD COLUMN student_uploaded_url TEXT`,
     `ALTER TABLE lead_documents ADD COLUMN student_uploaded_at TEXT`,
+    // Academic & Medical fields
+    `ALTER TABLE leads      ADD COLUMN passing_year TEXT`,
+    `ALTER TABLE leads      ADD COLUMN last_education_major TEXT`,
+    `ALTER TABLE leads      ADD COLUMN height TEXT`,
+    `ALTER TABLE leads      ADD COLUMN weight TEXT`,
+    `ALTER TABLE leads      ADD COLUMN english_test_type TEXT`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
