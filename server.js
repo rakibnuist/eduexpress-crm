@@ -3105,6 +3105,47 @@ function autoCheckIn(user, opts = {}) {
   return { ok: true, created: info.lastInsertRowid, status, time, source, ssid };
 }
 
+function autoLinkOrCreateLead(contact) {
+  if (!contact.phone || contact.lead_id) return contact;
+  let phone = String(contact.phone).trim();
+  const digits = phone.replace(/[^\d]/g, '');
+  if (digits.startsWith('01') && digits.length === 11) {
+    phone = '+88' + digits;
+  } else if (digits.startsWith('8801') && digits.length === 13) {
+    phone = '+' + digits;
+  }
+  const last10 = digits.slice(-10);
+  if (!last10 || last10.length < 10) return contact;
+
+  const existingLead = db.prepare("SELECT id FROM leads WHERE phone LIKE ?").get(`%${last10}`);
+  if (existingLead) {
+    db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(existingLead.id, contact.id);
+    db.prepare("UPDATE conversations SET lead_id=? WHERE contact_id=?").run(existingLead.id, contact.id);
+    contact.lead_id = existingLead.id;
+  } else {
+    const year = new Date().getFullYear().toString().slice(-2);
+    const count = db.prepare("SELECT COUNT(*) as n FROM leads WHERE lead_id LIKE ?").get(`L${year}%`).n + 1;
+    const nextId = `L${year}${String(count).padStart(4, '0')}`;
+    const info = db.prepare(`INSERT INTO leads (
+      lead_id, date_added, client_name, phone, lead_source, lead_status, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      nextId, new Date().toISOString().slice(0, 10), contact.name || 'Chat Lead', phone, 'Inbox', 'New Lead', 'In-House'
+    );
+    const newLeadId = info.lastInsertRowid;
+    db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(newLeadId, contact.id);
+    db.prepare("UPDATE conversations SET lead_id=? WHERE contact_id=?").run(newLeadId, contact.id);
+    contact.lead_id = newLeadId;
+    
+    // Broadcast the new lead so UI updates
+    const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(newLeadId);
+    if (newLead) {
+      broadcast('new_lead', { lead: newLead });
+      logActivity({ type: 'lead_created', actor: { name: 'Auto-Lead Bot' }, lead: newLead, details: { source: 'Chat Auto-Link' } });
+    }
+  }
+  return contact;
+}
+
 function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_id, email, avatar_url }) {
   const existing = wa_id
     ? db.prepare("SELECT * FROM contacts WHERE wa_id=?").get(wa_id)
@@ -3117,16 +3158,24 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_
     : phone ? db.prepare("SELECT * FROM contacts WHERE phone=?").get(phone) : null;
 
   if (existing) {
-    // Fill in a real name / avatar if we now have one and didn't before
-    if (name && (!existing.name || existing.name === 'Unknown' || existing.name.endsWith(' User')))
+    if (name && (!existing.name || existing.name === 'Unknown' || existing.name.endsWith(' User'))) {
       db.prepare("UPDATE contacts SET name=? WHERE id=?").run(name, existing.id);
-    if (avatar_url && !existing.avatar_url)
+      existing.name = name;
+    }
+    if (avatar_url && !existing.avatar_url) {
       db.prepare("UPDATE contacts SET avatar_url=? WHERE id=?").run(avatar_url, existing.id);
-    return existing;
+      existing.avatar_url = avatar_url;
+    }
+    if (phone && !existing.phone) {
+      db.prepare("UPDATE contacts SET phone=? WHERE id=?").run(phone, existing.id);
+      existing.phone = phone;
+    }
+    return autoLinkOrCreateLead(existing);
   }
   const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id,tiktok_id,avatar_url) VALUES (?,?,?,?,?,?,?,?)`)
     .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null, tiktok_id || null, avatar_url || null);
-  return db.prepare("SELECT * FROM contacts WHERE id=?").get(info.lastInsertRowid);
+  const newContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(info.lastInsertRowid);
+  return autoLinkOrCreateLead(newContact);
 }
 
 function upsertConversation(contactId, channelId, channelType) {
@@ -3182,7 +3231,15 @@ function upsertConversation(contactId, channelId, channelType) {
   if (!info || info.changes === 0) {
     return db.prepare("SELECT * FROM conversations WHERE contact_id=? AND channel_id=? AND status != 'resolved'").get(contactId, channelId);
   }
-  return db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
+  
+  const createdConv = db.prepare("SELECT * FROM conversations WHERE id=?").get(info.lastInsertRowid);
+  // Auto inherit lead_id from contact
+  const contact = db.prepare("SELECT lead_id FROM contacts WHERE id=?").get(contactId);
+  if (contact && contact.lead_id && createdConv) {
+    db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(contact.lead_id, createdConv.id);
+    createdConv.lead_id = contact.lead_id;
+  }
+  return createdConv;
 }
 
 function createLeadFromContact(contactId, source, initialMessage, creatorUser, options = {}) {
@@ -3394,30 +3451,10 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
         const match = content.match(bdPhoneRegex);
         if (match) {
           const extractedPhone = match[0];
-          // Check if lead exists
-          const existing = db.prepare("SELECT id FROM leads WHERE phone LIKE ?").get(`%${extractedPhone.slice(-10)}`);
-          if (!existing) {
-            // Create new lead
-            const leadParamsObj = leadParams({
-              client_name: conv.contact_name || 'Chat Lead',
-              phone: extractedPhone,
-              lead_source: conv.channel_type || 'Inbox',
-              lead_status: 'New Lead',
-              notes: 'Auto-created from chat message phone number.',
-              destination: 'Bangladesh',
-              source: 'In-House'
-            }, nextLeadId(), 0);
-            const lInfo = db.prepare(LEAD_INSERT_SQL).run(leadParamsObj);
-            const newLeadId = lInfo.lastInsertRowid;
-            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(newLeadId, convId);
-            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(newLeadId, conv.contact_id);
-            const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(newLeadId);
-            broadcast('new_lead', { lead: newLead });
-            logActivity({ type: 'lead_created', actor: { name: 'Auto-Lead Bot' }, lead: newLead, details: { source: 'Chat Extraction' } });
-          } else {
-            // Link to existing
-            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(existing.id, convId);
-            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(existing.id, conv.contact_id);
+          db.prepare("UPDATE contacts SET phone=? WHERE id=? AND (phone IS NULL OR phone = '')").run(extractedPhone, conv.contact_id);
+          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
+          if (updatedContact) {
+            autoLinkOrCreateLead(updatedContact);
           }
         }
       }
