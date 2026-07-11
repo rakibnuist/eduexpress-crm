@@ -2415,6 +2415,7 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN ad_name TEXT`,
     `ALTER TABLE leads ADD COLUMN page_name TEXT`,
     `ALTER TABLE leads ADD COLUMN channel_id INTEGER`,
+    `ALTER TABLE contacts ADD COLUMN referral_data TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -3226,10 +3227,50 @@ function autoLinkOrCreateLead(contact) {
     const year = new Date().getFullYear().toString().slice(-2);
     const count = db.prepare("SELECT COUNT(*) as n FROM leads WHERE lead_id LIKE ?").get(`L${year}%`).n + 1;
     const nextId = `L${year}${String(count).padStart(4, '0')}`;
+    
+    let lead_source = 'Inbox';
+    let source = 'In-House';
+    let ad_name = null, page_name = null, channel_id = null, meta_ad_id = null, meta_campaign = null, assigned_consultant = null;
+    let notes = 'Auto-created from Chat';
+
+    if (contact.referral_data) {
+      try {
+        const ref = JSON.parse(contact.referral_data);
+        if (ref.sourcePlatform !== 'whatsapp') {
+          const platformSourceMap = { messenger: 'Facebook Ad', instagram: 'Instagram Ad' };
+          lead_source = platformSourceMap[ref.sourcePlatform] || 'Facebook Ad';
+          meta_ad_id = ref.ad_id || ref.source_id || null;
+          meta_campaign = ref.campaign_id || ref.campaign_name || null;
+          ad_name = ref.ad_title || ref.headline || null;
+          page_name = ref.channel_name || null;
+          channel_id = ref.channel_id || null;
+          assigned_consultant = ref.consultant || null;
+
+          const adTitle = ad_name || '';
+          const bodyText = ref.body || '';
+          notes = adTitle ? `Click-to-${ref.sourcePlatform} Referral Ad: "${adTitle}" ${bodyText ? '- ' + bodyText : ''}` : `Auto-created from Click-to-${ref.sourcePlatform} ad.`;
+
+          const textToCheck = (adTitle + ' ' + bodyText).toLowerCase();
+          if (textToCheck.includes('china') || textToCheck.includes('chinese') || textToCheck.includes('中国')) {
+            source = 'China';
+            assigned_consultant = 'Abdullah Al Rakib';
+          } else if (textToCheck.includes('b2b') || textToCheck.includes('agent')) {
+            source = 'B2B';
+            assigned_consultant = 'Tahmid Imam';
+          } else if (textToCheck.includes('bangladesh') || textToCheck.includes('bd') || textToCheck.includes('office')) {
+            source = 'In-House';
+            assigned_consultant = 'Taj Ahmed';
+          }
+        }
+      } catch (e) {}
+    }
+
     const info = db.prepare(`INSERT INTO leads (
-      lead_id, date_added, client_name, phone, lead_source, lead_status, source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-      nextId, new Date().toISOString().slice(0, 10), contact.name || 'Chat Lead', phone, 'Inbox', 'New Lead', 'In-House'
+      lead_id, date_added, client_name, phone, lead_source, lead_status, source,
+      meta_ad_id, meta_campaign, ad_name, page_name, channel_id, assigned_consultant, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      nextId, new Date().toISOString().slice(0, 10), contact.name || 'Chat Lead', phone, lead_source, 'New Lead', source,
+      meta_ad_id, meta_campaign, ad_name, page_name, channel_id, assigned_consultant, notes
     );
     const newLeadId = info.lastInsertRowid;
     db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(newLeadId, contact.id);
@@ -3428,6 +3469,15 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
 function createLeadFromReferral({ contact, channel, referralData, sourcePlatform }) {
   try {
     if (contact.lead_id) return null; // Lead already exists
+    
+    // Always store referral data on the contact for future use (when phone is provided)
+    if (referralData) {
+      try {
+        const enrichedReferral = { ...referralData, sourcePlatform, channel_name: channel.name, channel_id: channel.id, consultant: channel.consultant };
+        db.prepare("UPDATE contacts SET referral_data=? WHERE id=?").run(JSON.stringify(enrichedReferral), contact.id);
+      } catch (e) { console.error('Error saving referral data:', e.message); }
+    }
+
     if (!contact.phone) return null;  // Skip — no phone number, not a trackable lead
     if (sourcePlatform === 'whatsapp') return null; // Skip WhatsApp — API costs money; track Messenger/Instagram only
 
