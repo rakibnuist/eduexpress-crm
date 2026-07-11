@@ -2425,25 +2425,28 @@ function runMigrations() {
     console.error("[migration] Payroll update failed:", e.message);
   }
 
-  // Dynamic self-healing migration to reset and force file stages config to the updated user pipeline
+  // Dynamic self-healing migration to reset and force file stages config to the updated professional pipeline
   try {
-    const newStages = [
-      'Documents Collecting',
-      'Documents Ready',
-      'Applied to University',
-      'Interview',
-      'Pre-Admission',
-      'Deposit',
-      'Admission/JW Received',
-      'Visa Applied',
-      'Visa Approved',
-      'Visa Rejected',
-      'Enrolled',
-      'Cancelled',
-      'Withdraw'
-    ];
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
-    console.log("[migration] Updated settings_fileStages in database to user requested default flow.");
+    const currentStagesRaw = db.prepare("SELECT value FROM meta_config WHERE key = 'settings_fileStages'").get()?.value;
+    if (currentStagesRaw && currentStagesRaw.includes('Documents Collecting')) {
+      const newStages = [
+        'Document Collection',
+        'Document Verification',
+        'Application Submitted',
+        'University Interview',
+        'Conditional Offer',
+        'Tuition Deposit',
+        'Unconditional Offer & JW202',
+        'Visa Application',
+        'Visa Approval',
+        'Final Settlement',
+        'Pre-Departure & Flight',
+        'Arrival & Enrollment'
+      ];
+      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
+      console.log("[migration] Updated settings_fileStages in database to professional requested default flow.");
+    }
+
 
     // Migrate any existing legacy application stages in leads table to their closest new counterparts
     db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'in_review'").run();
