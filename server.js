@@ -2387,6 +2387,10 @@ function runMigrations() {
     `ALTER TABLE conversations ADD COLUMN assigned_to_id INTEGER`,
     `DELETE FROM conversations WHERE id NOT IN (SELECT MAX(id) FROM conversations GROUP BY contact_id, channel_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_contact_channel ON conversations(contact_id, channel_id)`,
+    // ── Ad Attribution columns (which FB page / ad created the lead) ──
+    `ALTER TABLE leads ADD COLUMN ad_name TEXT`,
+    `ALTER TABLE leads ADD COLUMN page_name TEXT`,
+    `ALTER TABLE leads ADD COLUMN channel_id INTEGER`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -3400,6 +3404,8 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
 function createLeadFromReferral({ contact, channel, referralData, sourcePlatform }) {
   try {
     if (contact.lead_id) return null; // Lead already exists
+    if (!contact.phone) return null;  // Skip — no phone number, not a trackable lead
+    if (sourcePlatform === 'whatsapp') return null; // Skip WhatsApp — API costs money; track Messenger/Instagram only
 
     const adId = referralData.ad_id || referralData.source_id;
     const campaignId = referralData.campaign_id || referralData.campaign_name;
@@ -3448,6 +3454,9 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
       assigned_consultant,
       meta_ad_id: adId || null,
       meta_campaign: campaignId || null,
+      ad_name: adTitle || null,
+      page_name: channel.name || null,
+      channel_id: channel.id || null,
       notes: noteText
     }, lead_id, 0);
 
@@ -4046,6 +4055,60 @@ app.get('/api/dashboard', (req, res) => {
 // ─────────────────────────────────────────────────────────
 // LEADS
 // ─────────────────────────────────────────────────────────
+// Ad Performance: which FB page / ad is generating the most leads (admin/CEO only)
+app.get('/api/leads/source-stats', requireAuth, (req, res) => {
+  const u = req.user;
+  const isAdminOrCEO = u?.role === 'admin' ||
+    (Array.isArray(u?.roles) && (u.roles.includes('founder_ceo') || u.roles.includes('managing_director')));
+  if (!isAdminOrCEO) return res.status(403).json({ error: 'Forbidden' });
+
+  const { days = 30 } = req.query;
+  const since = new Date(Date.now() - parseInt(days) * 86400000).toISOString().slice(0, 10);
+
+  // Per-page breakdown (Messenger only — WhatsApp excluded intentionally)
+  const byPage = db.prepare(`
+    SELECT
+      page_name,
+      channel_id,
+      COUNT(*) as total_leads,
+      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled,
+      SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
+    FROM leads
+    WHERE page_name IS NOT NULL
+      AND date_added >= ?
+    GROUP BY page_name
+    ORDER BY total_leads DESC
+  `).all(since);
+
+  // Per-ad breakdown
+  const byAd = db.prepare(`
+    SELECT
+      ad_name,
+      meta_ad_id,
+      page_name,
+      COUNT(*) as total_leads,
+      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled,
+      SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
+    FROM leads
+    WHERE ad_name IS NOT NULL
+      AND date_added >= ?
+    GROUP BY ad_name
+    ORDER BY total_leads DESC
+    LIMIT 10
+  `).all(since);
+
+  // Totals from Messenger/Instagram ads in period
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled
+    FROM leads
+    WHERE page_name IS NOT NULL AND date_added >= ?
+  `).get(since);
+
+  res.json({ byPage, byAd, totals, days: parseInt(days), since });
+});
+
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
@@ -4164,6 +4227,10 @@ function leadParams(d, lead_id, balance) {
     // Agent Portal
     agency_id: d.agency_id ? Number(d.agency_id) : null,
     lead_type: txt(d.lead_type) || 'B2C',
+    // Ad Attribution
+    ad_name: txt(d.ad_name),
+    page_name: txt(d.page_name),
+    channel_id: d.channel_id ? Number(d.channel_id) : null,
   };
 }
 
@@ -4175,7 +4242,8 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
   application_stage, passing_year, last_education_major, height, weight, english_test_type,
-  payment_agreement, hardcopy_status, hardcopy_documents, age, agency_id, lead_type
+  payment_agreement, hardcopy_status, hardcopy_documents, age, agency_id, lead_type,
+  ad_name, page_name, channel_id
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -4184,7 +4252,8 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
   @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
-  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age, @agency_id, @lead_type
+  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age, @agency_id, @lead_type,
+  @ad_name, @page_name, @channel_id
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
