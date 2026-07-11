@@ -70,9 +70,9 @@ export default function StudentPortal() {
 
   useEffect(() => {
     if (data?.student?.client_name) {
-      document.title = `${data.student.client_name} - Student Portal | EduExpress Core`;
+      document.title = `${data.student.client_name} - Student Portal`;
     } else {
-      document.title = "Student Portal | EduExpress Core";
+      document.title = "Student Portal";
     }
   }, [data]);
 
@@ -83,7 +83,7 @@ export default function StudentPortal() {
           <AlertCircle size={36} className="text-rose-400 mx-auto mb-3" />
           <h1 className="text-xl font-bold text-slate-800 mb-1">Portal unavailable</h1>
           <p className="text-sm text-slate-500">{error}</p>
-          <p className="text-xs text-slate-400 mt-4">Please contact your EduExpress consultant for help.</p>
+          <p className="text-xs text-slate-400 mt-4">Please contact your consultant for help.</p>
         </div>
       </div>
     );
@@ -112,8 +112,8 @@ export default function StudentPortal() {
               <GraduationCap size={18} className="text-white" />
             </div>
             <div>
-              <p className="font-bold text-slate-800 text-sm">EduExpress International</p>
-              <p className="text-xs text-slate-400">Student Application Portal</p>
+              <p className="font-bold text-slate-800 text-sm">Application Portal</p>
+              <p className="text-xs text-slate-400">Track your progress</p>
             </div>
           </div>
           <button onClick={() => load()} disabled={refreshing}
