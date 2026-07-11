@@ -212,6 +212,12 @@ export default function LeadForm({ user, lead, settings, onSave }) {
               <SelectField label="Hardcopy Status" value={form.hardcopy_status} onChange={v => set('hardcopy_status', v)}
                 options={['Not Received', 'Received (In Office)', 'Returned to Student']} placeholder="— pick —" />
             </Row>
+            {form.hardcopy_status === 'Received (In Office)' && (
+              <Row cols={1}>
+                <TextareaField label="List of Received Documents" value={form.hardcopy_documents} onChange={v => set('hardcopy_documents', v)}
+                  placeholder="e.g. Original Passport, SSC Certificate, HSC Marksheet..." rows={2} />
+              </Row>
+            )}
           </>
         )}
       </Section>
@@ -325,6 +331,7 @@ function initial(lead, user) {
     english_test_type: lead.english_test_type ?? '',
     payment_agreement: lead.payment_agreement ?? '',
     hardcopy_status: lead.hardcopy_status ?? '',
+    hardcopy_documents: lead.hardcopy_documents ?? '',
   };
 }
 

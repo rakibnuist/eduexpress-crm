@@ -332,6 +332,11 @@ export default function LeadDetail({ user }) {
               <>
                 <Row label="Payment Agreement">{lead.payment_agreement || 'Standard'}</Row>
                 <Row label="Hardcopy">{lead.hardcopy_status || 'Not Received'}</Row>
+                {lead.hardcopy_status === 'Received (In Office)' && lead.hardcopy_documents && (
+                  <Row label="Documents List">
+                    <span className="whitespace-pre-wrap">{lead.hardcopy_documents}</span>
+                  </Row>
+                )}
               </>
             )}
             <Row label="Visa deadline">{lead.visa_deadline || '—'}</Row>
