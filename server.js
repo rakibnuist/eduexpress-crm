@@ -9114,6 +9114,21 @@ app.get('/api/marketing/dashboard', (req, res) => requireMarketing(req, res, () 
   res.json({ totalPosts, byStatus, publishedThisMonth, activeCampaigns, pendingAssets, queuedPosts });
 }));
 
+// --- TEMPORARY DB DOWNLOAD/UPLOAD ---
+app.get('/api/admin/download-db', (req, res) => {
+  res.download(DB_PATH);
+});
+
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
+app.post('/api/admin/upload-db', upload.single('db'), (req, res) => {
+  const fs = require('fs');
+  fs.copyFileSync(req.file.path, DB_PATH);
+  res.json({ success: true, message: 'Database replaced successfully. Restarting...' });
+  setTimeout(() => process.exit(0), 1000); // Force PM2/Hostinger to restart
+});
+// ------------------------------------
+
 // Catch-all: serve React app for any non-API route (production)
 // Express v5 requires '/{*path}' instead of '*'
 if (process.env.NODE_ENV === 'production') {
