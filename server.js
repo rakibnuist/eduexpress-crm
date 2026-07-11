@@ -300,33 +300,54 @@ app.post('/api/auth/login', (req, res) => {
     if (single) allowedSSIDs = [single];
   }
 
-  // SSID check: only when the client actually sent an SSID value
-  if (enforceLocation && ssid && allowedSSIDs.length > 0) {
-    const ssidMatch = allowedSSIDs.some(s =>
-      String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
-    );
-    if (!ssidMatch) {
-      return res.status(403).json({
-        error: 'Not connected to the office network. Please connect to the EduExpress or HTA Wi-Fi and try again.',
-        code: 'WRONG_NETWORK',
-      });
-    }
-  }
-
-  // Geo check: enforced whenever office lat/lng are configured
   const officeLat = parseFloat(getConfig('office_lat'));
   const officeLng = parseFloat(getConfig('office_lng'));
-  if (enforceLocation && Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
-    const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
-    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
-      console.warn(`[login] User ${email} logged in without location coordinates`);
-    } else {
-      const distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
-      if (distFromOffice > officeRadius) {
+  const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
+
+  if (enforceLocation) {
+    let ssidPassed = false;
+    let ssidFailed = false;
+    if (ssid && allowedSSIDs.length > 0) {
+      ssidPassed = allowedSSIDs.some(s =>
+        String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
+      );
+      if (!ssidPassed) ssidFailed = true;
+    }
+
+    let geoPassed = false;
+    let geoFailed = false;
+    let distFromOffice = null;
+    if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
+      if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+        distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
+        if (distFromOffice <= officeRadius) {
+          geoPassed = true;
+        } else {
+          geoFailed = true;
+        }
+      } else {
+        console.warn(`[login] User ${email} logged in without location coordinates`);
+      }
+    }
+
+    // Allow login if either condition explicitly passed.
+    if (!ssidPassed && !geoPassed) {
+      if (geoFailed && ssidFailed) {
+        return res.status(403).json({
+          error: `Not connected to office Wi-Fi and you are ${Math.round(distFromOffice)}m away.`,
+          code: 'OUTSIDE_OFFICE',
+          distance: Math.round(distFromOffice),
+        });
+      } else if (geoFailed && !ssid) {
         return res.status(403).json({
           error: `You must be at the office to log in. You are currently ${Math.round(distFromOffice)}m away.`,
           code: 'OUTSIDE_OFFICE',
           distance: Math.round(distFromOffice),
+        });
+      } else if (ssidFailed && (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng))) {
+        return res.status(403).json({
+          error: 'Not connected to the office network. Please connect to the EduExpress or HTA Wi-Fi and try again.',
+          code: 'WRONG_NETWORK',
         });
       }
     }
@@ -3962,9 +3983,13 @@ function leadParams(d, lead_id, balance) {
     degree: txt(d.degree), major: txt(d.major),
     intake_term: txt(d.intake_term), university: txt(d.university),
     drive_link: txt(d.drive_link), deposit: num(d.deposit),
+    // Academic additions
+    passing_year: txt(d.passing_year), last_education_major: txt(d.last_education_major),
+    english_test_type: txt(d.english_test_type),
     // Medical
     blood_group: txt(d.blood_group), date_of_birth: txt(d.date_of_birth),
     medical_notes: txt(d.medical_notes), emergency_contact: txt(d.emergency_contact),
+    height: txt(d.height), weight: txt(d.weight),
     // Active application stage
     application_stage: txt(d.application_stage),
   };
@@ -3977,7 +4002,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   meta_lead_id, meta_form_id, meta_ad_id, meta_campaign,
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
-  application_stage
+  application_stage, passing_year, last_education_major, height, weight, english_test_type
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
   @english_score, @program, @lead_source, @lead_status, @assigned_consultant, @assigned_employee_id,
@@ -3985,7 +4010,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @meta_lead_id, @meta_form_id, @meta_ad_id, @meta_campaign,
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
-  @application_stage
+  @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
   client_name=@client_name, phone=@phone, email=@email, destination=@destination,
@@ -3998,7 +4023,9 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   drive_link=@drive_link, deposit=@deposit,
   blood_group=@blood_group, date_of_birth=@date_of_birth, medical_notes=@medical_notes,
   emergency_contact=@emergency_contact,
-  application_stage=@application_stage
+  application_stage=@application_stage, passing_year=@passing_year,
+  last_education_major=@last_education_major, height=@height, weight=@weight,
+  english_test_type=@english_test_type
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
@@ -7266,7 +7293,7 @@ app.get('/api/settings', (req, res) => {
     employees: activeEmployees,
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
     destinations: getList('settings_destinations', ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand']),
-    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
+    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
       'Documents Collecting',
       'Documents Ready',

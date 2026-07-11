@@ -14,6 +14,7 @@ import { bdtToday } from '../lib/format';
 const STAGES = [
   { status: 'New Lead',       hex: '#0ea5e9', col: 'bg-sky-500',     light: 'bg-sky-50',      ring: 'ring-sky-200' },
   { status: 'No Response',    hex: '#94a3b8', col: 'bg-slate-400',   light: 'bg-slate-50',    ring: 'ring-slate-200' },
+  { status: 'Follow-up',      hex: '#f59e0b', col: 'bg-amber-500',   light: 'bg-amber-50',    ring: 'ring-amber-200' },
   { status: 'Positive',       hex: '#10b981', col: 'bg-emerald-500', light: 'bg-emerald-50',  ring: 'ring-emerald-200' },
   { status: 'Office Visited', hex: '#8b5cf6', col: 'bg-violet-500',  light: 'bg-violet-50',   ring: 'ring-violet-200' },
   { status: 'File Opened',    hex: '#3b82f6', col: 'bg-blue-500',    light: 'bg-blue-50',     ring: 'ring-blue-200' },

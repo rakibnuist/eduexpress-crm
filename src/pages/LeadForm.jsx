@@ -8,7 +8,7 @@ import { useToast } from '../components/Toast';
 import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
 const SOURCES   = ['In-House', 'B2B', 'China', 'Agent'];
-const DEGREES   = ['Diploma', 'Bachelor', 'L+Bachelor', 'L+Diploma', 'Masters', 'PhD'];
+const DEGREES   = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'Language', 'Foundation', 'L+Diploma +', 'L + Bachelor', 'F+Bachelor'];
 const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
 const mapStages = (stagesArray) => {
@@ -127,8 +127,8 @@ export default function LeadForm({ user, lead, settings, onSave }) {
         </Row>
       </Section>
 
-      {/* ── Academic ── */}
-      <Section icon={<GraduationCap size={14}/>} title="Academic" color="violet">
+      {/* ── Plan to study ── */}
+      <Section icon={<GraduationCap size={14}/>} title="Plan to study" color="violet">
         <Row>
           <SelectField label="Destination" value={form.destination} onChange={v => set('destination', v)}
             options={settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia']} placeholder="— pick —" />
@@ -142,12 +142,26 @@ export default function LeadForm({ user, lead, settings, onSave }) {
           <Field label="Major / Program" value={form.major || form.program} onChange={v => set('major', v)} placeholder="International Economy" />
         </Row>
         <Row>
-          <Field label="Last education" value={form.last_education} onChange={v => set('last_education', v)} placeholder="HSC · Science" />
           <Field label="Primary university (preference)" value={form.university} onChange={v => set('university', v)} placeholder="e.g. NJTech" />
+        </Row>
+      </Section>
+
+      {/* ── Academic Profile ── */}
+      <Section icon={<GraduationCap size={14}/>} title="Academic Profile" color="orange">
+        <Row>
+          <SelectField label="Last education" value={form.last_education} onChange={v => set('last_education', v)} 
+            options={['SSC', 'HSC', 'O Level', 'A Level', 'Dakhil', 'Alim', 'Diploma', 'Degree', 'Bachelor', 'Masters']} 
+            placeholder="— pick —" />
+          <Field label="Major / Group" value={form.last_education_major} onChange={v => set('last_education_major', v)} placeholder="Science / Business" />
         </Row>
         <Row>
           <Field label="GPA / CGPA" type="number" step="0.01" value={form.gpa} onChange={v => set('gpa', v)} placeholder="4.50" />
-          <Field label="English score" value={form.english_score} onChange={v => set('english_score', v)} placeholder="IELTS 6.5 / MOI" />
+          <Field label="Passing Year" value={form.passing_year} onChange={v => set('passing_year', v)} placeholder="e.g. 2024" />
+        </Row>
+        <Row>
+          <SelectField label="English Test" value={form.english_test_type} onChange={v => set('english_test_type', v)}
+            options={['IELTS', 'TOEFL', 'Duolingo', 'MOI', 'EFSET']} placeholder="— pick —" />
+          <Field label="Score" value={form.english_score} onChange={v => set('english_score', v)} placeholder="6.5" />
         </Row>
       </Section>
 
@@ -238,13 +252,17 @@ export default function LeadForm({ user, lead, settings, onSave }) {
               options={BLOOD} placeholder="—" />
             <Field label="Date of birth" type="date" value={form.date_of_birth} onChange={v => set('date_of_birth', v)} />
           </Row>
+          <Row>
+            <Field label="Height" value={form.height} onChange={v => set('height', v)} placeholder="e.g. 5'8&quot;" />
+            <Field label="Weight" value={form.weight} onChange={v => set('weight', v)} placeholder="e.g. 70 kg" />
+          </Row>
           <Row cols={1}>
             <Field label="Emergency contact" value={form.emergency_contact} onChange={v => set('emergency_contact', v)}
               placeholder="Name + relationship + phone (e.g. Father · +880 1XXX-XXXXXX)" />
           </Row>
           <Row cols={1}>
-            <TextareaField label="Medical notes" value={form.medical_notes} onChange={v => set('medical_notes', v)}
-              placeholder="Allergies, conditions, medications…" rows={2} />
+            <TextareaField label="Medical History / Notes" value={form.medical_notes} onChange={v => set('medical_notes', v)}
+              placeholder="Allergies, conditions, past surgeries, medications…" rows={2} />
           </Row>
         </div>
       </details>
@@ -294,6 +312,9 @@ function initial(lead, user) {
     drive_link: lead.drive_link ?? '',
     blood_group: lead.blood_group ?? '', date_of_birth: lead.date_of_birth ?? '',
     medical_notes: lead.medical_notes ?? '', emergency_contact: lead.emergency_contact ?? '',
+    passing_year: lead.passing_year ?? '', last_education_major: lead.last_education_major ?? '',
+    height: lead.height ?? '', weight: lead.weight ?? '',
+    english_test_type: lead.english_test_type ?? '',
   };
 }
 

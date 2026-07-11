@@ -20,6 +20,7 @@ import {
 const PIPE_COLORS = {
   'New Lead':       '#38bdf8',
   'No Response':    '#94a3b8',
+  'Follow-up':      '#fbbf24',
   'Positive':       '#34d399',
   'Office Visited': '#a78bfa',
   'File Opened':    '#60a5fa',

@@ -13,6 +13,7 @@ import {
 const STAGES = [
   { status: 'New Lead',       hex: '#0ea5e9', col: 'bg-sky-500',     border: 'border-sky-500',     light: 'bg-sky-50',      ring: 'ring-sky-200/50' },
   { status: 'No Response',    hex: '#94a3b8', col: 'bg-slate-400',   border: 'border-slate-400',   light: 'bg-slate-50',    ring: 'ring-slate-200/50' },
+  { status: 'Follow-up',      hex: '#f59e0b', col: 'bg-amber-500',   border: 'border-amber-500',   light: 'bg-amber-50',    ring: 'ring-amber-200/50' },
   { status: 'Positive',       hex: '#10b981', col: 'bg-emerald-500', border: 'border-emerald-500', light: 'bg-emerald-50',  ring: 'ring-emerald-200/50' },
   { status: 'Office Visited', hex: '#8b5cf6', col: 'bg-violet-500',  border: 'border-violet-500',  light: 'bg-violet-50',   ring: 'ring-violet-200/50' },
   { status: 'File Opened',    hex: '#3b82f6', col: 'bg-blue-500',    border: 'border-blue-500',    light: 'bg-blue-50',     ring: 'ring-blue-200/50' },
@@ -932,6 +933,7 @@ function InlineStatusSelect({ value, onChange, options }) {
   const colors = {
     'New Lead': 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
     'No Response': 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100',
+    'Follow-up': 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
     'Positive': 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
     'Office Visited': 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
     'File Opened': 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',

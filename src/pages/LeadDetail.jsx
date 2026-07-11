@@ -289,16 +289,24 @@ export default function LeadDetail({ user }) {
             )}
           </Card>
 
-          <Card title="Academic" icon={<GraduationCap size={14}/>}>
+          <Card title="Plan to study" icon={<GraduationCap size={14}/>}>
             <Row label="Destination">{lead.destination || '—'}</Row>
-            <Row label="University">{lead.university || '—'}</Row>
+            <Row label="Intake">{lead.intake_term || '—'}</Row>
             <Row label="Degree">{lead.degree || '—'}</Row>
             <Row label="Major / Program">{lead.major || lead.program || '—'}</Row>
-            <Row label="Intake">{lead.intake_term || '—'}</Row>
-            <Row label="Last education">{lead.last_education || '—'}</Row>
-            <Row label="GPA">{lead.gpa ?? '—'}</Row>
-            <Row label="English score">{lead.english_score || '—'}</Row>
+            <Row label="Primary university (preference)">{lead.university || '—'}</Row>
           </Card>
+
+          {(lead.last_education || lead.passing_year || lead.gpa || lead.last_education_major || lead.english_test_type || lead.english_score) && (
+            <Card title="Academic Profile" icon={<GraduationCap size={14}/>}>
+              <Row label="Last education">{lead.last_education || '—'}</Row>
+              <Row label="Major/Group">{lead.last_education_major || '—'}</Row>
+              <Row label="GPA/CGPA">{lead.gpa ?? '—'}</Row>
+              <Row label="Passing Year">{lead.passing_year || '—'}</Row>
+              <Row label="English Test">{lead.english_test_type || '—'}</Row>
+              <Row label="English Score">{lead.english_score || '—'}</Row>
+            </Card>
+          )}
 
           <Card title="Application" icon={<Plane size={14}/>}>
             <Row label="Stage">
@@ -383,10 +391,12 @@ export default function LeadDetail({ user }) {
           )}
 
           {/* Medical info — relevant for visas (China MBBS etc.) */}
-          {(lead.blood_group || lead.date_of_birth || lead.medical_notes || lead.emergency_contact) && (
+          {(lead.blood_group || lead.date_of_birth || lead.medical_notes || lead.emergency_contact || lead.height || lead.weight) && (
             <Card title="Medical & Emergency" icon={<Heart size={14}/>}>
               <Row label="Blood group">{lead.blood_group || '—'}</Row>
               <Row label="Date of birth">{lead.date_of_birth || '—'}</Row>
+              <Row label="Height">{lead.height || '—'}</Row>
+              <Row label="Weight">{lead.weight || '—'}</Row>
               <Row label="Emergency contact">{lead.emergency_contact || '—'}</Row>
               {lead.medical_notes && (
                 <div className="mt-2 text-xs text-slate-600 whitespace-pre-wrap bg-slate-50 rounded-lg p-2">{lead.medical_notes}</div>
