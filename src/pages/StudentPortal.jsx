@@ -194,16 +194,16 @@ export default function StudentPortal() {
                   const descriptions = {
                     'documents': 'Gathering required files',
                     'ready': 'Files verified & ready',
-                    'submitted': 'Submitted to universities',
+                    'submitted': 'Application sent to universities',
                     'interview': 'University interview phase',
-                    'pre_admission': 'Pending admission letter',
+                    'pre_admission': 'Pending conditional offer',
                     'university_initial_deposit': 'Initial tuition deposit',
-                    'admitted': 'Admission/JW202 received',
+                    'admitted': 'Unconditional offer & JW202 received',
                     'visa_applied': 'Visa application filed',
-                    'passport_collection': 'Passport ready for pickup',
-                    'payment': 'Final payment clearance',
-                    'air_ticket': 'Flight booking',
-                    'fly': 'Ready for departure'
+                    'passport_collection': 'Visa approved & passport ready',
+                    'payment': 'Final settlement clearance',
+                    'air_ticket': 'Pre-departure & flight booking',
+                    'fly': 'Arrival & university enrollment'
                   };
                   const desc = descriptions[s.key] || 'Stage in progress';
                   
