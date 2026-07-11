@@ -4001,6 +4001,7 @@ function leadParams(d, lead_id, balance) {
     payment_agreement: txt(d.payment_agreement),
     hardcopy_status: txt(d.hardcopy_status),
     hardcopy_documents: txt(d.hardcopy_documents),
+    age: num(d.age),
     // Active application stage
     application_stage: txt(d.application_stage),
   };
