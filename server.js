@@ -3505,17 +3505,7 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
 
     // Evaluate automation rules in background
     if (conv) {
-      setImmediate(() => evaluateAutomationRules('keyword', conv, msg).catch(() => {}));
-      const inCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(convId).n;
-      if (inCount === 1) {
-        setImmediate(() => evaluateAutomationRules('new_conversation', conv, msg).catch(() => {}));
-        // Send CAPI Contact event for new conversation
-        sendCAPIEvent('Contact', {
-          lead_id: `CONV-${conv.id}`,
-          phone: conv?.contact_phone || undefined,
-          event_source_url: undefined,
-        }).catch(() => {});
-      }
+      let currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
 
       // Auto-Lead Creation from Message Content (Bangladeshi numbers)
       if (direction === 'in' && type === 'text' && content && !conv.lead_id) {
@@ -3524,11 +3514,31 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
         if (match) {
           const extractedPhone = match[0];
           db.prepare("UPDATE contacts SET phone=? WHERE id=? AND (phone IS NULL OR phone = '')").run(extractedPhone, conv.contact_id);
-          const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
-          if (updatedContact) {
-            autoLinkOrCreateLead(updatedContact);
+          currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
+          if (currentContact) {
+            const oldLeadId = conv.lead_id;
+            autoLinkOrCreateLead(currentContact);
+            const freshConvRow = db.prepare("SELECT * FROM conversations WHERE id=?").get(conv.id);
+            if (freshConvRow && freshConvRow.lead_id !== oldLeadId) {
+                const fullConv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conv.id);
+                broadcast('conversation_updated', fullConv);
+            }
           }
         }
+      }
+
+      const freshConvForRules = db.prepare("SELECT * FROM conversations WHERE id=?").get(conv.id);
+      const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(conv.channel_id);
+      setImmediate(() => executeAutomationRules({ conversation: freshConvForRules, message: msg, channel, contact: currentContact }).catch(e => console.error("Automation error:", e)));
+
+      const inCount = db.prepare("SELECT COUNT(*) as n FROM messages WHERE conversation_id=? AND direction='in'").get(convId).n;
+      if (inCount === 1) {
+        // Send CAPI Contact event for new conversation
+        sendCAPIEvent('Contact', {
+          lead_id: `CONV-${conv.id}`,
+          phone: currentContact?.phone || undefined,
+          event_source_url: undefined,
+        }).catch(() => {});
       }
     }
 
@@ -3759,6 +3769,8 @@ async function executeAutomationRules({ conversation, message, channel, contact 
             db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conversation.id);
             db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, contact.id);
             broadcast('new_lead', { lead });
+            const updatedConv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conversation.id);
+            if (updatedConv) broadcast('conversation_updated', updatedConv);
             executed = true;
           }
           break;
