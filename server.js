@@ -140,8 +140,18 @@ let UPLOADS_DIR;
 
 if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
   UPLOADS_DIR = PERSISTENT_UPLOADS_DIR;
+  let persistentOk = true;
   if (!existsSync(PERSISTENT_UPLOADS_DIR)) {
-    mkdirSync(PERSISTENT_UPLOADS_DIR, { recursive: true });
+    try {
+      mkdirSync(PERSISTENT_UPLOADS_DIR, { recursive: true });
+    } catch (err) {
+      console.error(`[uploads] Cannot create ${PERSISTENT_UPLOADS_DIR}, falling back to app dir:`, err.message);
+      persistentOk = false;
+      UPLOADS_DIR = LOCAL_UPLOADS_DIR;
+    }
+  }
+  
+  if (persistentOk) {
     // Migrate existing uploads if any
     if (existsSync(LOCAL_UPLOADS_DIR)) {
       try {
@@ -155,7 +165,9 @@ if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
       }
     }
   }
-} else {
+}
+
+if (!UPLOADS_DIR || UPLOADS_DIR === LOCAL_UPLOADS_DIR) {
   UPLOADS_DIR = LOCAL_UPLOADS_DIR;
   if (!existsSync(UPLOADS_DIR)) {
     mkdirSync(UPLOADS_DIR, { recursive: true });
