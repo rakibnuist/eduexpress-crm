@@ -4,9 +4,10 @@ import { api } from '../api';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/Confirm';
 import { 
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, Download, X,
-  LayoutGrid, Table as TableIcon, GripVertical, Phone, MapPin, User,
+  LayoutGrid, Table as TableIcon, GripVertical, Phone, MapPin, User, Users, CheckCircle2,
   Calendar, Filter, CalendarDays, Building2, FolderOpen, ArrowRight, MessageSquare
 } from 'lucide-react';
 
@@ -81,9 +82,14 @@ export default function Leads({ user }) {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [bulkAssignConsultant, setBulkAssignConsultant] = useState('');
+  const [bulkStatusModal, setBulkStatusModal] = useState(false);
+  const [bulkStatusValue, setBulkStatusValue] = useState('');
+  const [duplicatesModal, setDuplicatesModal] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState([]);
   const searchRef = useRef();
   const navigate = useNavigate();
   const toast = useToast();
+  const confirm = useConfirm();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   useEffect(() => {
@@ -142,6 +148,36 @@ export default function Leads({ user }) {
   }
 
   const activeFilters = [filters.status, filters.consultant, filters.destination, filters.source].filter(Boolean).length;
+
+  async function handleBulkStatus() {
+    if (!bulkStatusValue) { toast.error('Please select a status'); return; }
+    try {
+      const res = await api.bulkUpdateStatus(selectedIds, bulkStatusValue);
+      setSelectedIds([]);
+      setBulkStatusModal(false);
+      setBulkStatusValue('');
+      load();
+      toast.success(`Updated ${res.updated} leads to ${bulkStatusValue}`);
+    } catch (e) { toast.error(e.message || 'Could not update status'); }
+  }
+
+  async function loadDuplicates() {
+    try {
+      const res = await api.findDuplicates();
+      setDuplicateGroups(res.groups || []);
+      setDuplicatesModal(true);
+    } catch (e) { toast.error(e.message || 'Failed to load duplicates'); }
+  }
+
+  async function handleMerge(primary_id, secondary_ids) {
+    if (!await confirm('Merge Leads', 'Are you sure you want to merge these leads? The secondary leads will be deleted permanently. This cannot be undone.', 'Merge', 'rose')) return;
+    try {
+      await api.mergeLeads(primary_id, secondary_ids);
+      toast.success('Leads merged successfully');
+      loadDuplicates();
+      load();
+    } catch (e) { toast.error(e.message || 'Merge failed'); }
+  }
 
   async function handleDelete(id) {
     try {
@@ -301,11 +337,17 @@ export default function Leads({ user }) {
                 <button onClick={() => setBulkAssigning(true)} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-100 transition-colors shadow-sm select-none cursor-pointer">
                   <User size={15} /> Assign Consultant ({selectedIds.length})
                 </button>
+                <button onClick={() => setBulkStatusModal(true)} className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-indigo-100 transition-colors shadow-sm select-none cursor-pointer">
+                  <CheckCircle2 size={15} /> Update Status ({selectedIds.length})
+                </button>
                 <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-rose-700 transition-colors shadow-sm select-none cursor-pointer">
                   <Trash2 size={15} /> Delete Selected ({selectedIds.length})
                 </button>
               </>
             )}
+            <button onClick={loadDuplicates} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
+              <Users size={15} /> Find Duplicates
+            </button>
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-sm select-none cursor-pointer">
               <Download size={15} /> Export CSV
             </button>
@@ -879,6 +921,69 @@ export default function Leads({ user }) {
           </div>
         </Modal>
       )}
+      {duplicatesModal && (
+        <Modal title="Duplicate Leads Found" onClose={() => setDuplicatesModal(false)} maxWidth="max-w-4xl">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {duplicateGroups.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">No duplicates found based on phone or email.</div>
+            ) : (
+              duplicateGroups.map((group, idx) => {
+                const primary = group[0];
+                const secondaries = group.slice(1);
+                return (
+                  <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h3 className="font-semibold text-slate-800 mb-2">Match: {primary.phone || primary.email}</h3>
+                    <div className="space-y-2">
+                      {group.map((lead, i) => (
+                        <div key={lead.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                          <div>
+                            <span className="font-medium text-slate-700">{lead.client_name || 'Unnamed'}</span>
+                            <span className="text-xs text-slate-400 ml-2">ID: {lead.lead_id} | Status: {lead.lead_status} | Source: {lead.lead_source}</span>
+                          </div>
+                          {i === 0 ? (
+                            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">Primary Record</span>
+                          ) : (
+                            <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs rounded">Will be merged</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <button onClick={() => handleMerge(primary.id, secondaries.map(s => s.id))} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 cursor-pointer">
+                        Merge into Primary
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+          <div className="flex justify-end pt-4 border-t border-slate-100 mt-4">
+            <button onClick={() => setDuplicatesModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium cursor-pointer">Close</button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkStatusModal && (
+        <Modal title="Update Status for Selected Leads" onClose={() => setBulkStatusModal(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">Select a new status for {selectedIds.length} leads:</p>
+            <select
+              className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 p-2.5"
+              value={bulkStatusValue}
+              onChange={e => setBulkStatusValue(e.target.value)}
+            >
+              <option value="">Select Status...</option>
+              {STAGES.map(s => <option key={s.status} value={s.status}>{s.status}</option>)}
+            </select>
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={() => setBulkStatusModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm cursor-pointer">Cancel</button>
+              <button onClick={handleBulkStatus} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 cursor-pointer">Update Status</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {bulkAssigning && (
         <Modal title="Assign Consultant to Selected Leads" onClose={() => setBulkAssigning(false)}>
           <div className="p-4 space-y-4">

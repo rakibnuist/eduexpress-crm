@@ -131,6 +131,7 @@ export default function Settings() {
         {activeTab === 'tools' && (
           <div className="space-y-5">
             <BroadcastManager />
+            <LeadPipelineToolsCard />
             <SystemHealthCard />
 
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -1849,6 +1850,47 @@ function SystemHealthCard() {
           <button onClick={() => window.open('/api/health/export-json', '_blank')} disabled={restoring}
             className="flex items-center gap-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50">
             <FileText size={13} /> Export JSON
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeadPipelineToolsCard() {
+  const toast = useToast();
+  const [running, setRunning] = useState(false);
+
+  const runCleanup = async () => {
+    setRunning(true);
+    try {
+      const res = await api.autoCleanupLeads();
+      toast.success(`Successfully cleaned up ${res.cleaned} stale leads.`);
+    } catch (e) {
+      toast.error('Cleanup failed: ' + e.message);
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-indigo-50 text-indigo-700 border-indigo-100">
+        <Filter size={18} />
+        <span className="font-semibold text-sm flex-1">Pipeline Maintenance</span>
+      </div>
+      <div className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Auto-Cleanup Stale Leads</h4>
+            <p className="text-xs text-slate-500 mt-1">Moves "New Leads" older than 3 days to "Follow-up" status automatically.</p>
+          </div>
+          <button 
+            onClick={runCleanup} 
+            disabled={running}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            {running ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+            Run Cleanup Now
           </button>
         </div>
       </div>

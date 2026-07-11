@@ -3387,6 +3387,40 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
           event_source_url: undefined,
         }).catch(() => {});
       }
+
+      // Auto-Lead Creation from Message Content (Bangladeshi numbers)
+      if (direction === 'in' && type === 'text' && content && !conv.lead_id) {
+        const bdPhoneRegex = /(?:\+?88)?01[3-9]\d{8}/;
+        const match = content.match(bdPhoneRegex);
+        if (match) {
+          const extractedPhone = match[0];
+          // Check if lead exists
+          const existing = db.prepare("SELECT id FROM leads WHERE phone LIKE ?").get(`%${extractedPhone.slice(-10)}`);
+          if (!existing) {
+            // Create new lead
+            const leadParamsObj = leadParams({
+              client_name: conv.contact_name || 'Chat Lead',
+              phone: extractedPhone,
+              lead_source: conv.channel_type || 'Inbox',
+              lead_status: 'New Lead',
+              notes: 'Auto-created from chat message phone number.',
+              destination: 'Bangladesh',
+              source: 'In-House'
+            }, nextLeadId(), 0);
+            const lInfo = db.prepare(LEAD_INSERT_SQL).run(leadParamsObj);
+            const newLeadId = lInfo.lastInsertRowid;
+            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(newLeadId, convId);
+            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(newLeadId, conv.contact_id);
+            const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(newLeadId);
+            broadcast('new_lead', { lead: newLead });
+            logActivity({ type: 'lead_created', actor: { name: 'Auto-Lead Bot' }, lead: newLead, details: { source: 'Chat Extraction' } });
+          } else {
+            // Link to existing
+            db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(existing.id, convId);
+            db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(existing.id, conv.contact_id);
+          }
+        }
+      }
     }
 
     return msg;
@@ -4147,6 +4181,90 @@ app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+}));
+
+app.get('/api/leads/duplicates', (req, res) => requireManagerOrAdmin(req, res, () => {
+  try {
+    const query = `
+      SELECT * FROM leads 
+      WHERE phone IN (
+        SELECT phone FROM leads WHERE phone IS NOT NULL AND phone != '' GROUP BY phone HAVING count(*) > 1
+      )
+      OR email IN (
+        SELECT email FROM leads WHERE email IS NOT NULL AND email != '' GROUP BY email HAVING count(*) > 1
+      )
+      ORDER BY phone, email, id ASC
+    `;
+    const dupes = db.prepare(query).all();
+    const groups = {};
+    for (const lead of dupes) {
+      const key = lead.phone || lead.email;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(lead);
+    }
+    res.json({ ok: true, groups: Object.values(groups) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+app.post('/api/leads/merge', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const { primary_id, secondary_ids } = req.body;
+  if (!primary_id || !secondary_ids || !secondary_ids.length) return res.status(400).json({ error: 'Missing primary or secondary IDs' });
+  
+  try {
+    db.transaction(() => {
+      const qs = secondary_ids.map(() => '?').join(',');
+      db.prepare(`UPDATE activity_log SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
+      db.prepare(`UPDATE lead_documents SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
+      db.prepare(`UPDATE lead_university_applications SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
+      db.prepare(`UPDATE conversations SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
+      db.prepare(`UPDATE contacts SET lead_id=? WHERE lead_id IN (${qs})`).run(primary_id, ...secondary_ids);
+      
+      db.prepare(`DELETE FROM leads WHERE id IN (${qs})`).run(...secondary_ids);
+      
+      const primaryLead = db.prepare('SELECT * FROM leads WHERE id=?').get(primary_id);
+      if (primaryLead) {
+        logActivity({ type: 'lead_merged', actor: req.user, lead: primaryLead, details: { merged_ids: secondary_ids } });
+      }
+    })();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+app.post('/api/leads/bulk-status', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const { ids, status } = req.body;
+  if (!ids || !ids.length || !status) return res.status(400).json({ error: 'Missing ids or status' });
+  
+  try {
+    const updated = [];
+    db.transaction(() => {
+      for (const id of ids) {
+        const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
+        if (oldLead && oldLead.lead_status !== status) {
+          db.prepare("UPDATE leads SET lead_status=? WHERE id=?").run(status, id);
+          const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
+          logActivity({ type: 'lead_status_changed', actor: req.user, lead: newLead, from: oldLead.lead_status, to: status });
+          updated.push(newLead);
+        }
+      }
+    })();
+    res.json({ ok: true, updated: updated.length, leads: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
+app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res, () => {
+  try {
+    const staleLeads = db.prepare("SELECT * FROM leads WHERE lead_status='New Lead' AND date_added <= date('now', '-3 days')").all();
+    const updated = [];
+    db.transaction(() => {
+      for (const lead of staleLeads) {
+        db.prepare("UPDATE leads SET lead_status='Follow-up' WHERE id=?").run(lead.id);
+        const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(lead.id);
+        logActivity({ type: 'lead_status_changed', actor: { name: 'Auto-Cleanup Bot' }, lead: newLead, from: 'New Lead', to: 'Follow-up' });
+        updated.push(newLead);
+      }
+    })();
+    res.json({ ok: true, cleaned: updated.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
 app.delete('/api/leads/:id', (req, res) => {

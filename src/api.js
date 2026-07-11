@@ -98,6 +98,10 @@ export const api = {
   updateLead:   (id, d)  => req(`/leads/${id}`, { method: 'PUT',  body: JSON.stringify(d) }),
   deleteLead:   (id)     => req(`/leads/${id}`, { method: 'DELETE' }),
   bulkAssignLeads: (ids, consultant) => req('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, consultant }) }),
+  bulkUpdateStatus: (ids, status) => req('/leads/bulk-status', { method: 'POST', body: JSON.stringify({ ids, status }) }),
+  findDuplicates: () => req('/leads/duplicates'),
+  mergeLeads: (primary_id, secondary_ids) => req('/leads/merge', { method: 'POST', body: JSON.stringify({ primary_id, secondary_ids }) }),
+  autoCleanupLeads: () => req('/leads/auto-cleanup', { method: 'POST' }),
   leadTimeline: (id)     => req(`/leads/${id}/timeline`),
   addNote:      (id, t)  => req(`/leads/${id}/notes`, { method: 'POST', body: JSON.stringify({ text: t }) }),
 
