@@ -2849,9 +2849,36 @@ function runMigrations() {
   } catch (e) {
     console.error('[migration] content_posts recreation failed:', e.message);
   }
+  // Seed default destinations if empty
+  try {
+    const destCheck = db.prepare("SELECT COUNT(*) as c FROM destinations").get();
+    if (destCheck.c === 0) {
+      const defaultDestPath = join(__dirname, 'default_destinations.json');
+      if (existsSync(defaultDestPath)) {
+        const destData = JSON.parse(readFileSync(defaultDestPath, 'utf8'));
+        const insertDest = db.prepare(`
+          INSERT INTO destinations (name, slug, requirements, programs, fees, embassy_documents, application_processing, other_details, is_public) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `);
+        for (const [slug, details] of Object.entries(destData)) {
+          insertDest.run(
+            details.name, slug, 
+            details.requirements || '', 
+            details.programs || '', 
+            details.fees || '', 
+            details.embassy_documents || '', 
+            details.application_processing || '', 
+            details.other_details || ''
+          );
+        }
+        console.log(`[migration] Seeded ${Object.keys(destData).length} default destinations.`);
+      }
+    }
+  } catch (e) {
+    console.error('[migration] Destination seeding failed:', e.message);
+  }
 
 }
-
 
 // ─────────────────────────────────────────────────────────
 // SSE REAL-TIME BROADCAST
