@@ -2302,6 +2302,7 @@ function runMigrations() {
     `ALTER TABLE leads      ADD COLUMN payment_agreement TEXT`,
     `ALTER TABLE leads      ADD COLUMN hardcopy_status TEXT`,
     `ALTER TABLE leads      ADD COLUMN hardcopy_documents TEXT`,
+    `ALTER TABLE leads      ADD COLUMN age INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_public_token ON leads(public_token)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
