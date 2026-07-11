@@ -170,7 +170,6 @@ export default function StudentPortal() {
                 </span>
               )}
             </div>
-            </div>
             
             {/* Student Details Grid */}
             <div className="mt-8 pt-6 border-t border-slate-100">
