@@ -633,7 +633,7 @@ export default function Leads({ user }) {
                         />
                       </td>
                       <td className="py-3 px-3.5 text-xs text-slate-400 font-semibold tabular-nums text-center">
-                        {(page - 1) * 50 + index + 1}
+                        {(filters.page - 1) * 50 + index + 1}
                       </td>
                       <td className="py-3 px-3.5 font-mono text-xs">
                         <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold">
