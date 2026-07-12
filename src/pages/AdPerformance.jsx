@@ -29,6 +29,7 @@ export default function AdPerformance({ user }) {
   const [statsFilters, setStatsFilters] = useState({ source: '', page_name: '', ad_name: '' });
   const [sourceStats, setSourceStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [selectedAd, setSelectedAd] = useState(null);
 
   useEffect(() => {
     document.title = "Ad Performance | EduExpress Core";
@@ -268,7 +269,7 @@ export default function AdPerformance({ user }) {
                         {sourceStats.byAd.map((row, i) => {
                           const rate = row.total_leads > 0 ? ((row.file_opened / row.total_leads) * 100).toFixed(1) : '0.0';
                           return (
-                            <tr key={i} className="hover:bg-blue-50/30 transition-colors">
+                            <tr key={i} onClick={() => setSelectedAd(row)} className="hover:bg-blue-50/50 transition-colors cursor-pointer group">
                               <td className="px-5 py-3.5">
                                 <div className="font-semibold text-slate-700 max-w-[250px] truncate" title={row.ad_name}>{row.ad_name || '—'}</div>
                                 <div className="text-[11px] text-slate-500 max-w-[250px] truncate" title={`${row.meta_campaign} > ${row.meta_adset_name}`}>{row.meta_campaign || 'Unknown Campaign'} • {row.meta_adset_name || 'Unknown AdSet'}</div>
@@ -298,6 +299,94 @@ export default function AdPerformance({ user }) {
           )}
         </div>
       </div>
+
+      {/* Specific Ad Details Modal */}
+      {selectedAd && (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center p-4 z-50 backdrop-blur-sm" onClick={() => setSelectedAd(null)}>
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{selectedAd.ad_name || 'Unknown Ad'}</h2>
+                <p className="text-sm text-slate-500 mt-1">{selectedAd.meta_campaign || 'Unknown Campaign'} • {selectedAd.meta_adset_name || 'Unknown AdSet'}</p>
+              </div>
+              <button onClick={() => setSelectedAd(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={20} className="text-slate-500" />
+              </button>
+            </div>
+            
+            {/* Body */}
+            <div className="p-6 overflow-y-auto">
+              {/* Metric Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Spend</p>
+                  <p className="text-2xl font-bold text-slate-700">${selectedAd.spend?.toFixed(2) || '0.00'}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Impressions</p>
+                  <p className="text-2xl font-bold text-slate-700">{selectedAd.impressions?.toLocaleString() || 0}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Clicks</p>
+                  <p className="text-2xl font-bold text-slate-700">{selectedAd.clicks?.toLocaleString() || 0}</p>
+                </div>
+                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                  <p className="text-[11px] text-blue-500 font-bold uppercase tracking-wider mb-1">CTR</p>
+                  <p className="text-2xl font-bold text-blue-700">{selectedAd.impressions ? ((selectedAd.clicks/selectedAd.impressions)*100).toFixed(2) : '0.00'}%</p>
+                </div>
+                
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Cost Per Click (CPC)</p>
+                  <p className="text-2xl font-bold text-slate-700">${selectedAd.clicks ? (selectedAd.spend/selectedAd.clicks).toFixed(2) : '0.00'}</p>
+                </div>
+                <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
+                  <p className="text-[11px] text-indigo-500 font-bold uppercase tracking-wider mb-1">Leads Generated</p>
+                  <p className="text-2xl font-bold text-indigo-700">{selectedAd.total_leads}</p>
+                </div>
+                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
+                  <p className="text-[11px] text-amber-600 font-bold uppercase tracking-wider mb-1">Cost Per Lead (CPL)</p>
+                  <p className="text-2xl font-bold text-amber-700">${selectedAd.total_leads ? (selectedAd.spend/selectedAd.total_leads).toFixed(2) : '0.00'}</p>
+                </div>
+                <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
+                  <p className="text-[11px] text-rose-600 font-bold uppercase tracking-wider mb-1">CPA (File Opened)</p>
+                  <p className="text-2xl font-bold text-rose-700">${selectedAd.file_opened ? (selectedAd.spend/selectedAd.file_opened).toFixed(2) : '—'}</p>
+                </div>
+              </div>
+              
+              {/* Quality Breakdown */}
+              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                <span className="text-blue-500">📊</span> Lead Quality Breakdown
+              </h3>
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100">
+                      <th className="text-center px-4 py-3 border-r border-slate-100">Active</th>
+                      <th className="text-center px-4 py-3 border-r border-slate-100">Positive</th>
+                      <th className="text-center px-4 py-3 border-r border-slate-100">Office Visited</th>
+                      <th className="text-center px-4 py-3 border-r border-slate-100">File Opened</th>
+                      <th className="text-center px-4 py-3">Conv. Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <tr>
+                      <td className="px-4 py-4 text-center text-emerald-600 font-bold border-r border-slate-100">{selectedAd.active}</td>
+                      <td className="px-4 py-4 text-center text-cyan-600 font-bold border-r border-slate-100">{selectedAd.positive}</td>
+                      <td className="px-4 py-4 text-center text-purple-600 font-bold border-r border-slate-100">{selectedAd.office_visited}</td>
+                      <td className="px-4 py-4 text-center text-indigo-600 font-bold border-r border-slate-100">{selectedAd.file_opened}</td>
+                      <td className="px-4 py-4 text-center font-bold text-slate-700 bg-slate-50">
+                        {selectedAd.total_leads > 0 ? ((selectedAd.file_opened / selectedAd.total_leads) * 100).toFixed(1) : '0.0'}%
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
