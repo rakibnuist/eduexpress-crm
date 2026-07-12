@@ -1477,6 +1477,48 @@ app.get('/api/public/diag', (req, res) => {
   }
 });
 
+app.get('/api/public/fix-leads-manual', (req, res) => {
+  try {
+    const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL OR page_name = ''").all();
+    let fixedCount = 0;
+    let logs = [];
+    for (const l of leadsToFix) {
+       const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
+       const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
+       
+       if (throughConv && throughConv.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughConv.name, throughConv.id, l.id);
+         fixedCount++;
+         logs.push(`Fixed lead ${l.id} via throughConv with ${throughConv.name}`);
+       } else if (throughContact && throughContact.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
+         fixedCount++;
+         logs.push(`Fixed lead ${l.id} via throughContact with ${throughContact.name}`);
+       } else {
+         const orphanConv = db.prepare(`SELECT channel_id FROM conversations WHERE lead_id = ? LIMIT 1`).get(l.id);
+         if (orphanConv && orphanConv.channel_id) {
+           const peerLead = db.prepare(`SELECT l.page_name FROM leads l JOIN conversations c ON l.id = c.lead_id WHERE c.channel_id = ? AND l.page_name IS NOT NULL AND l.page_name != '' LIMIT 1`).get(orphanConv.channel_id);
+           if (peerLead && peerLead.page_name) {
+             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(peerLead.page_name, orphanConv.channel_id, l.id);
+             fixedCount++;
+             logs.push(`Fixed lead ${l.id} via peerLead with ${peerLead.page_name}`);
+           } else {
+             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run("Unknown Page", orphanConv.channel_id, l.id);
+             fixedCount++;
+             logs.push(`Fixed lead ${l.id} via Unknown Page (channel ${orphanConv.channel_id})`);
+           }
+         } else {
+             db.prepare("UPDATE leads SET page_name = ? WHERE id = ?").run("Unknown Page", l.id);
+             fixedCount++;
+             logs.push(`Fixed lead ${l.id} via Unknown Page (no conversation)`);
+         }
+       }
+    }
+    res.json({ ok: true, fixedCount, logs });
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack });
+  }
+});
 
 app.get('/api/public/diag2', (req, res) => {
   try {
