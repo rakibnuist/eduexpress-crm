@@ -4350,7 +4350,9 @@ app.get('/api/leads/source-stats', (req, res) => {
       page_name,
       channel_id,
       COUNT(*) as total_leads,
-      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled,
+      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
+      SUM(CASE WHEN lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
+      SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
       SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
     FROM leads
     WHERE page_name IS NOT NULL
@@ -4366,7 +4368,9 @@ app.get('/api/leads/source-stats', (req, res) => {
       meta_ad_id,
       page_name,
       COUNT(*) as total_leads,
-      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled,
+      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
+      SUM(CASE WHEN lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
+      SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
       SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
     FROM leads
     WHERE ad_name IS NOT NULL
@@ -4380,7 +4384,7 @@ app.get('/api/leads/source-stats', (req, res) => {
   const totals = db.prepare(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN lead_status = 'Enrolled' THEN 1 ELSE 0 END) as enrolled
+      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened
     FROM leads
     WHERE page_name IS NOT NULL AND date_added >= ?
   `).get(since);

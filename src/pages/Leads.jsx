@@ -473,13 +473,15 @@ export default function Leads({ user }) {
                               <th className="text-left px-4 py-2.5 rounded-l-xl">Page</th>
                               <th className="text-center px-4 py-2.5">Leads</th>
                               <th className="text-center px-4 py-2.5">Active</th>
-                              <th className="text-center px-4 py-2.5">Enrolled</th>
+                              <th className="text-center px-4 py-2.5">Office Visited</th>
+                              <th className="text-center px-4 py-2.5">Positive</th>
+                              <th className="text-center px-4 py-2.5">File Opened</th>
                               <th className="text-center px-4 py-2.5 rounded-r-xl">Conv. Rate</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {sourceStats.byPage.map((row, i) => {
-                              const rate = row.total_leads > 0 ? ((row.enrolled / row.total_leads) * 100).toFixed(1) : '0.0';
+                              const rate = row.total_leads > 0 ? ((row.file_opened / row.total_leads) * 100).toFixed(1) : '0.0';
                               return (
                                 <tr key={i} className="hover:bg-blue-50/30 transition-colors">
                                   <td className="px-4 py-3 font-semibold text-slate-700">
@@ -490,7 +492,9 @@ export default function Leads({ user }) {
                                   </td>
                                   <td className="px-4 py-3 text-center font-bold text-slate-800">{row.total_leads}</td>
                                   <td className="px-4 py-3 text-center text-emerald-600 font-semibold">{row.active}</td>
-                                  <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.enrolled}</td>
+                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
+                                  <td className="px-4 py-3 text-center text-cyan-600 font-semibold">{row.positive}</td>
+                                  <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.file_opened}</td>
                                   <td className="px-4 py-3 text-center">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                                       parseFloat(rate) >= 20 ? 'bg-emerald-100 text-emerald-700' :
@@ -518,13 +522,16 @@ export default function Leads({ user }) {
                               <th className="text-left px-4 py-2.5 rounded-l-xl">Ad Name</th>
                               <th className="text-left px-4 py-2.5">Page</th>
                               <th className="text-center px-4 py-2.5">Leads</th>
-                              <th className="text-center px-4 py-2.5">Enrolled</th>
+                              <th className="text-center px-4 py-2.5">Active</th>
+                              <th className="text-center px-4 py-2.5">Office Visited</th>
+                              <th className="text-center px-4 py-2.5">Positive</th>
+                              <th className="text-center px-4 py-2.5">File Opened</th>
                               <th className="text-center px-4 py-2.5 rounded-r-xl">Conv. Rate</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {sourceStats.byAd.map((row, i) => {
-                              const rate = row.total_leads > 0 ? ((row.enrolled / row.total_leads) * 100).toFixed(1) : '0.0';
+                              const rate = row.total_leads > 0 ? ((row.file_opened / row.total_leads) * 100).toFixed(1) : '0.0';
                               return (
                                 <tr key={i} className="hover:bg-blue-50/30 transition-colors">
                                   <td className="px-4 py-3 font-semibold text-slate-700 max-w-[200px] truncate" title={row.ad_name}>
@@ -532,7 +539,10 @@ export default function Leads({ user }) {
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 text-xs">{row.page_name || '—'}</td>
                                   <td className="px-4 py-3 text-center font-bold text-slate-800">{row.total_leads}</td>
-                                  <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.enrolled}</td>
+                                  <td className="px-4 py-3 text-center text-emerald-600 font-semibold">{row.active}</td>
+                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
+                                  <td className="px-4 py-3 text-center text-cyan-600 font-semibold">{row.positive}</td>
+                                  <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.file_opened}</td>
                                   <td className="px-4 py-3 text-center">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                                       parseFloat(rate) >= 20 ? 'bg-emerald-100 text-emerald-700' :
@@ -585,13 +595,13 @@ export default function Leads({ user }) {
               {!canViewOwnLeadsOnly(user) && (
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
+              {(activeFilters > 0 || filters.search) && (
+                <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
+                  className="flex items-center gap-1.5 h-10 px-4 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white rounded-xl transition-all select-none cursor-pointer shadow-sm">
+                  <X size={15} strokeWidth={2.5} /> Reset Filters
+                </button>
+              )}
             </div>
-          )}
-          {(activeFilters > 0 || filters.search) && (
-            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
-              className="flex items-center gap-1.5 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white px-3 py-2 rounded-xl transition-all select-none cursor-pointer shadow-sm ml-auto">
-              <X size={15} strokeWidth={2.5} /> Reset Filters
-            </button>
           )}
         </div>
 
