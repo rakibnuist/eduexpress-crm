@@ -1641,7 +1641,8 @@ export default function Conversations({ user }) {
                     if (!cnf) return;
                     try {
                       setIsScanning(true);
-                      const res = await fetch(`/api/channels/${channelTab}/bulk-scan`, { 
+                      const actualChannelId = String(channelTab).replace('channel_', '');
+                      const res = await fetch(`/api/channels/${actualChannelId}/bulk-scan`, { 
                         method: 'POST', 
                         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } 
                       });
