@@ -3767,6 +3767,25 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
       tiktok: 'TikTok'
     };
 
+    let meta_ad_id = null;
+    let meta_campaign = null;
+    let meta_adset_name = null;
+    let meta_adset_id = null;
+    let ad_name = null;
+    let channel_id = null;
+
+    if (contact.referral_data) {
+      try {
+        const ref = JSON.parse(contact.referral_data);
+        if (ref.ad_id) meta_ad_id = String(ref.ad_id);
+        if (ref.campaign_name || ref.campaign_id) meta_campaign = String(ref.campaign_name || ref.campaign_id);
+        if (ref.adset_name) meta_adset_name = String(ref.adset_name);
+        if (ref.adset_id) meta_adset_id = String(ref.adset_id);
+        if (ref.ad_title || ref.headline) ad_name = String(ref.ad_title || ref.headline);
+        if (ref.channel_id) channel_id = ref.channel_id;
+      } catch (e) {}
+    }
+
     const params = leadParams({
       client_name,
       phone,
@@ -3778,6 +3797,12 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
       lead_status: 'New Lead',
       assigned_consultant,
       assigned_employee_id,
+      meta_ad_id,
+      meta_campaign,
+      meta_adset_name,
+      meta_adset_id,
+      ad_name,
+      channel_id,
       notes: initialMessage ? `Initial Inquiry: "${initialMessage}"` : `Auto-created from ${source} chat integration.`
     }, lead_id, 0);
 
@@ -7205,6 +7230,26 @@ app.post('/api/conversations/:id/convert-to-lead', (req, res) => {
       tiktok: 'TikTok'
     };
     const lead_id = nextLeadId();
+
+    let meta_ad_id = null;
+    let meta_campaign = null;
+    let meta_adset_name = null;
+    let meta_adset_id = null;
+    let ad_name = null;
+    let channel_id_val = null;
+
+    if (contact.referral_data) {
+      try {
+        const ref = JSON.parse(contact.referral_data);
+        if (ref.ad_id) meta_ad_id = String(ref.ad_id);
+        if (ref.campaign_name || ref.campaign_id) meta_campaign = String(ref.campaign_name || ref.campaign_id);
+        if (ref.adset_name) meta_adset_name = String(ref.adset_name);
+        if (ref.adset_id) meta_adset_id = String(ref.adset_id);
+        if (ref.ad_title || ref.headline) ad_name = String(ref.ad_title || ref.headline);
+        if (ref.channel_id) channel_id_val = ref.channel_id;
+      } catch (e) {}
+    }
+
     const params = leadParams({
       client_name: client_name || contact.name || 'Unknown',
       phone: phone || contact.phone || null,
@@ -7214,6 +7259,12 @@ app.post('/api/conversations/:id/convert-to-lead', (req, res) => {
       lead_source: leadSourceMap[conv.channel_type] || 'Chat',
       lead_status: 'New Lead',
       assigned_consultant,
+      meta_ad_id,
+      meta_campaign,
+      meta_adset_name,
+      meta_adset_id,
+      ad_name,
+      channel_id: channel_id_val,
       notes: notes || null,
     }, lead_id, 0);
 
