@@ -1415,7 +1415,15 @@ app.get('/api/debug/webhooks', (req, res) => {
   }
 });
 
-// Start HTTP server IMMEDIATELY so Hostinger health check passes
+app.get('/api/admin/debug-leads', async (req, res) => {
+  try {
+    const leads = db.prepare("SELECT lead_id, client_name, page_name, meta_form_id FROM leads ORDER BY id ASC LIMIT 50").all();
+    res.json({ ok: true, leads });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/admin/backfill-meta', async (req, res) => {
   try {
     const logs = [];
