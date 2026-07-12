@@ -9336,5 +9336,42 @@ try {
   console.error('[Startup] Failed to fix page_name:', e.message);
 }
 
+// Retroactively fix page_name for Meta Lead Ads by looking up form_id from Facebook API
+async function backfillMetaLeadAds() {
+  try {
+    const missingLeads = db.prepare("SELECT DISTINCT meta_form_id FROM leads WHERE meta_form_id IS NOT NULL AND page_name IS NULL").all();
+    if (missingLeads.length === 0) return;
+    
+    console.log(`[Startup] Found ${missingLeads.length} unique form_ids to backfill from Meta API.`);
+    const channels = db.prepare("SELECT * FROM channels WHERE type='facebook' AND access_token IS NOT NULL").all();
+    
+    for (const { meta_form_id } of missingLeads) {
+      let found = false;
+      for (const channel of channels) {
+        try {
+          const pageToken = await resolvePageAccessToken(channel.page_id, channel.access_token);
+          const r = await fetch(`https://graph.facebook.com/v19.0/${meta_form_id}?fields=page&access_token=${pageToken}`);
+          const d = await r.json();
+          if (d.page && d.page.id) {
+            const pageIdStr = String(d.page.id).trim();
+            // Find which channel has this page_id
+            const matchedChannel = db.prepare("SELECT * FROM channels WHERE trim(page_id)=?").get(pageIdStr);
+            if (matchedChannel) {
+              const fix = db.prepare("UPDATE leads SET page_name=?, channel_id=? WHERE meta_form_id=? AND page_name IS NULL").run(matchedChannel.name, matchedChannel.id, meta_form_id);
+              console.log(`[Startup] Backfilled ${fix.changes} leads for form ${meta_form_id} -> Page: ${matchedChannel.name}`);
+              found = true;
+              break;
+            }
+          }
+        } catch(e) {}
+      }
+      if (!found) console.log(`[Startup] Could not find page for form ${meta_form_id}`);
+    }
+  } catch (e) {
+    console.error('[Startup] Failed to backfill Meta Lead Ads:', e.message);
+  }
+}
+setTimeout(backfillMetaLeadAds, 7000);
+
 // Run immediately after server starts
 setTimeout(scanOldChatsForLeads, 3000);
