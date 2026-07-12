@@ -6663,12 +6663,18 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
       const inboundText = messages.filter(m => m.direction === 'in').map(m => m.content).join(' ');
       
       const phoneRegex = /(?:(?:\+|00)?88[\s\-]?)?01[3-9](?:[\s\-]*\d){8}/g;
-      const phones = inboundText.match(phoneRegex) || allText.match(phoneRegex);
+      const rawPhones = inboundText.match(phoneRegex) || allText.match(phoneRegex) || [];
+      
+      const companyNumbers = ['+8801983333566', '+8801333099608'];
       
       let extractedPhone = null;
-      if (phones && phones.length > 0) {
-        extractedPhone = phones[0].replace(/[\s\-]/g, '');
-        if (extractedPhone.startsWith('01')) extractedPhone = '+88' + extractedPhone;
+      for (let p of rawPhones) {
+        let cleanP = p.replace(/[\s\-]/g, '');
+        if (cleanP.startsWith('01')) cleanP = '+88' + cleanP;
+        if (!companyNumbers.includes(cleanP)) {
+          extractedPhone = cleanP;
+          break;
+        }
       }
 
       const adMatch = allText.match(/ad_id=(\d+)/i) || allText.match(/campaign_id=(\d+)/i);
