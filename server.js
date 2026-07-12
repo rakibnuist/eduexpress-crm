@@ -1002,7 +1002,7 @@ app.get('/api/applications', (req, res) => {
            l.lead_status, l.application_stage, l.visa_deadline, l.departure_date,
            l.intake_term, l.assigned_consultant, l.assigned_employee_id, l.service_fee, l.paid, l.balance,
            l.source, l.lead_market, l.lead_type, l.lead_source, l.referrer, l.nationality, l.passport, l.degree, l.major,
-           l.drive_link, l.deposit,
+           l.drive_link, l.deposit, l.page_name, l.ad_name, l.channel_id, l.meta_campaign,
            e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id) AS docs_total,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id AND d.status IN ('received','verified')) AS docs_received,
