@@ -128,10 +128,13 @@ function makeStatement(rawSql) {
       const params = args.length === 1 ? convertParams(args[0]) : args;
       try {
         const stmt = _db.prepare(sql);
-        stmt.bind(params);
-        const row = stmt.step() ? stmt.getAsObject() : undefined;
-        stmt.free();
-        return row || undefined;
+        try {
+          stmt.bind(params);
+          const row = stmt.step() ? stmt.getAsObject() : undefined;
+          return row || undefined;
+        } finally {
+          stmt.free();
+        }
       } catch (e) {
         if (handleFatalError(e, `get ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
         throw new Error(`[sqldb] get failed: ${e.message}\nSQL: ${sql}`, { cause: e });
@@ -143,11 +146,14 @@ function makeStatement(rawSql) {
       const params = args.length === 0 ? {} : args.length === 1 ? convertParams(args[0]) : args;
       try {
         const stmt = _db.prepare(sql);
-        stmt.bind(params);
-        const rows = [];
-        while (stmt.step()) rows.push(stmt.getAsObject());
-        stmt.free();
-        return rows;
+        try {
+          stmt.bind(params);
+          const rows = [];
+          while (stmt.step()) rows.push(stmt.getAsObject());
+          return rows;
+        } finally {
+          stmt.free();
+        }
       } catch (e) {
         if (handleFatalError(e, `all ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
         throw new Error(`[sqldb] all failed: ${e.message}\nSQL: ${sql}`, { cause: e });
@@ -159,11 +165,15 @@ function makeStatement(rawSql) {
       const params = args.length === 0 ? {} : args.length === 1 ? convertParams(args[0]) : args;
       try {
         const stmt = _db.prepare(sql);
-        stmt.bind(params);
-        stmt.step();
-        stmt.free();
-        const changes = _db.getRowsModified();
-        const lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
+        let changes, lastInsertRowid;
+        try {
+          stmt.bind(params);
+          stmt.step();
+        } finally {
+          stmt.free();
+        }
+        changes = _db.getRowsModified();
+        lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
         if (write) scheduleSave();
         return { changes, lastInsertRowid };
       } catch (e) {
@@ -199,9 +209,10 @@ export async function initDatabase(dbPath) {
   const dir = dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  // Use sql-asm.js (pure JavaScript, no WASM file needed — works on any server)
-  const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-asm.js'));
-  _SQL = await initSqlJs();
+  // Use sql-wasm.js which has dynamic memory growth to prevent OOM
+  const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-wasm.js'));
+  const wasmBinary = readFileSync(join(__dirname, 'node_modules/sql.js/dist/sql-wasm.wasm'));
+  _SQL = await initSqlJs({ wasmBinary });
 
   // Load existing DB file or create new — with corruption recovery.
   // Three integrity gates: (1) buffer loads, (2) sqlite_master readable,
