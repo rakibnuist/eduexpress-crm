@@ -631,7 +631,7 @@ export default function Leads({ user }) {
                   const isDueToday = l.next_followup === today;
                   const isOverdue = l.next_followup && l.next_followup < today && l.lead_status !== 'Enrolled' && l.lead_status !== 'Not Interested';
                   return (
-                    <tr key={l.id} className="hover:bg-blue-50/40 transition-colors group cursor-pointer">
+                    <tr key={l.id} className="even:bg-slate-50/70 hover:bg-blue-50/60 transition-colors group cursor-pointer">
                       <td className="py-3 px-3.5 text-left" onClick={e => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -804,21 +804,57 @@ export default function Leads({ user }) {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 bg-slate-50/40">
-            <span className="text-xs text-slate-400">
-              Showing {Math.min((filters.page - 1) * 50 + 1, data.total)}–{Math.min(filters.page * 50, data.total)} of {data.total.toLocaleString()}
+          <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-4 border-t border-slate-100 bg-white gap-4">
+            <span className="text-sm text-slate-500 font-medium text-center sm:text-left">
+              Showing <span className="text-slate-800 font-bold">{Math.min((filters.page - 1) * 50 + 1, data.total || 0)}</span> to <span className="text-slate-800 font-bold">{Math.min(filters.page * 50, data.total)}</span> of <span className="text-slate-800 font-bold">{data.total.toLocaleString()}</span> leads
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <button disabled={filters.page <= 1}
                 onClick={() => setFilters(f => ({ ...f, page: f.page - 1 }))}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs disabled:opacity-40 hover:bg-white transition-colors cursor-pointer select-none">
-                <ChevronLeft size={14} /> Prev
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer select-none shadow-sm active:scale-95">
+                <ChevronLeft size={16} /> Prev
               </button>
-              <span className="px-3 py-1.5 text-xs text-slate-600 font-medium">{filters.page} / {data.pages}</span>
-              <button disabled={filters.page >= data.pages}
+              
+              <div className="hidden md:flex items-center gap-1.5">
+                {Array.from({ length: Math.min(5, data.pages || 1) }, (_, i) => {
+                  let pageNum;
+                  const totalP = data.pages || 1;
+                  if (totalP <= 5) pageNum = i + 1;
+                  else if (filters.page <= 3) pageNum = i + 1;
+                  else if (filters.page >= totalP - 2) pageNum = totalP - 4 + i;
+                  else pageNum = filters.page - 2 + i;
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setFilters(f => ({ ...f, page: pageNum }))}
+                      className={`flex items-center justify-center min-w-[36px] h-9 px-2 rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 ${
+                        filters.page === pageNum
+                          ? 'bg-blue-600 text-white border border-blue-600 ring-2 ring-blue-600/20'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                {data.pages > 5 && filters.page < data.pages - 2 && (
+                  <>
+                    <span className="px-1 text-slate-400 tracking-widest font-bold">...</span>
+                    <button
+                      onClick={() => setFilters(f => ({ ...f, page: data.pages }))}
+                      className="flex items-center justify-center min-w-[36px] h-9 px-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 text-sm font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95"
+                    >
+                      {data.pages}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <button disabled={filters.page >= (data.pages || 1)}
                 onClick={() => setFilters(f => ({ ...f, page: f.page + 1 }))}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs disabled:opacity-40 hover:bg-white transition-colors cursor-pointer select-none">
-                Next <ChevronRight size={14} />
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer select-none shadow-sm active:scale-95">
+                Next <ChevronRight size={16} />
               </button>
             </div>
           </div>

@@ -18,7 +18,7 @@ import { useConfirm } from '../components/Confirm';
 import Modal from '../components/Modal';
 import {
   GraduationCap, RefreshCw, X, CheckCircle2, ExternalLink,
-  CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, Plus, Trash2,
+  CalendarClock, MapPin, Save, ArrowRight, FileText, ChevronRight, ChevronLeft, Plus, Trash2,
   LayoutGrid, Table as TableIcon, Building2, ChevronDown,
   Share2, Copy, QrCode, RotateCw, Search, ArrowUpDown, Download, Filter,
   BarChart3, Clock, DollarSign, CheckCircle, Globe
@@ -660,6 +660,15 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
     if (sortConfig.key !== col) return <ArrowUpDown size={10} className="text-slate-300 ml-1" />;
     return <ArrowUpDown size={10} className={sortConfig.dir === 'asc' ? 'text-blue-600 ml-1' : 'text-blue-600 ml-1 rotate-180'} />;
   };
+
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [rows]);
+  
+  const pageSize = 50;
+  const total = rows.length;
+  const pages = Math.ceil(total / pageSize) || 1;
+  const paginatedRows = rows.slice((page - 1) * pageSize, page * pageSize);
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
@@ -685,8 +694,8 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => (
-              <tr key={r.id} onClick={() => onPick(r)} className="hover:bg-blue-50/40 cursor-pointer">
+            {paginatedRows.map((r) => (
+              <tr key={r.id} onClick={() => onPick(r)} className="even:bg-slate-50/70 hover:bg-blue-50/60 transition-colors cursor-pointer">
                 <Td onClick={e => e.stopPropagation()}>
                   <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={(e) => { if (e.target.checked) setSelectedIds(prev => [...prev, r.id]); else setSelectedIds(prev => prev.filter(id => id !== r.id)); }}
                     className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
@@ -716,6 +725,61 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
             ))}
           </tbody>
         </table>
+      </div>
+      
+      {/* Pagination */}
+      <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-4 border-t border-slate-100 bg-white gap-4">
+        <span className="text-sm text-slate-500 font-medium text-center sm:text-left">
+          Showing <span className="text-slate-800 font-bold">{Math.min((page - 1) * pageSize + 1, total || 0)}</span> to <span className="text-slate-800 font-bold">{Math.min(page * pageSize, total)}</span> of <span className="text-slate-800 font-bold">{total.toLocaleString()}</span> applications
+        </span>
+        <div className="flex items-center gap-2">
+          <button disabled={page <= 1}
+            onClick={() => setPage(p => p - 1)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer select-none shadow-sm active:scale-95">
+            <ChevronLeft size={16} /> Prev
+          </button>
+          
+          <div className="hidden md:flex items-center gap-1.5">
+            {Array.from({ length: Math.min(5, pages) }, (_, i) => {
+              let pageNum;
+              if (pages <= 5) pageNum = i + 1;
+              else if (page <= 3) pageNum = i + 1;
+              else if (page >= pages - 2) pageNum = pages - 4 + i;
+              else pageNum = page - 2 + i;
+              
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setPage(pageNum)}
+                  className={`flex items-center justify-center min-w-[36px] h-9 px-2 rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95 ${
+                    page === pageNum
+                      ? 'bg-blue-600 text-white border border-blue-600 ring-2 ring-blue-600/20'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            {pages > 5 && page < pages - 2 && (
+              <>
+                <span className="px-1 text-slate-400 tracking-widest font-bold">...</span>
+                <button
+                  onClick={() => setPage(pages)}
+                  className="flex items-center justify-center min-w-[36px] h-9 px-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 text-sm font-bold transition-all shadow-sm cursor-pointer select-none active:scale-95"
+                >
+                  {pages}
+                </button>
+              </>
+            )}
+          </div>
+
+          <button disabled={page >= pages}
+            onClick={() => setPage(p => p + 1)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 disabled:opacity-40 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer select-none shadow-sm active:scale-95">
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
