@@ -3358,12 +3358,12 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_
       db.prepare("UPDATE contacts SET phone=? WHERE id=?").run(phone, existing.id);
       existing.phone = phone;
     }
-    return autoLinkOrCreateLead(existing);
+    return existing;
   }
   const info = db.prepare(`INSERT INTO contacts (name,phone,email,wa_id,messenger_id,instagram_id,tiktok_id,avatar_url) VALUES (?,?,?,?,?,?,?,?)`)
     .run(name || 'Unknown', phone || null, email || null, wa_id || null, messenger_id || null, instagram_id || null, tiktok_id || null, avatar_url || null);
   const newContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(info.lastInsertRowid);
-  return autoLinkOrCreateLead(newContact);
+  return newContact;
 }
 
 function upsertConversation(contactId, channelId, channelType) {
