@@ -7283,10 +7283,10 @@ app.post('/webhook/meta', async (req, res) => {
 
             const lead_id = nextLeadId();
             const client_name = fields.full_name||fields.name||`${fields.first_name||''} ${fields.last_name||''}`.trim()||'Unknown';
-            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,source,assigned_consultant,notes)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,source,assigned_consultant,notes,page_name,channel_id)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
               .run(lead_id, new Date().toISOString().slice(0,10), client_name, fields.phone_number||null, fields.email||null, destination,
-                source,'New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,source,assigned_consultant,JSON.stringify(fields));
+                source,'New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,source,assigned_consultant,JSON.stringify(fields), channel?.name||null, channel?.id||null);
             const lead = db.prepare("SELECT * FROM leads WHERE meta_lead_id=?").get(leadgen_id);
             if (lead) {
               sendCAPIEvent('Lead', { ...lead, event_source_url: fields.link_url || fields.page_url || undefined });
