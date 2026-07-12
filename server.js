@@ -4341,10 +4341,26 @@ app.get('/api/leads/source-stats', (req, res) => {
     (Array.isArray(u?.roles) && (u.roles.includes('founder_ceo') || u.roles.includes('managing_director')));
   if (!isAdminOrCEO) return res.status(403).json({ error: 'Forbidden' });
 
-  const { days = 30 } = req.query;
+  const { days = 30, source, page_name, ad_name } = req.query;
   const since = new Date(Date.now() - parseInt(days) * 86400000).toISOString().slice(0, 10);
 
-  // Per-page breakdown (Messenger only — WhatsApp excluded intentionally)
+  let extraWhere = '';
+  const params = [since];
+
+  if (source) {
+    extraWhere += ' AND lead_source = ?';
+    params.push(source);
+  }
+  if (page_name) {
+    extraWhere += ' AND page_name = ?';
+    params.push(page_name);
+  }
+  if (ad_name) {
+    extraWhere += ' AND ad_name = ?';
+    params.push(ad_name);
+  }
+
+  // Per-page breakdown
   const byPage = db.prepare(`
     SELECT
       page_name,
@@ -4356,10 +4372,10 @@ app.get('/api/leads/source-stats', (req, res) => {
       SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
     FROM leads
     WHERE page_name IS NOT NULL
-      AND date_added >= ?
+      AND date_added >= ? ${extraWhere}
     GROUP BY page_name
     ORDER BY total_leads DESC
-  `).all(since);
+  `).all(...params);
 
   // Per-ad breakdown
   const byAd = db.prepare(`
@@ -4374,20 +4390,20 @@ app.get('/api/leads/source-stats', (req, res) => {
       SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
     FROM leads
     WHERE ad_name IS NOT NULL
-      AND date_added >= ?
+      AND date_added >= ? ${extraWhere}
     GROUP BY ad_name
     ORDER BY total_leads DESC
-    LIMIT 10
-  `).all(since);
+    LIMIT 20
+  `).all(...params);
 
-  // Totals from Messenger/Instagram ads in period
+  // Totals
   const totals = db.prepare(`
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened
     FROM leads
-    WHERE page_name IS NOT NULL AND date_added >= ?
-  `).get(since);
+    WHERE date_added >= ? ${extraWhere}
+  `).get(...params);
 
   res.json({ byPage, byAd, totals, days: parseInt(days), since });
 });

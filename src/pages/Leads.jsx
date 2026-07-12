@@ -117,16 +117,22 @@ export default function Leads({ user }) {
   // Ad performance panel state (admin only)
   const [sourceStats, setSourceStats] = useState(null);
   const [statsDays, setStatsDays] = useState(30);
+  const [statsFilters, setStatsFilters] = useState({ source: '', page_name: '', ad_name: '' });
   const [statsOpen, setStatsOpen] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !statsOpen) return;
     setStatsLoading(true);
-    fetch(`/api/leads/source-stats?days=${statsDays}`, { credentials: 'include' })
+    const params = new URLSearchParams({ days: statsDays });
+    if (statsFilters.source) params.append('source', statsFilters.source);
+    if (statsFilters.page_name) params.append('page_name', statsFilters.page_name);
+    if (statsFilters.ad_name) params.append('ad_name', statsFilters.ad_name);
+    
+    fetch(`/api/leads/source-stats?${params.toString()}`, { credentials: 'include' })
       .then(r => r.json()).then(setSourceStats).catch(() => {})
       .finally(() => setStatsLoading(false));
-  }, [isAdmin, statsOpen, statsDays]);
+  }, [isAdmin, statsOpen, statsDays, statsFilters]);
 
   useEffect(() => {
     localStorage.setItem('leads_view', view);
@@ -453,6 +459,14 @@ export default function Leads({ user }) {
 
           {statsOpen && (
             <div className="border-t border-slate-100 p-5 space-y-5">
+              <div className="flex flex-wrap gap-2 items-center mb-1">
+                 <FilterSelect value={statsFilters.source} onChange={v => setStatsFilters(s => ({ ...s, source: v }))} options={settings?.leadSources || []} placeholder="All Sources" />
+                 <FilterSelect value={statsFilters.page_name} onChange={v => setStatsFilters(s => ({ ...s, page_name: v }))} options={settings?.pages || []} placeholder="All Pages" />
+                 <FilterSelect value={statsFilters.ad_name} onChange={v => setStatsFilters(s => ({ ...s, ad_name: v }))} options={settings?.ads || []} placeholder="All Ads" />
+                 {(statsFilters.source || statsFilters.page_name || statsFilters.ad_name) && (
+                   <button onClick={() => setStatsFilters({ source: '', page_name: '', ad_name: '' })} className="text-xs text-rose-500 hover:text-rose-700 font-medium px-2">Clear</button>
+                 )}
+              </div>
               {statsLoading ? (
                 <p className="text-sm text-slate-400 text-center py-4">Loading...</p>
               ) : !sourceStats || (sourceStats.byPage.length === 0 && sourceStats.byAd.length === 0) ? (
