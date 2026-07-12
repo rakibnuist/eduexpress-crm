@@ -1489,6 +1489,16 @@ app.get('/api/public/diag2', (req, res) => {
   }
 });
 
+
+app.get('/api/public/diag3', (req, res) => {
+  try {
+    const c = db.prepare("SELECT * FROM channels WHERE id = 9").get();
+    res.json(c || { error: 'Channel 9 not found' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
 // ── Init DB async in background ────────────────────────────
