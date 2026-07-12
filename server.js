@@ -1551,6 +1551,61 @@ app.get('/api/public/diag4', (req, res) => {
   }
 });
 
+async function syncMetaAdPerformance() {
+  console.log('[cron] Starting Meta Ad Performance Sync...');
+  try {
+    const accessToken = getConfig('meta_ads_access_token');
+    const adAccountId = getConfig('meta_ad_account_id');
+    if (!accessToken || !adAccountId) {
+      console.log('[cron] Missing meta_ads_access_token or meta_ad_account_id. Skipping sync.');
+      return;
+    }
+
+    const today = new Date();
+    today.setDate(today.getDate() - 1); // Fetch yesterday's data
+    const dateStr = today.toISOString().slice(0, 10);
+
+    const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=ad&time_range={'since':'${dateStr}','until':'${dateStr}'}&fields=ad_id,spend,impressions,clicks&access_token=${accessToken}`;
+    
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.error) {
+      console.error('[cron] Meta API Error:', data.error.message);
+      return;
+    }
+
+    const insights = data.data || [];
+    let synced = 0;
+    
+    const insertStmt = db.prepare(`
+      INSERT OR REPLACE INTO ad_performance_cache (ad_id, date, spend, impressions, clicks)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    db.transaction(() => {
+      for (const row of insights) {
+        insertStmt.run(row.ad_id, dateStr, parseFloat(row.spend || 0), parseInt(row.impressions || 0), parseInt(row.clicks || 0));
+        synced++;
+      }
+    })();
+
+    console.log(`[cron] Successfully synced ${synced} ad performance records for ${dateStr}`);
+  } catch (err) {
+    console.error('[cron] Ad Performance Sync failed:', err.message);
+  }
+}
+
+// Run daily ad spend sync (check every 6 hours)
+setInterval(() => {
+  syncMetaAdPerformance();
+}, 6 * 60 * 60 * 1000); 
+
+// Run once 10 seconds after startup
+setTimeout(() => {
+  if (db) syncMetaAdPerformance();
+}, 10000);
+
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
 // ── Init DB async in background ────────────────────────────
@@ -4389,23 +4444,37 @@ app.get('/api/leads/source-stats', (req, res) => {
   `).all(...params);
 
   // Per-ad breakdown
+  const paramsByAd = [since, ...params];
+  const extraWhereAd = extraWhere.replace(/AND /g, 'AND l.');
+  
   const byAd = db.prepare(`
     SELECT
-      ad_name,
-      meta_ad_id,
-      page_name,
-      COUNT(*) as total_leads,
-      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
-      SUM(CASE WHEN lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
-      SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
-      SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
-    FROM leads
-    WHERE ad_name IS NOT NULL
-      AND date_added >= ? ${extraWhere}
-    GROUP BY ad_name
+      l.ad_name,
+      l.meta_ad_id,
+      l.page_name,
+      l.meta_campaign,
+      l.meta_adset_name,
+      COUNT(l.id) as total_leads,
+      SUM(CASE WHEN l.lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
+      SUM(CASE WHEN l.lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
+      SUM(CASE WHEN l.lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
+      SUM(CASE WHEN l.lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active,
+      COALESCE(c.total_spend, 0) as spend,
+      COALESCE(c.total_impressions, 0) as impressions,
+      COALESCE(c.total_clicks, 0) as clicks
+    FROM leads l
+    LEFT JOIN (
+      SELECT ad_id, SUM(spend) as total_spend, SUM(impressions) as total_impressions, SUM(clicks) as total_clicks
+      FROM ad_performance_cache
+      WHERE date >= ?
+      GROUP BY ad_id
+    ) c ON l.meta_ad_id = c.ad_id
+    WHERE l.ad_name IS NOT NULL
+      AND l.date_added >= ? ${extraWhereAd}
+    GROUP BY l.ad_name, l.meta_ad_id, l.page_name, l.meta_campaign, l.meta_adset_name
     ORDER BY total_leads DESC
     LIMIT 20
-  `).all(...params);
+  `).all(...paramsByAd);
 
   // Per-source breakdown
   const bySource = db.prepare(`
