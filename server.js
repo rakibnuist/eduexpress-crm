@@ -1565,7 +1565,7 @@ async function syncMetaAdPerformance() {
     today.setDate(today.getDate() - 1); // Fetch yesterday's data
     const dateStr = today.toISOString().slice(0, 10);
 
-    const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=ad&time_range={'since':'${dateStr}','until':'${dateStr}'}&fields=ad_id,spend,impressions,clicks&access_token=${accessToken}`;
+    const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=ad&time_range={'since':'${dateStr}','until':'${dateStr}'}&fields=ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks&access_token=${accessToken}`;
     
     const res = await fetch(url);
     const data = await res.json();
@@ -1579,13 +1579,22 @@ async function syncMetaAdPerformance() {
     let synced = 0;
     
     const insertStmt = db.prepare(`
-      INSERT OR REPLACE INTO ad_performance_cache (ad_id, date, spend, impressions, clicks)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO ad_performance_cache (ad_id, ad_name, campaign_name, adset_name, date, spend, impressions, clicks)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.transaction(() => {
       for (const row of insights) {
-        insertStmt.run(row.ad_id, dateStr, parseFloat(row.spend || 0), parseInt(row.impressions || 0), parseInt(row.clicks || 0));
+        insertStmt.run(
+          row.ad_id,
+          row.ad_name || 'Unknown Ad',
+          row.campaign_name || 'Unknown Campaign',
+          row.adset_name || 'Unknown Ad Set',
+          dateStr,
+          parseFloat(row.spend || 0),
+          parseInt(row.impressions || 0),
+          parseInt(row.clicks || 0)
+        );
         synced++;
       }
     })();
@@ -1601,9 +1610,61 @@ setInterval(() => {
   syncMetaAdPerformance();
 }, 6 * 60 * 60 * 1000); 
 
+async function backfillMetaAds30Days() {
+  console.log('[startup] Backfilling Meta Ad Performance for last 30 days...');
+  const accessToken = getConfig('meta_ads_access_token');
+  const adAccountId = getConfig('meta_ad_account_id');
+  if (!accessToken || !adAccountId) return;
+  const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=ad&date_preset=last_30d&fields=ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks&access_token=${accessToken}`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.data) {
+      const insertStmt = db.prepare(`
+        INSERT OR REPLACE INTO ad_performance_cache (ad_id, ad_name, campaign_name, adset_name, date, spend, impressions, clicks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      db.transaction(() => {
+        for (const row of data.data) {
+          // date_start is the aggregation period for date_preset=last_30d
+          // wait, date_preset=last_30d groups everything into one big chunk if time_increment is not 1!
+          // We need time_increment=1 to get daily breakdowns!
+        }
+      })();
+    }
+  } catch(e) {}
+}
+
 // Run once 10 seconds after startup
-setTimeout(() => {
-  if (db) syncMetaAdPerformance();
+setTimeout(async () => {
+  if (db) {
+    // 30 day backfill to populate ad_name
+    console.log('[startup] Backfilling Meta Ad Performance for last 30 days...');
+    const accessToken = getConfig('meta_ads_access_token');
+    const adAccountId = getConfig('meta_ad_account_id');
+    if (accessToken && adAccountId) {
+      try {
+        const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=ad&date_preset=last_30d&time_increment=1&fields=ad_id,ad_name,campaign_name,adset_name,spend,impressions,clicks&access_token=${accessToken}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.data) {
+          const insertStmt = db.prepare(`
+            INSERT OR REPLACE INTO ad_performance_cache (ad_id, ad_name, campaign_name, adset_name, date, spend, impressions, clicks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          db.transaction(() => {
+            for (const row of data.data) {
+              insertStmt.run(row.ad_id, row.ad_name, row.campaign_name, row.adset_name, row.date_start, parseFloat(row.spend||0), parseInt(row.impressions||0), parseInt(row.clicks||0));
+            }
+          })();
+          console.log('[startup] Backfill complete.');
+        }
+      } catch (e) {
+        console.error('Backfill failed:', e);
+      }
+    }
+    syncMetaAdPerformance();
+  }
 }, 10000);
 
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
@@ -1679,12 +1740,20 @@ process.on('SIGINT',  () => { if (db) db.flush(); process.exit(0); });
 function setupSchema() { db.exec(`
   CREATE TABLE IF NOT EXISTS ad_performance_cache (
     ad_id TEXT,
+    ad_name TEXT,
+    campaign_name TEXT,
+    adset_name TEXT,
     date TEXT,
     spend REAL DEFAULT 0,
     impressions INTEGER DEFAULT 0,
     clicks INTEGER DEFAULT 0,
     PRIMARY KEY (ad_id, date)
   );
+`);
+  try { db.exec(`ALTER TABLE ad_performance_cache ADD COLUMN ad_name TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE ad_performance_cache ADD COLUMN campaign_name TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE ad_performance_cache ADD COLUMN adset_name TEXT`); } catch {}
+  db.exec(`
   CREATE TABLE IF NOT EXISTS leads (
     lead_market TEXT DEFAULT 'Bangladesh',
     id INTEGER PRIMARY KEY AUTOINCREMENT,
