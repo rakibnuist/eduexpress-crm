@@ -1472,7 +1472,7 @@ app.get('/api/public/check-lead', async (req, res) => {
 });
 
 
-app.get('/api/admin/fix-leads-final', async (req, res) => {
+app.get('/api/public/fix-leads-final', async (req, res) => {
   try {
     const leadsToFix = db.prepare("SELECT id, lead_id, client_name FROM leads WHERE page_name IS NULL").all();
     let fixedCount = 0;
