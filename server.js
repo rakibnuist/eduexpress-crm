@@ -3684,12 +3684,11 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
     }
 
     if (!contact.phone) return null;  // Skip — no phone number, not a trackable lead
-    if (sourcePlatform === 'whatsapp') return null; // Skip WhatsApp — API costs money; track Messenger/Instagram only
 
-    const adId = referralData.ad_id || referralData.source_id;
-    const campaignId = referralData.campaign_id || referralData.campaign_name;
-    const adTitle = referralData.ad_title || referralData.headline || '';
-    const bodyText = referralData.body || '';
+    const adId = referralData ? (referralData.ad_id || referralData.source_id) : null;
+    const campaignId = referralData ? (referralData.campaign_id || referralData.campaign_name) : null;
+    const adTitle = referralData ? (referralData.ad_title || referralData.headline || '') : '';
+    const bodyText = referralData ? (referralData.body || '') : '';
 
     const lead_id = nextLeadId();
     let assigned_consultant = channel.consultant || null;
@@ -3713,14 +3712,16 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
     }
 
     const platformSourceMap = {
-      whatsapp: 'WhatsApp Ad',
+      whatsapp: referralData ? 'WhatsApp Ad' : 'WhatsApp Manual',
       messenger: 'Facebook Ad',
       instagram: 'Instagram Ad'
     };
 
-    const noteText = adTitle 
-      ? `Click-to-${sourcePlatform} Referral Ad: "${adTitle}" ${bodyText ? '- ' + bodyText : ''}`
-      : `Auto-created from Click-to-${sourcePlatform} ad.`;
+    const noteText = referralData 
+      ? (adTitle 
+        ? `Click-to-${sourcePlatform} Referral Ad: "${adTitle}" ${bodyText ? '- ' + bodyText : ''}`
+        : `Auto-created from Click-to-${sourcePlatform} ad.`)
+      : `Auto-created from organic ${sourcePlatform} knock.`;
 
     const params = leadParams({
       client_name: contact.name || 'Chat Lead',
@@ -7417,12 +7418,12 @@ app.post('/webhook/meta', async (req, res) => {
             const contact = upsertContact({ name: profileName, phone: msg.from, wa_id: msg.from });
             const conv    = upsertConversation(contact.id, channel.id, 'whatsapp');
 
-            // If message is from a Meta Paid Ad (Click-to-WhatsApp referral), auto-create a lead
-            if (msg.referral && !contact.lead_id) {
+            // Auto-create a lead if contact does not have one (handles both Ads and Organic/Manual knocks)
+            if (!contact.lead_id) {
               createLeadFromReferral({
                 contact,
                 channel,
-                referralData: msg.referral,
+                referralData: msg.referral || null,
                 sourcePlatform: 'whatsapp'
               });
               const updatedContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contact.id);
