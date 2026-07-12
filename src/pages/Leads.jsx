@@ -477,6 +477,55 @@ export default function Leads({ user }) {
                 </div>
               ) : (
                 <>
+                  {/* By Source */}
+                  {sourceStats.bySource?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">By Source</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-400">
+                              <th className="text-left px-4 py-2.5 rounded-l-xl">Source</th>
+                              <th className="text-center px-4 py-2.5">Leads</th>
+                              <th className="text-center px-4 py-2.5">Active</th>
+                              <th className="text-center px-4 py-2.5">Positive</th>
+                              <th className="text-center px-4 py-2.5">Office Visited</th>
+                              <th className="text-center px-4 py-2.5">File Opened</th>
+                              <th className="text-center px-4 py-2.5 rounded-r-xl">Conv. Rate</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {sourceStats.bySource.map((row, i) => {
+                              const rate = row.total_leads > 0 ? ((row.file_opened / row.total_leads) * 100).toFixed(1) : '0.0';
+                              return (
+                                <tr key={i} className="hover:bg-blue-50/30 transition-colors">
+                                  <td className="px-4 py-3 font-semibold text-slate-700">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="text-blue-500">📥</span>
+                                      {row.source || '—'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-center font-bold text-slate-800">{row.total_leads}</td>
+                                  <td className="px-4 py-3 text-center text-emerald-600 font-semibold">{row.active}</td>
+                                  <td className="px-4 py-3 text-center text-cyan-600 font-semibold">{row.positive}</td>
+                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
+                                  <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.file_opened}</td>
+                                  <td className="px-4 py-3 text-center">
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                                      parseFloat(rate) >= 20 ? 'bg-emerald-100 text-emerald-700' :
+                                      parseFloat(rate) >= 10 ? 'bg-amber-100 text-amber-700' :
+                                      'bg-slate-100 text-slate-500'
+                                    }`}>{rate}%</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* By Page */}
                   {sourceStats.byPage.length > 0 && (
                     <div>
@@ -488,8 +537,8 @@ export default function Leads({ user }) {
                               <th className="text-left px-4 py-2.5 rounded-l-xl">Page</th>
                               <th className="text-center px-4 py-2.5">Leads</th>
                               <th className="text-center px-4 py-2.5">Active</th>
-                              <th className="text-center px-4 py-2.5">Office Visited</th>
                               <th className="text-center px-4 py-2.5">Positive</th>
+                              <th className="text-center px-4 py-2.5">Office Visited</th>
                               <th className="text-center px-4 py-2.5">File Opened</th>
                               <th className="text-center px-4 py-2.5 rounded-r-xl">Conv. Rate</th>
                             </tr>
@@ -507,8 +556,8 @@ export default function Leads({ user }) {
                                   </td>
                                   <td className="px-4 py-3 text-center font-bold text-slate-800">{row.total_leads}</td>
                                   <td className="px-4 py-3 text-center text-emerald-600 font-semibold">{row.active}</td>
-                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
                                   <td className="px-4 py-3 text-center text-cyan-600 font-semibold">{row.positive}</td>
+                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
                                   <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.file_opened}</td>
                                   <td className="px-4 py-3 text-center">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
@@ -538,8 +587,8 @@ export default function Leads({ user }) {
                               <th className="text-left px-4 py-2.5">Page</th>
                               <th className="text-center px-4 py-2.5">Leads</th>
                               <th className="text-center px-4 py-2.5">Active</th>
-                              <th className="text-center px-4 py-2.5">Office Visited</th>
                               <th className="text-center px-4 py-2.5">Positive</th>
+                              <th className="text-center px-4 py-2.5">Office Visited</th>
                               <th className="text-center px-4 py-2.5">File Opened</th>
                               <th className="text-center px-4 py-2.5 rounded-r-xl">Conv. Rate</th>
                             </tr>
@@ -555,8 +604,8 @@ export default function Leads({ user }) {
                                   <td className="px-4 py-3 text-slate-500 text-xs">{row.page_name || '—'}</td>
                                   <td className="px-4 py-3 text-center font-bold text-slate-800">{row.total_leads}</td>
                                   <td className="px-4 py-3 text-center text-emerald-600 font-semibold">{row.active}</td>
-                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
                                   <td className="px-4 py-3 text-center text-cyan-600 font-semibold">{row.positive}</td>
+                                  <td className="px-4 py-3 text-center text-purple-600 font-semibold">{row.office_visited}</td>
                                   <td className="px-4 py-3 text-center text-indigo-600 font-bold">{row.file_opened}</td>
                                   <td className="px-4 py-3 text-center">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${

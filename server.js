@@ -4396,6 +4396,22 @@ app.get('/api/leads/source-stats', (req, res) => {
     LIMIT 20
   `).all(...params);
 
+  // Per-source breakdown
+  const bySource = db.prepare(`
+    SELECT
+      lead_source as source,
+      COUNT(*) as total_leads,
+      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
+      SUM(CASE WHEN lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
+      SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
+      SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
+    FROM leads
+    WHERE lead_source IS NOT NULL
+      AND date_added >= ? ${extraWhere}
+    GROUP BY lead_source
+    ORDER BY total_leads DESC
+  `).all(...params);
+
   // Totals
   const totals = db.prepare(`
     SELECT
@@ -4405,7 +4421,7 @@ app.get('/api/leads/source-stats', (req, res) => {
     WHERE date_added >= ? ${extraWhere}
   `).get(...params);
 
-  res.json({ byPage, byAd, totals, days: parseInt(days), since });
+  res.json({ bySource, byPage, byAd, totals, days: parseInt(days), since });
 });
 
 app.get('/api/leads', (req, res) => {
