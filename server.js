@@ -4584,7 +4584,9 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   last_education_major=@last_education_major, height=@height, weight=@weight,
   english_test_type=@english_test_type, payment_agreement=@payment_agreement,
   hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents,
-  age=@age, agency_id=@agency_id, lead_type=@lead_type, lead_market=@lead_market
+  age=@age, agency_id=@agency_id, lead_type=@lead_type, lead_market=@lead_market,
+  meta_lead_id=@meta_lead_id, meta_form_id=@meta_form_id, meta_ad_id=@meta_ad_id, meta_campaign=@meta_campaign,
+  ad_name=@ad_name, page_name=@page_name, channel_id=@channel_id
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
@@ -4625,69 +4627,76 @@ app.post('/api/leads', async (req, res) => {
 });
 
 app.put('/api/leads/:id', async (req, res) => {
-  const d = req.body;
-  // Backward compat for old source field
-  if (d.source === 'China') d.lead_market = 'China';
-  if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
-  if (d.source === 'In-House') d.lead_type = 'B2C';
-  if (!d.lead_market) d.lead_market = 'Bangladesh';
-  const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
-  if (!oldLead) return res.status(404).json({ error: 'Not found' });
-  // China data isolation: block unauthorized access to China leads
-  if (isChinaBlockedForUser(oldLead, req.user)) {
-    return res.status(403).json({ error: 'Access denied to China lead records' });
-  }
-  if (!leadIsVisibleTo(oldLead, req.user)) {
-    return res.status(403).json({ error: 'Access denied to this lead record' });
-  }
-  const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
-  const params = leadParams(d, oldLead.lead_id, balance);
-  db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
-  let lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
-
-  // Audit the changes that matter to an owner.
-  let autoUpdates = [];
-  if (oldLead?.lead_status !== lead.lead_status) {
-    logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
-    const evtMap = { 'Enrolled':'Purchase','File Opened':'InitiateCheckout','Office Visited':'Schedule','Positive':'Lead' };
-    if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead).catch(() => {});
-
-    // Auto-move to applications when status becomes 'File Opened'
-    if (lead.lead_status === 'File Opened') {
-      let newStage = lead.application_stage || 'documents';
-      if (!lead.application_stage) {
-        autoUpdates.push("application_stage = 'documents'");
-      }
-      let newSource = lead.source;
-      let newDestination = lead.destination;
-      if (lead.destination === 'China') {
-        newSource = 'China';
-        if (lead.source !== 'China') autoUpdates.push("source = 'China'");
-      } else if (lead.destination === 'Bangladesh') {
-        if (lead.source === 'B2B') {
-          newSource = 'B2B';
-        } else {
-          newSource = 'In-House';
-          if (lead.source !== 'In-House') autoUpdates.push("source = 'In-House'");
-        }
-      }
-      if (autoUpdates.length) {
-        db.prepare(`UPDATE leads SET ${autoUpdates.join(', ')} WHERE id=?`).run(req.params.id);
-      }
-      logActivity({ type: 'application_stage_changed', actor: req.user, lead, details: { stage: newStage, source: newSource, destination: newDestination } });
+  try {
+    const d = req.body;
+    // Backward compat for old source field
+    if (d.source === 'China') d.lead_market = 'China';
+    if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
+    if (d.source === 'In-House') d.lead_type = 'B2C';
+    if (!d.lead_market) d.lead_market = 'Bangladesh';
+    const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+    if (!oldLead) return res.status(404).json({ error: 'Not found' });
+    // China data isolation: block unauthorized access to China leads
+    if (isChinaBlockedForUser(oldLead, req.user)) {
+      return res.status(403).json({ error: 'Access denied to China lead records' });
     }
+    if (!leadIsVisibleTo(oldLead, req.user)) {
+      return res.status(403).json({ error: 'Access denied to this lead record' });
+    }
+    const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
+    const params = leadParams(d, oldLead.lead_id, balance);
+    delete params.lead_id;
+    delete params.date_added;
+    db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
+    let lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+
+    // Audit the changes that matter to an owner.
+    let autoUpdates = [];
+    if (oldLead?.lead_status !== lead.lead_status) {
+      logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
+      const evtMap = { 'Enrolled':'Purchase','File Opened':'InitiateCheckout','Office Visited':'Schedule','Positive':'Lead' };
+      if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead).catch(() => {});
+
+      // Auto-move to applications when status becomes 'File Opened'
+      if (lead.lead_status === 'File Opened') {
+        let newStage = lead.application_stage || 'documents';
+        if (!lead.application_stage) {
+          autoUpdates.push("application_stage = 'documents'");
+        }
+        let newSource = lead.source;
+        let newDestination = lead.destination;
+        if (lead.destination === 'China') {
+          newSource = 'China';
+          if (lead.source !== 'China') autoUpdates.push("source = 'China'");
+        } else if (lead.destination === 'Bangladesh') {
+          if (lead.source === 'B2B') {
+            newSource = 'B2B';
+          } else {
+            newSource = 'In-House';
+            if (lead.source !== 'In-House') autoUpdates.push("source = 'In-House'");
+          }
+        }
+        if (autoUpdates.length) {
+          db.prepare(`UPDATE leads SET ${autoUpdates.join(', ')} WHERE id=?`).run(req.params.id);
+        }
+        logActivity({ type: 'application_stage_changed', actor: req.user, lead, details: { stage: newStage, source: newSource, destination: newDestination } });
+      }
+    }
+    if (autoUpdates.length) {
+      lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+    }
+    if ((oldLead?.assigned_consultant || '') !== (lead.assigned_consultant || '')) {
+      logActivity({ type: 'lead_assigned', actor: req.user, lead, from: oldLead?.assigned_consultant, to: lead.assigned_consultant });
+    }
+    if ((parseFloat(oldLead?.paid) || 0) !== (parseFloat(lead.paid) || 0)) {
+      const delta = (parseFloat(lead.paid) || 0) - (parseFloat(oldLead?.paid) || 0);
+      if (delta !== 0) logActivity({ type: 'lead_payment', actor: req.user, lead, amount: delta, from: oldLead.paid, to: lead.paid });
+    }
+    res.json(lead);
+  } catch (err) {
+    console.error("Error updating lead:", err);
+    res.status(500).json({ error: err.message });
   }
-  if (autoUpdates.length) {
-    lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
-  }
-  if ((oldLead?.assigned_consultant || '') !== (lead.assigned_consultant || '')) {
-    logActivity({ type: 'lead_assigned', actor: req.user, lead, from: oldLead?.assigned_consultant, to: lead.assigned_consultant });
-  }
-  if ((parseFloat(oldLead?.paid) || 0) !== (parseFloat(lead.paid) || 0)) {
-    const delta = (parseFloat(lead.paid) || 0) - (parseFloat(oldLead?.paid) || 0);
-    if (delta !== 0) logActivity({ type: 'lead_payment', actor: req.user, lead, amount: delta, from: oldLead.paid, to: lead.paid });
-  }
-  res.json(lead);
 });
 
 app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res, () => {

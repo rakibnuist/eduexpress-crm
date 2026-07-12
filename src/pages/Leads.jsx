@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import Modal from '../components/Modal';
-import LeadForm from './LeadForm';
+import LeadDetailsModal from './LeadDetailsModal';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import { 
@@ -825,9 +825,13 @@ export default function Leads({ user }) {
         </div>
 
       {modal && (
-        <Modal title={modal === 'add' ? '➕ Add New Lead' : `✏️ Edit Lead — ${modal.lead_id}`} onClose={() => setModal(null)} wide>
-          <LeadForm user={user} lead={modal === 'add' ? null : modal} settings={settings} onSave={() => { setModal(null); load(); }} />
-        </Modal>
+        <LeadDetailsModal
+          user={user}
+          lead={modal}
+          settings={settings}
+          onClose={() => setModal(null)}
+          onSave={() => { setModal(null); load(); }}
+        />
       )}
 
       {deleting && (
