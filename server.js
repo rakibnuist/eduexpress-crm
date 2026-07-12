@@ -1466,6 +1466,17 @@ app.get('/api/admin/backfill-meta', async (req, res) => {
 
 
 
+
+app.get('/api/public/diag', (req, res) => {
+  try {
+    const nullLeads = db.prepare("SELECT id, lead_id, client_name, page_name, channel_id, meta_form_id FROM leads WHERE page_name IS NULL OR page_name = '' LIMIT 20").all();
+    const totalNull = db.prepare("SELECT COUNT(*) as c FROM leads WHERE page_name IS NULL OR page_name = ''").get().c;
+    res.json({ totalNull, nullLeads });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
 // ── Init DB async in background ────────────────────────────
