@@ -617,7 +617,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Client', 'Phone', 'Plan to study', 'Status', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
+                  {['Lead ID', 'Client', 'Phone', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Status', 'Page Source', 'Follow-up', 'Consultant', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -688,22 +688,11 @@ export default function Leads({ user }) {
                           </div>
                         ) : '—'}
                       </td>
-                      <td className="py-3 px-3.5">
-                        <div className="flex flex-col gap-0.5 text-xs text-slate-600">
-                          {l.destination && <span className="font-bold text-slate-700">{l.destination}</span>}
-                          {(l.degree || l.major || l.program) && (
-                            <span className="text-slate-500">
-                              {[l.degree, (l.major || l.program)].filter(Boolean).join(' · ')}
-                            </span>
-                          )}
-                          {(l.university || l.intake_term) && (
-                            <span className="text-slate-400 font-medium">
-                              {[l.university, l.intake_term].filter(Boolean).join(' · ')}
-                            </span>
-                          )}
-                          {!l.destination && !l.degree && !l.major && !l.program && !l.university && !l.intake_term && <span className="text-slate-300 italic">—</span>}
-                        </div>
-                      </td>
+                      <td className="py-3 px-3.5 text-slate-600 text-xs font-semibold">{l.destination || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.degree || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.major || l.program}>{l.major || l.program || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.university}>{l.university || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium whitespace-nowrap">{l.intake_term || '—'}</td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
                       <td className="py-3 px-3.5">
@@ -818,7 +807,7 @@ export default function Leads({ user }) {
                 })}
                 {data.leads.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="py-12">
+                    <td colSpan={15} className="py-12">
                       <div className="text-center">
                         <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2">
                           <Search size={20} />
