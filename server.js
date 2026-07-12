@@ -2592,6 +2592,7 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN ad_name TEXT`,
     `ALTER TABLE leads ADD COLUMN page_name TEXT`,
     `ALTER TABLE leads ADD COLUMN channel_id INTEGER`,
+    `ALTER TABLE leads ADD COLUMN lead_market TEXT DEFAULT 'Bangladesh'`,
     `ALTER TABLE contacts ADD COLUMN referral_data TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
