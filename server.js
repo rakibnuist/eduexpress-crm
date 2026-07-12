@@ -4385,7 +4385,7 @@ app.get('/api/leads/source-stats', (req, res) => {
 });
 
 app.get('/api/leads', (req, res) => {
-  const { search, status, consultant, destination, source, lead_market, lead_type, page = 1, limit = 50 } = req.query;
+  const { search, status, consultant, destination, source, lead_market, lead_type, intake, page_name, follow_up, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
   if (lead_market) { where.push("lead_market=@lead_market"); params.lead_market = lead_market; }
   if (lead_type) { where.push("lead_type=@lead_type"); params.lead_type = lead_type; }
@@ -4393,6 +4393,25 @@ app.get('/api/leads', (req, res) => {
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
+  if (intake)      { where.push("intake_term=@intake");           params.intake = intake; }
+  if (page_name)   { where.push("page_name=@page_name");          params.page_name = page_name; }
+  
+  if (follow_up) {
+    const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
+    const todayStr = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
+    
+    if (follow_up === 'Today') {
+      where.push("next_followup LIKE @today");
+      params.today = `${todayStr}%`;
+    } else if (follow_up === 'Overdue') {
+      where.push("next_followup < @today AND next_followup IS NOT NULL AND next_followup != ''");
+      params.today = todayStr;
+    } else if (follow_up === 'Upcoming') {
+      where.push("next_followup > @today AND next_followup IS NOT NULL AND next_followup != ''");
+      params.today = todayStr;
+    }
+  }
+
   if (source) {
     if (source === 'meta') {
       where.push("meta_lead_id IS NOT NULL");
@@ -4423,7 +4442,21 @@ app.get('/api/leads', (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const total  = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
   const leads  = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id ${ws} ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}`).all(params);
-  res.json({ leads, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+  
+  // Compute global stats based on the current filters
+  const consultations = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} lead_status='Office Visited'`).get(params).c;
+  const activeFiles = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} (lead_status='File Opened' OR lead_status='Enrolled')`).get(params).c;
+  const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
+  const todayStrForStats = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
+  const dueToday = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} next_followup LIKE @todayForStats`).get({...params, todayForStats: `${todayStrForStats}%`}).c;
+  
+  res.json({ 
+    leads, 
+    total, 
+    page: parseInt(page), 
+    pages: Math.ceil(total / parseInt(limit)),
+    stats: { totalInquiries: total, consultations, activeFiles, dueToday }
+  });
 });
 app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id WHERE l.id=? OR l.lead_id=?`).get(req.params.id, req.params.id);
@@ -8000,6 +8033,14 @@ app.get('/api/settings', (req, res) => {
         if(rows.length > 0) return rows.map(r => r.name);
       } catch(e){}
       return ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand'];
+    })(),
+    intakes: (function(){
+      try { return db.prepare("SELECT DISTINCT intake_term FROM leads WHERE intake_term IS NOT NULL AND intake_term != '' ORDER BY intake_term").all().map(r => r.intake_term); } catch(e){}
+      return [];
+    })(),
+    pages: (function(){
+      try { return db.prepare("SELECT DISTINCT page_name FROM leads WHERE page_name IS NOT NULL AND page_name != '' AND page_name != 'Unknown Page' ORDER BY page_name").all().map(r => r.page_name); } catch(e){}
+      return [];
     })(),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [

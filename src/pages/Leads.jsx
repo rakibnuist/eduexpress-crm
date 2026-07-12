@@ -127,20 +127,21 @@ export default function Leads({ user }) {
       if (filters.status) p.status = filters.status;
       if (filters.consultant) p.consultant = filters.consultant;
       if (filters.destination) p.destination = filters.destination;
-      if (filters.source) p.source = filters.source;
-      if (filters.lead_market) p.lead_market = filters.lead_market;
-      if (filters.lead_type) p.lead_type = filters.lead_type;
-      if (filters.lead_market) p.lead_market = filters.lead_market;
-      if (filters.lead_type) p.lead_type = filters.lead_type;
+      if (filters.intake) p.intake = filters.intake;
+      if (filters.page_name) p.page_name = filters.page_name;
+      if (filters.follow_up) p.follow_up = filters.follow_up;
       p.page = filters.page;
       api.leads(p).then(setData).catch(() => {});
     } else {
       // In Kanban view, fetch a larger subset of leads to populate all columns instantly
       const p = { limit: 500 };
       if (filters.search) p.search = filters.search;
+      if (filters.status) p.status = filters.status;
       if (filters.consultant) p.consultant = filters.consultant;
       if (filters.destination) p.destination = filters.destination;
-      if (filters.source) p.source = filters.source;
+      if (filters.intake) p.intake = filters.intake;
+      if (filters.page_name) p.page_name = filters.page_name;
+      if (filters.follow_up) p.follow_up = filters.follow_up;
       api.leads(p).then(d => {
         const grouped = {};
         STAGES.forEach(({ status }) => { grouped[status] = []; });
@@ -169,7 +170,7 @@ export default function Leads({ user }) {
     setFilters(f => ({ ...f, [key]: val, page: 1 }));
   }
 
-  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.source, filters.lead_market, filters.lead_type].filter(Boolean).length;
+  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.intake, filters.page_name, filters.follow_up].filter(Boolean).length;
 
   async function handleBulkStatus() {
     if (!bulkStatusValue) { toast.error('Please select a status'); return; }
@@ -273,13 +274,14 @@ export default function Leads({ user }) {
   }
 
   const stats = useMemo(() => {
+    if (data.stats) return data.stats;
     const list = view === 'kanban' ? Object.values(byStatus).flat() : data.leads || [];
     const totalInquiries = list.length;
     const consultations = list.filter(l => l.lead_status === 'Office Visited').length;
     const activeFiles = list.filter(l => l.lead_status === 'File Opened' || l.lead_status === 'Enrolled').length;
     const dueToday = list.filter(l => l.next_followup === today).length;
     return { totalInquiries, consultations, activeFiles, dueToday };
-  }, [data.leads, byStatus, today, view]);
+  }, [data.leads, byStatus, today, view, data.stats]);
 
   // ── Drag and Drop columns handlers ─────────────────────────────
   const onDragStart = (lead, fromStatus) => setDragging({ lead, fromStatus });
@@ -556,17 +558,17 @@ export default function Leads({ user }) {
               {view === 'table' && (
                 <FilterSelect value={filters.status} onChange={v => setFilter('status', v)} options={settings.leadStatuses} placeholder="All Statuses" />
               )}
+              <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
+              <FilterSelect value={filters.intake} onChange={v => setFilter('intake', v)} options={settings.intakes || []} placeholder="All Intakes" />
+              <FilterSelect value={filters.page_name} onChange={v => setFilter('page_name', v)} options={settings.pages || []} placeholder="All Pages" />
+              <FilterSelect value={filters.follow_up} onChange={v => setFilter('follow_up', v)} options={['Today', 'Upcoming', 'Overdue']} placeholder="All Follow-ups" />
               {!canViewOwnLeadsOnly(user) && (
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
-              <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
-              <FilterSelect value={filters.lead_market} onChange={v => setFilter('lead_market', v)} options={['Bangladesh', 'China']} placeholder="All Markets" />
-              <FilterSelect value={filters.lead_type} onChange={v => setFilter('lead_type', v)} options={['B2C', 'B2B']} placeholder="All Types" />
-              <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources} placeholder="All Channels" />
             </div>
           )}
           {(activeFilters > 0 || filters.search) && (
-            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', source: '', lead_market: '', lead_type: '', page: 1 })}
+            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', follow_up: '', page: 1 })}
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all select-none cursor-pointer">
               <X size={14} /> Clear all
             </button>
@@ -574,22 +576,20 @@ export default function Leads({ user }) {
         </div>
 
         {/* Active-filter chips */}
-        {(filters.status || filters.consultant || filters.destination || filters.source || filters.lead_market || filters.lead_type || filters.search) && (
+        {(filters.status || filters.consultant || filters.destination || filters.intake || filters.page_name || filters.follow_up || filters.search) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
             {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
-            {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}
             {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
-            {filters.lead_market && <Chip onClear={() => setFilter('lead_market', '')}>Market: <strong>{filters.lead_market}</strong></Chip>}
-            {filters.lead_type && <Chip onClear={() => setFilter('lead_type', '')}>Type: <strong>{filters.lead_type}</strong></Chip>}
-            {filters.source && <Chip onClear={() => setFilter('source', '')}>Channel: <strong>{filters.source}</strong></Chip>}
+            {filters.intake && <Chip onClear={() => setFilter('intake', '')}>Intake: <strong>{filters.intake}</strong></Chip>}
+            {filters.page_name && <Chip onClear={() => setFilter('page_name', '')}>Page: <strong>{filters.page_name}</strong></Chip>}
+            {filters.follow_up && <Chip onClear={() => setFilter('follow_up', '')}>Follow-up: <strong>{filters.follow_up}</strong></Chip>}
+            {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}
             <span className="text-xs text-slate-400 self-center ml-1">{data.total.toLocaleString()} match{data.total === 1 ? '' : 'es'}</span>
           </div>
         )}
       </div>
 
-
-        /* TABLE VIEW VIEW */
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -617,7 +617,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Client', 'Phone', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Status', 'Page Source', 'Follow-up', 'Consultant', ''].map(h => (
+                  {['Lead ID', 'Client', 'Phone', 'Status', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Page', 'Source', 'Follow-up', 'Consultant', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -688,11 +688,6 @@ export default function Leads({ user }) {
                           </div>
                         ) : '—'}
                       </td>
-                      <td className="py-3 px-3.5 text-slate-600 text-xs font-semibold">{l.destination || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.degree || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.major || l.program}>{l.major || l.program || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.university}>{l.university || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium whitespace-nowrap">{l.intake_term || '—'}</td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
                       <td className="py-3 px-3.5">
@@ -710,6 +705,12 @@ export default function Leads({ user }) {
                           }}
                         />
                       </td>
+
+                      <td className="py-3 px-3.5 text-slate-600 text-xs font-semibold">{l.destination || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.degree || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.major || l.program}>{l.major || l.program || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[120px] truncate" title={l.university}>{l.university || '—'}</td>
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium whitespace-nowrap">{l.intake_term || '—'}</td>
 
                       <td className="py-3 px-3.5">
                         <div className="flex flex-col gap-1.5">
@@ -729,9 +730,13 @@ export default function Leads({ user }) {
                           ) : (
                             <span className="text-slate-300 italic text-xs">—</span>
                           )}
-                          
+                        </div>
+                      </td>
+                      
+                      <td className="py-3 px-3.5">
+                        <div className="flex flex-col gap-1.5">
                           {/* Source Info (Market/Type/Channel) */}
-                          <div className="text-[10px] text-slate-500 mt-0.5">
+                          <div className="text-[10px] text-slate-500">
                             {l.lead_source === 'WhatsApp' ? (
                               <div className="flex items-center gap-1">
                                 <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer"
