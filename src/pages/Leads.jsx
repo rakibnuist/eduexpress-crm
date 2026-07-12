@@ -617,7 +617,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Market/Type/Channel', 'Page', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
+                  {['Lead ID', 'Client', 'Phone', 'Plan to study', 'Status', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -688,61 +688,21 @@ export default function Leads({ user }) {
                           </div>
                         ) : '—'}
                       </td>
-                      <td className="py-3 px-3.5 text-slate-600 font-semibold">{l.destination || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium">{l.last_education || '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 font-medium">{l.gpa ?? '—'}</td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs max-w-[140px] font-medium">
-                        {l.lead_source === 'WhatsApp' ? (
-                          <div className="flex items-center gap-1">
-                            <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                              <span>WhatsApp</span>
-                            </a>
-                            <Link to={`/conversations?search=${encodeURIComponent(formatPhoneDisplay(l.phone, l.nationality).replace(/\D/g, ''))}`}
-                              className="inline-flex items-center justify-center p-1 rounded-md text-blue-600 hover:bg-blue-50 transition-colors bg-white border border-blue-100" title="Open in CRM Inbox">
-                              <MessageSquare size={13} />
-                            </Link>
-                          </div>
-                        ) : (l.lead_source === 'Facebook Ad' || l.lead_source === 'Messenger') ? (
-                          <div className="flex flex-col gap-0.5">
-                            <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors w-fit"
-                              title={l.page_name ? `Page: ${l.page_name}${l.ad_name ? ' | Ad: ' + l.ad_name : ''}` : 'Facebook Ad'}>
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
-                              <span>FB Ad</span>
-                            </a>
-                          </div>
-                        ) : l.lead_source === 'Instagram Ad' ? (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pink-50 text-pink-700 font-bold border border-pink-100 w-fit">
-                              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 flex-shrink-0"></span>
-                              <span>IG Ad</span>
+                      <td className="py-3 px-3.5">
+                        <div className="flex flex-col gap-0.5 text-xs text-slate-600">
+                          {l.destination && <span className="font-bold text-slate-700">{l.destination}</span>}
+                          {(l.degree || l.major || l.program) && (
+                            <span className="text-slate-500">
+                              {[l.degree, (l.major || l.program)].filter(Boolean).join(' · ')}
                             </span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col">
-                            <span>{l.lead_market || ''} {l.lead_type ? `/ ${l.lead_type}` : ''}</span>
-                            <span className="text-slate-400">{l.lead_source || '—'}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[150px]">
-                        {l.page_name ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold truncate max-w-full w-fit">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
-                              <span className="truncate">{l.page_name}</span>
+                          )}
+                          {(l.university || l.intake_term) && (
+                            <span className="text-slate-400 font-medium">
+                              {[l.university, l.intake_term].filter(Boolean).join(' · ')}
                             </span>
-                            {l.ad_name && (
-                              <span className="inline-flex items-center text-[10px] text-slate-500 bg-slate-50 border border-slate-200/60 px-1.5 py-0.5 rounded w-fit truncate max-w-full" title={l.ad_name}>
-                                {l.ad_name}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-300 italic">—</span>
-                        )}
+                          )}
+                          {!l.destination && !l.degree && !l.major && !l.program && !l.university && !l.intake_term && <span className="text-slate-300 italic">—</span>}
+                        </div>
                       </td>
                       
                       {/* Premium Interactive Color-Coded Status Dropdown */}
@@ -762,19 +722,56 @@ export default function Leads({ user }) {
                         />
                       </td>
 
-                      <td className="py-3 px-3.5 text-slate-500 text-xs font-semibold">
-                        {l.employee_name ? (
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-blue-400" />
-                            {l.employee_name}
-                          </span>
-                        ) : l.assigned_consultant || '—'}
+                      <td className="py-3 px-3.5">
+                        <div className="flex flex-col gap-1.5">
+                          {/* Page badge */}
+                          {l.page_name ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold text-xs truncate max-w-[180px] w-fit">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
+                                <span className="truncate">{l.page_name}</span>
+                              </span>
+                              {l.ad_name && (
+                                <span className="inline-flex items-center text-[10px] text-slate-500 bg-slate-50 border border-slate-200/60 px-1.5 py-0.5 rounded w-fit truncate max-w-[180px]" title={l.ad_name}>
+                                  {l.ad_name}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300 italic text-xs">—</span>
+                          )}
+                          
+                          {/* Source Info (Market/Type/Channel) */}
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {l.lead_source === 'WhatsApp' ? (
+                              <div className="flex items-center gap-1">
+                                <a href={getWAUrl(l.phone, l.nationality)} target="_blank" rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
+                                  <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                                  <span>WhatsApp</span>
+                                </a>
+                              </div>
+                            ) : (l.lead_source === 'Facebook Ad' || l.lead_source === 'Messenger') ? (
+                              <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors w-fit">
+                                <span className="w-1 h-1 rounded-full bg-blue-500 flex-shrink-0"></span>
+                                <span>FB Ad</span>
+                              </a>
+                            ) : l.lead_source === 'Instagram Ad' ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-700 font-bold border border-pink-100 w-fit">
+                                <span className="w-1 h-1 rounded-full bg-pink-500 flex-shrink-0"></span>
+                                <span>IG Ad</span>
+                              </span>
+                            ) : (
+                              <div className="flex flex-col font-medium">
+                                <span>{l.lead_market || ''} {l.lead_type ? `/ ${l.lead_type}` : ''}</span>
+                                <span>{l.lead_source || ''}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </td>
-                      <td className="py-3 px-3.5 text-right text-slate-600 text-xs font-semibold tabular-nums">{l.service_fee ? '৳' + l.service_fee.toLocaleString() : '—'}</td>
-                      <td className="py-3 px-3.5 text-right text-emerald-600 text-xs font-bold tabular-nums bg-emerald-50/30">{l.paid ? '৳' + l.paid.toLocaleString() : '—'}</td>
-                      <td className="py-3 px-3.5 text-right text-xs font-bold tabular-nums">
-                        {l.balance > 0 ? <span className="text-rose-600 bg-rose-50 px-2 py-1 rounded-lg border border-rose-100">৳{l.balance.toLocaleString()}</span> : '—'}
-                      </td>
+
                       <td className="py-3 px-3.5 text-xs font-bold whitespace-nowrap">
                         {isDueToday ? (
                           <span className="px-2 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg flex items-center gap-1 w-fit">
@@ -789,6 +786,15 @@ export default function Leads({ user }) {
                         ) : (
                           <span className="text-slate-300 font-medium">—</span>
                         )}
+                      </td>
+
+                      <td className="py-3 px-3.5 text-slate-500 text-xs font-semibold">
+                        {l.employee_name ? (
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-400" />
+                            {l.employee_name}
+                          </span>
+                        ) : l.assigned_consultant || '—'}
                       </td>
                       <td className="py-3 px-3.5">
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -812,7 +818,7 @@ export default function Leads({ user }) {
                 })}
                 {data.leads.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="py-12">
+                    <td colSpan={11} className="py-12">
                       <div className="text-center">
                         <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2">
                           <Search size={20} />
