@@ -1634,6 +1634,33 @@ export default function Conversations({ user }) {
                 <p className="font-bold text-[15px] text-[#1c1e21]">Select a conversation</p>
                 <p className="text-[13px] text-[#8a8d91] mt-1">Choose from the list to start messaging</p>
               </div>
+              {channelTab !== 'all' && channelTab !== 'unread' && (
+                <button
+                  onClick={async () => {
+                    const cnf = window.confirm("Are you sure you want to bulk scan all conversations in this channel? This will extract leads and phone numbers for all chats.");
+                    if (!cnf) return;
+                    try {
+                      setIsScanning(true);
+                      const res = await fetch(`/api/channels/${channelTab}/bulk-scan`, { 
+                        method: 'POST', 
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } 
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Failed to bulk scan');
+                      alert(data.message || 'Bulk scan complete.');
+                    } catch (e) {
+                      alert(e.message);
+                    } finally {
+                      setIsScanning(false);
+                    }
+                  }}
+                  disabled={isScanning}
+                  className="mt-4 px-4 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-md text-sm font-medium shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                  <span>{isScanning ? 'Scanning...' : 'Bulk Scan Channel for Leads'}</span>
+                </button>
+              )}
             </div>
           )}
         </div>
