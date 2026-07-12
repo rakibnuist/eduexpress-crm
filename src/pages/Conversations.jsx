@@ -806,7 +806,7 @@ export default function Conversations({ user }) {
     setIsScanning(true);
     try {
       const allText = messages.map(m => m.content).join(' ');
-      const phoneRegex = /(?:(?:\+|00)?88)?01[3-9]\d{8}/g;
+      const phoneRegex = /(?:(?:\+|00)?88[\s\-]?)?01[3-9](?:[\s\-]*\d){8}/g;
       const phones = allText.match(phoneRegex);
       
       if (!phones || phones.length === 0) {
@@ -815,7 +815,7 @@ export default function Conversations({ user }) {
         return;
       }
       
-      const extractedPhone = phones[0];
+      const extractedPhone = phones[0].replace(/[\s\-]/g, '');
       
       const adMatch = allText.match(/ad_id=(\d+)/i) || allText.match(/campaign_id=(\d+)/i);
       const adDetails = adMatch ? `Found Ad/Campaign ID: ${adMatch[1]}` : 'No obvious ad details found';
