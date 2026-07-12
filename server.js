@@ -855,7 +855,7 @@ function leadIsVisibleTo(lead, user) {
   return false;
 }
 function leadIsChina(lead) {
-  return lead?.destination === 'China' || lead?.source === 'China';
+  return lead?.destination === 'China' || lead?.lead_market === 'China';
 }
 function isChinaBlockedForUser(lead, user) {
   if (!leadIsChina(lead)) return false;
@@ -927,18 +927,18 @@ app.get('/api/applications', (req, res) => {
   
   if (sourceMarket === 'china') {
     // China market = leads whose source is 'China' (students collected FROM China)
-    where.push("l.source = 'China'");
+    where.push("l.lead_market = 'China'");
   } else if (sourceMarket === 'bangladesh') {
     // Bangladesh market = all leads whose source is NOT 'China'
-    where.push("(l.source != 'China' OR l.source IS NULL OR l.source = '')");
+    where.push("(l.lead_market = 'Bangladesh' OR l.lead_market IS NULL OR l.lead_market = '')");
   }
   
   // Bangladesh channel filter (only meaningful when source_market is bangladesh or all)
   const bdChannel = req.query.bd_channel || 'all';
   if (bdChannel === 'office') {
-    where.push("(l.source = 'In-House' OR l.source IS NULL OR l.source = '')");
+    where.push("(l.lead_type = 'B2C' OR l.lead_type IS NULL OR l.lead_type = '')");
   } else if (bdChannel === 'b2b') {
-    where.push("(l.source = 'B2B' OR l.source = 'Agent')");
+    where.push("(l.lead_type = 'B2B')");
   }
   
   // ── Destination filter (where the student GOES TO: Malaysia, Thailand, China, etc.) ──
@@ -964,7 +964,7 @@ app.get('/api/applications', (req, res) => {
   
   // China data isolation: exclude China leads for unauthorized users when viewing all or other markets
   if (!canViewChinaData(req.user) && sourceMarket !== 'china') {
-    where.push("(l.source != 'China')");
+    where.push("(l.lead_market != 'China')");
   }
   
   // Source filtering (explicit source value)
@@ -982,7 +982,7 @@ app.get('/api/applications', (req, res) => {
     SELECT l.id, l.lead_id, l.client_name, l.phone, l.email, l.destination, l.university,
            l.lead_status, l.application_stage, l.visa_deadline, l.departure_date,
            l.intake_term, l.assigned_consultant, l.assigned_employee_id, l.service_fee, l.paid, l.balance,
-           l.source, l.referrer, l.nationality, l.passport, l.degree, l.major,
+           l.source, l.lead_market, l.lead_type, l.lead_source, l.referrer, l.nationality, l.passport, l.degree, l.major,
            l.drive_link, l.deposit,
            e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role,
            (SELECT COUNT(*) FROM lead_documents d WHERE d.lead_id=l.id) AS docs_total,
@@ -1042,6 +1042,9 @@ app.put('/api/leads/:id/stage', (req, res) => {
     intake_term       = COALESCE(?, intake_term),
     application_notes = COALESCE(?, application_notes),
     source            = COALESCE(?, source),
+    lead_market       = COALESCE(?, lead_market),
+    lead_type         = COALESCE(?, lead_type),
+    lead_source       = COALESCE(?, lead_source),
     referrer          = COALESCE(?, referrer),
     nationality       = COALESCE(?, nationality),
     passport          = COALESCE(?, passport),
@@ -1071,7 +1074,7 @@ app.put('/api/leads/:id/stage', (req, res) => {
     WHERE id=?`).run(
       stage ?? null, visa_deadline ?? null, departure_date ?? null,
       university ?? null, intake_term ?? null, application_notes ?? null,
-      source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
+      source ?? null, req.body.lead_market ?? null, req.body.lead_type ?? null, req.body.lead_source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
       degree ?? null, major ?? null, drive_link ?? null,
       (deposit === '' || deposit == null) ? null : Number(deposit),
       blood_group ?? null, date_of_birth ?? null, medical_notes ?? null, emergency_contact ?? null,
@@ -1466,6 +1469,7 @@ process.on('SIGINT',  () => { if (db) db.flush(); process.exit(0); });
 // ─────────────────────────────────────────────────────────
 function setupSchema() { db.exec(`
   CREATE TABLE IF NOT EXISTS leads (
+    lead_market TEXT DEFAULT 'Bangladesh',
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id TEXT UNIQUE,
     date_added TEXT,
@@ -4227,8 +4231,10 @@ app.get('/api/leads/source-stats', (req, res) => {
 });
 
 app.get('/api/leads', (req, res) => {
-  const { search, status, consultant, destination, source, page = 1, limit = 50 } = req.query;
+  const { search, status, consultant, destination, source, lead_market, lead_type, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
+  if (lead_market) { where.push("lead_market=@lead_market"); params.lead_market = lead_market; }
+  if (lead_type) { where.push("lead_type=@lead_type"); params.lead_type = lead_type; }
   if (search && search !== 'undefined' && search !== 'null') { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
   if (status)      { where.push("lead_status=@status");           params.status = status; }
   if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
@@ -4257,7 +4263,7 @@ app.get('/api/leads', (req, res) => {
   }
   // China data isolation: exclude China leads for unauthorized users unless they own/are assigned to them
   if (!canViewChinaData(req.user) && !canViewOwnLeadsOnly(req.user)) {
-    where.push("(destination != 'China' AND source != 'China')");
+    where.push("(destination != 'China' AND lead_market != 'China')");
   }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -4341,7 +4347,8 @@ function leadParams(d, lead_id, balance) {
     age: num(d.age),
     // Active application stage
     application_stage: txt(d.application_stage),
-    // Agent Portal
+    // Market & Agent Portal
+    lead_market: txt(d.lead_market) || 'Bangladesh',
     agency_id: d.agency_id ? Number(d.agency_id) : null,
     lead_type: txt(d.lead_type) || 'B2C',
     // Ad Attribution
@@ -4359,7 +4366,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   source, referrer, nationality, passport, degree, major, intake_term, university,
   drive_link, deposit, blood_group, date_of_birth, medical_notes, emergency_contact,
   application_stage, passing_year, last_education_major, height, weight, english_test_type,
-  payment_agreement, hardcopy_status, hardcopy_documents, age, agency_id, lead_type,
+  payment_agreement, hardcopy_status, hardcopy_documents, age, agency_id, lead_type, lead_market,
   ad_name, page_name, channel_id
 ) VALUES (
   @lead_id, @date_added, @client_name, @phone, @email, @destination, @last_education, @gpa,
@@ -4369,7 +4376,7 @@ const LEAD_INSERT_SQL = `INSERT INTO leads (
   @source, @referrer, @nationality, @passport, @degree, @major, @intake_term, @university,
   @drive_link, @deposit, @blood_group, @date_of_birth, @medical_notes, @emergency_contact,
   @application_stage, @passing_year, @last_education_major, @height, @weight, @english_test_type,
-  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age, @agency_id, @lead_type,
+  @payment_agreement, @hardcopy_status, @hardcopy_documents, @age, @agency_id, @lead_type, @lead_market,
   @ad_name, @page_name, @channel_id
 )`;
 const LEAD_UPDATE_SQL = `UPDATE leads SET
@@ -4387,12 +4394,17 @@ const LEAD_UPDATE_SQL = `UPDATE leads SET
   last_education_major=@last_education_major, height=@height, weight=@weight,
   english_test_type=@english_test_type, payment_agreement=@payment_agreement,
   hardcopy_status=@hardcopy_status, hardcopy_documents=@hardcopy_documents,
-  age=@age, agency_id=@agency_id, lead_type=@lead_type
+  age=@age, agency_id=@agency_id, lead_type=@lead_type, lead_market=@lead_market
 WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
-  const isChinaApp = d.isChinaApp || d.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-'));
+  // Backward compat for old source field
+  if (d.source === 'China') d.lead_market = 'China';
+  if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
+  if (d.source === 'In-House') d.lead_type = 'B2C';
+  if (!d.lead_market) d.lead_market = 'Bangladesh';
+  const isChinaApp = d.isChinaApp || d.lead_market === 'China' || d.source === 'China' || (d.lead_id && String(d.lead_id).startsWith('C-'));
   // RBAC: Only full admins and Application Managers can create China applications
   if (isChinaApp && !isFullAdmin(req.user) && !userHasRole(req.user, 'application_manager')) {
     return res.status(403).json({ error: 'Only Application Managers and Administrators can create China applications.' });
@@ -4424,6 +4436,11 @@ app.post('/api/leads', async (req, res) => {
 
 app.put('/api/leads/:id', async (req, res) => {
   const d = req.body;
+  // Backward compat for old source field
+  if (d.source === 'China') d.lead_market = 'China';
+  if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
+  if (d.source === 'In-House') d.lead_type = 'B2C';
+  if (!d.lead_market) d.lead_market = 'Bangladesh';
   const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!oldLead) return res.status(404).json({ error: 'Not found' });
   // China data isolation: block unauthorized access to China leads

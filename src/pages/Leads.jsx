@@ -74,6 +74,8 @@ export default function Leads({ user }) {
     consultant: '',
     destination: '',
     source: '',
+    lead_market: '',
+    lead_type: '',
     page: 1,
   });
 
@@ -126,6 +128,10 @@ export default function Leads({ user }) {
       if (filters.consultant) p.consultant = filters.consultant;
       if (filters.destination) p.destination = filters.destination;
       if (filters.source) p.source = filters.source;
+      if (filters.lead_market) p.lead_market = filters.lead_market;
+      if (filters.lead_type) p.lead_type = filters.lead_type;
+      if (filters.lead_market) p.lead_market = filters.lead_market;
+      if (filters.lead_type) p.lead_type = filters.lead_type;
       p.page = filters.page;
       api.leads(p).then(setData).catch(() => {});
     } else {
@@ -163,7 +169,7 @@ export default function Leads({ user }) {
     setFilters(f => ({ ...f, [key]: val, page: 1 }));
   }
 
-  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.source].filter(Boolean).length;
+  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.source, filters.lead_market, filters.lead_type].filter(Boolean).length;
 
   async function handleBulkStatus() {
     if (!bulkStatusValue) { toast.error('Please select a status'); return; }
@@ -240,7 +246,7 @@ export default function Leads({ user }) {
   function exportCSV() {
     const list = view === 'kanban' ? Object.values(byStatus).flat() : data.leads;
     if (!list.length) { toast.info('No leads to export'); return; }
-    const headers = ['Lead ID', 'Name', 'Phone', 'Email', 'Destination', 'Education', 'GPA', 'English', 'Program', 'Source', 'Status', 'Consultant', 'Fee', 'Paid', 'Balance', 'Payment', 'Follow-up', 'Notes'];
+    const headers = ['Lead ID', 'Name', 'Phone', 'Email', 'Destination', 'Education', 'GPA', 'English', 'Program', 'Source (Market / Type / Channel)', 'Status', 'Consultant', 'Fee', 'Paid', 'Balance', 'Payment', 'Follow-up', 'Notes'];
     const escape = (v) => {
       const s = v == null ? '' : String(v);
       if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
@@ -250,7 +256,7 @@ export default function Leads({ user }) {
     };
     const rows = list.map(l => [
       l.lead_id, l.client_name, l.phone, l.email, l.destination, l.last_education, l.gpa, l.english_score,
-      l.program, l.lead_source, l.lead_status, l.assigned_consultant, l.service_fee, l.paid, l.balance,
+      l.program, `${l.lead_market||''} / ${l.lead_type||''} / ${l.lead_source||''}`, l.lead_status, l.assigned_consultant, l.service_fee, l.paid, l.balance,
       l.payment_status, l.next_followup, l.notes
     ].map(escape));
     const csv = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -554,11 +560,13 @@ export default function Leads({ user }) {
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
-              <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources} placeholder="All Sources" />
+              <FilterSelect value={filters.lead_market} onChange={v => setFilter('lead_market', v)} options={['Bangladesh', 'China']} placeholder="All Markets" />
+              <FilterSelect value={filters.lead_type} onChange={v => setFilter('lead_type', v)} options={['B2C', 'B2B']} placeholder="All Types" />
+              <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources} placeholder="All Channels" />
             </div>
           )}
           {(activeFilters > 0 || filters.search) && (
-            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', source: '', page: 1 })}
+            <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', source: '', lead_market: '', lead_type: '', page: 1 })}
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all select-none cursor-pointer">
               <X size={14} /> Clear all
             </button>
@@ -566,13 +574,15 @@ export default function Leads({ user }) {
         </div>
 
         {/* Active-filter chips */}
-        {(filters.status || filters.consultant || filters.destination || filters.source || filters.search) && (
+        {(filters.status || filters.consultant || filters.destination || filters.source || filters.lead_market || filters.lead_type || filters.search) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
             {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
             {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}
             {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
-            {filters.source && <Chip onClear={() => setFilter('source', '')}>Source: <strong>{filters.source}</strong></Chip>}
+            {filters.lead_market && <Chip onClear={() => setFilter('lead_market', '')}>Market: <strong>{filters.lead_market}</strong></Chip>}
+            {filters.lead_type && <Chip onClear={() => setFilter('lead_type', '')}>Type: <strong>{filters.lead_type}</strong></Chip>}
+            {filters.source && <Chip onClear={() => setFilter('source', '')}>Channel: <strong>{filters.source}</strong></Chip>}
             <span className="text-xs text-slate-400 self-center ml-1">{data.total.toLocaleString()} match{data.total === 1 ? '' : 'es'}</span>
           </div>
         )}
@@ -607,7 +617,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Source', 'Page', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
+                  {['Lead ID', 'Client', 'Phone', 'Dest.', 'Edu.', 'GPA', 'Market/Type/Channel', 'Page', 'Status (Click to change)', 'Consultant', 'Fee', 'Paid', 'Balance', 'Follow-up', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -711,7 +721,10 @@ export default function Leads({ user }) {
                             </span>
                           </div>
                         ) : (
-                          l.lead_source || '—'
+                          <div className="flex flex-col">
+                            <span>{l.lead_market || ''} {l.lead_type ? `/ ${l.lead_type}` : ''}</span>
+                            <span className="text-slate-400">{l.lead_source || '—'}</span>
+                          </div>
                         )}
                       </td>
                       <td className="py-3 px-3.5 text-slate-500 text-xs font-medium max-w-[150px]">
@@ -881,7 +894,7 @@ export default function Leads({ user }) {
                         <div key={lead.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
                           <div>
                             <span className="font-medium text-slate-700">{lead.client_name || 'Unnamed'}</span>
-                            <span className="text-xs text-slate-400 ml-2">ID: {lead.lead_id} | Status: {lead.lead_status} | Source: {lead.lead_source}</span>
+                            <span className="text-xs text-slate-400 ml-2">ID: {lead.lead_id} | Status: {lead.lead_status} | Source: {lead.lead_market} / {lead.lead_type} / {lead.lead_source}</span>
                           </div>
                           {i === 0 ? (
                             <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">Primary Record</span>

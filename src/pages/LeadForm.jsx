@@ -7,7 +7,6 @@ import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { User, GraduationCap, Briefcase, Wallet, FolderOpen, Heart, Save, ChevronDown } from 'lucide-react';
 
-const SOURCES   = ['In-House', 'B2B', 'China', 'Agent'];
 const DEGREES   = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'Language', 'Foundation', 'L+Diploma +', 'L + Bachelor', 'F+Bachelor'];
 const BLOOD     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 
@@ -171,17 +170,18 @@ export default function LeadForm({ user, lead, settings, onSave }) {
       {!isAgentUser && (
       <Section icon={<Briefcase size={14}/>} title="Sales & Source" color="indigo">
         <Row>
-          <SelectField label="Source (Remark)" value={form.source} onChange={v => set('source', v)} options={SOURCES} placeholder="— pick —" />
+          <SelectField label="Market" value={form.lead_market} onChange={v => set('lead_market', v)} options={['Bangladesh', 'China']} placeholder="— pick —" />
+          <SelectField label="Type" value={form.lead_type} onChange={v => set('lead_type', v)} options={['B2C', 'B2B']} placeholder="— pick —" />
+          <SelectField label="Acquisition Channel" value={form.lead_source} onChange={v => set('lead_source', v)}
+            options={settings?.leadSources || []} placeholder="— pick —" />
+        </Row>
+        <Row>
           <Field label="Referrer (Referance)" value={form.referrer} onChange={v => set('referrer', v)}
             placeholder="e.g. BheUni, AZ Int, Mahmud, Office (M)" list="referrer-list" />
           <datalist id="referrer-list">
             {referrerList.map(r => <option key={r} value={r} />)}
             {(settings?.consultants || []).map(c => <option key={'c-' + c} value={c} />)}
           </datalist>
-        </Row>
-        <Row>
-          <SelectField label="Lead source" value={form.lead_source} onChange={v => set('lead_source', v)}
-            options={settings?.leadSources || []} placeholder="— pick —" />
           <SelectField label="Lead status" value={form.lead_status} onChange={v => set('lead_status', v)}
             options={settings?.leadStatuses || []} placeholder="— pick —" />
         </Row>

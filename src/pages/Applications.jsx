@@ -270,7 +270,7 @@ export default function Applications({ user }) {
       setShowAddModal(false);
       setNewApp({
         client_name: '', phone: '', destination: settings?.destinations?.[0] || '', degree: 'Bachelor', major: '',
-        university: '', source: meta.sources?.[0]?.key || '', referrer: '', assigned_employee_id: '',
+        university: '', source: meta.sources?.[0]?.key || '', lead_market: 'Bangladesh', lead_type: 'B2C', referrer: '', assigned_employee_id: '',
       });
       load();
     } catch (err) { toast.error(err.message || 'Could not create'); }
@@ -279,7 +279,7 @@ export default function Applications({ user }) {
   const handleExportExcel = () => {
     const data = filtered.map(r => ({
       'Lead ID': r.lead_id, 'Name': r.client_name, 'Phone': r.phone, 'Destination': r.destination,
-      'Source': r.source, 'Stage': stages.find(s => s.key === r.application_stage)?.label || r.application_stage,
+      'Market': r.lead_market, 'Type': r.lead_type, 'Channel': r.source, 'Stage': stages.find(s => s.key === r.application_stage)?.label || r.application_stage,
       'University': r.university, 'Degree': r.degree, 'Major': r.major, 'Consultant': r.employee_name || r.assigned_consultant,
       'Deposit': r.deposit, 'Balance': r.balance, 'Passport': r.passport, 'Nationality': r.nationality,
     }));
@@ -588,13 +588,28 @@ export default function Applications({ user }) {
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Source & Assignment</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Source Market</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Market & Type</label>
+                  <div className="flex gap-2">
+                    <select value={newApp.lead_market} onChange={e => setNewApp({ ...newApp, lead_market: e.target.value })}
+                      className="w-1/2 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                      <option value="Bangladesh">Bangladesh</option>
+                      <option value="China">China</option>
+                    </select>
+                    <select value={newApp.lead_type} onChange={e => setNewApp({ ...newApp, lead_type: e.target.value })}
+                      className="w-1/2 px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
+                      <option value="B2C">B2C</option>
+                      <option value="B2B">B2B</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Acquisition Channel</label>
                   <select value={newApp.source} onChange={e => setNewApp({ ...newApp, source: e.target.value })}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
                     {meta.sources?.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                   </select>
                 </div>
-                <div>
+                <div className="col-span-2">
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer</label>
                   <input type="text" value={newApp.referrer} onChange={e => setNewApp({ ...newApp, referrer: e.target.value })} placeholder="e.g. BheUni, Mahmud"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
@@ -655,7 +670,7 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
                 onChange={(e) => { if (e.target.checked) { setSelectedIds(prev => Array.from(new Set([...prev, ...rows.map(r => r.id)]))); } else { setSelectedIds(prev => prev.filter(id => !rows.map(r => r.id).includes(id))); } }}
                 onClick={e => e.stopPropagation()} className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" /></Th>
               <Th onClick={() => toggleSort('client_name')}>Name <SortIcon col="client_name" /></Th>
-              <Th>Source</Th>
+              <Th>Market / Type / Channel</Th>
               <Th onClick={() => toggleSort('destination')}>Destination <SortIcon col="destination" /></Th>
               <Th onClick={() => toggleSort('nationality')}>Nationality <SortIcon col="nationality" /></Th>
               <Th>Passport</Th>
@@ -682,8 +697,8 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
                 </Td>
                 <Td>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
-                    ${r.source === 'China' ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : (r.source === 'B2B' || r.source === 'Agent') ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-                    {r.source || 'In-House'}
+                    ${r.lead_market === 'China' ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : (r.lead_type === 'B2B') ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
+                    {r.lead_market||''} / {r.lead_type||''} <br/> <span className="text-[10px] opacity-70">{r.source || ''}</span>
                   </span>
                 </Td>
                 <Td>{r.destination || '—'}</Td>
