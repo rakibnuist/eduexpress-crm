@@ -174,6 +174,14 @@ export default function LeadForm({ user, lead, settings, onSave }) {
           <SelectField label="Type" value={form.lead_type} onChange={v => set('lead_type', v)} options={['B2C', 'B2B']} placeholder="— pick —" />
           <SelectField label="Acquisition Channel" value={form.lead_source} onChange={v => set('lead_source', v)}
             options={settings?.leadSources || []} placeholder="— pick —" />
+          <div>
+            <Field label="Page Name (Source)" value={form.page_name || ''} onChange={v => set('page_name', v)}
+              placeholder="e.g. WhatsApp, EduExpress" list="page-list" />
+            <datalist id="page-list">
+              {(settings?.pages || []).map(p => <option key={p} value={p} />)}
+              <option value="WhatsApp" />
+            </datalist>
+          </div>
         </Row>
         <Row>
           <Field label="Referrer (Referance)" value={form.referrer} onChange={v => set('referrer', v)}
