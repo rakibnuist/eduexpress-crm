@@ -15,7 +15,7 @@ import {
   GraduationCap, Building2, FileText, DollarSign, Activity, Send, AlertCircle,
   ExternalLink, Globe, CreditCard, CheckCircle2,
   Tag, UserPlus, Receipt, Plane, MessageSquare, Loader2,
-  Heart,
+  Heart, FolderOpen, HeartPulse, Wallet, BookOpen
 } from 'lucide-react';
 
 const fmt = (n) => {
@@ -258,63 +258,79 @@ export default function LeadDetail({ user }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: snapshot panels */}
         <div className="lg:col-span-1 space-y-4">
-          <Card title="Contact" icon={<User size={14}/>}>
-            <Row icon={<Phone size={12}/>}>
-              {lead.phone ? (
+          {/* Contact & Profile */}
+          <Card title="Contact & Profile" icon={<User size={14}/>} grid>
+            <DataField label="Phone Number" value={
+              lead.phone ? (
                 <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-                  className="text-slate-700 hover:text-emerald-600 hover:underline inline-flex items-center gap-1.5 transition-colors font-medium" title="Chat on WhatsApp">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                  className="text-emerald-600 hover:underline inline-flex items-center gap-1 transition-colors" title="Chat on WhatsApp">
                   {lead.phone}
                 </a>
-              ) : '—'}
-            </Row>
-            <Row icon={<Mail size={12}/>}>{lead.email || '—'}</Row>
-            <Row icon={<Globe size={12}/>}>{lead.nationality || '—'}</Row>
-            <Row icon={<Hash size={12}/>} mono>{lead.passport || '—'}</Row>
+              ) : ''
+            } />
+            <DataField label="Email Address" value={lead.email} />
+            <DataField label="Date of Birth" value={lead.date_of_birth} />
+            <DataField label="Nationality" value={lead.nationality} />
+            <DataField label="Passport Number" value={lead.passport} />
             {lead.phone && (
-              <div className="mt-4 pt-3 border-t border-slate-100">
+              <div className="col-span-2 mt-2">
                 <button
                   disabled={startingChat}
                   onClick={handleStartCRMChat}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl transition-all shadow-sm cursor-pointer hover:shadow"
                 >
                   {startingChat ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>Initiating Chat...</span>
-                    </>
+                    <><Loader2 size={13} className="animate-spin" /> Initiating Chat...</>
                   ) : (
-                    <>
-                      <MessageSquare size={13} />
-                      <span>Message in CRM Chat Inbox</span>
-                    </>
+                    <><MessageSquare size={13} /> Message in CRM Chat Inbox</>
                   )}
                 </button>
               </div>
             )}
           </Card>
 
-          <Card title="Plan to study" icon={<GraduationCap size={14}/>}>
-            <Row label="Destination">{lead.destination || '—'}</Row>
-            <Row label="Intake">{lead.intake_term || '—'}</Row>
-            <Row label="Degree">{lead.degree || '—'}</Row>
-            <Row label="Major / Program">{lead.major || lead.program || '—'}</Row>
-            <Row label="Primary university (preference)">{lead.university || '—'}</Row>
+          {/* Academic Background */}
+          <Card title="Academic Background" icon={<GraduationCap size={14}/>} grid>
+            <DataField label="Last Education" value={lead.last_education} />
+            <DataField label="Major/Background" value={lead.last_education_major} />
+            <DataField label="Passing Year" value={lead.passing_year} />
+            <DataField label="GPA / Result" value={lead.gpa} />
+            <DataField label="English Test" value={lead.english_test_type} />
+            <DataField label="English Score" value={lead.english_score} />
           </Card>
 
-          {(lead.last_education || lead.passing_year || lead.gpa || lead.last_education_major || lead.english_test_type || lead.english_score) && (
-            <Card title="Academic Profile" icon={<GraduationCap size={14}/>}>
-              <Row label="Last education">{lead.last_education || '—'}</Row>
-              <Row label="Major/Group">{lead.last_education_major || '—'}</Row>
-              <Row label="GPA/CGPA">{lead.gpa ?? '—'}</Row>
-              <Row label="Passing Year">{lead.passing_year || '—'}</Row>
-              <Row label="English Test">{lead.english_test_type || '—'}</Row>
-              <Row label="English Score">{lead.english_score || '—'}</Row>
+          {/* Target Program */}
+          <Card title="Target Program" icon={<Globe size={14}/>} grid>
+            <DataField label="Destination" value={lead.destination} />
+            <DataField label="Intake Term" value={lead.intake_term} />
+            <DataField label="Target Degree" value={lead.degree} />
+            <DataField label="Target Major" value={lead.major || lead.program} />
+            <DataField label="University Pref" value={lead.university} colSpan={2} />
+          </Card>
+
+          {/* Sales & Attribution */}
+          {!isAgentUser && (
+            <Card title="Sales & Attribution" icon={<Building2 size={14}/>} grid>
+              <DataField label="Lead Source" value={
+                lead.lead_source === 'WhatsApp' ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">WhatsApp</span>
+                ) : lead.lead_source === 'Messenger' ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold border border-blue-100">Messenger</span>
+                ) : lead.lead_source
+              } />
+              <DataField label="Referrer / Agent" value={lead.referrer} />
+              <DataField label="Page Name" value={lead.page_name} />
+              <DataField label="Ad Name" value={lead.ad_name} />
+              <DataField label="Lead Market" value={lead.lead_market} />
+              <DataField label="Lead Type" value={lead.lead_type} />
+              <DataField label="Follow-up" value={lead.next_followup} colSpan={2} />
             </Card>
           )}
 
-          <Card title="Application" icon={<Plane size={14}/>}>
-            <Row label="Stage">
+          {/* Application & Documents */}
+          <Card title="Application & Documents" icon={<FolderOpen size={14}/>} grid>
+            <div className="col-span-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Application Stage</span>
               {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') ? (
                 <InlineStageSelect
                   value={lead.application_stage}
@@ -329,49 +345,27 @@ export default function LeadDetail({ user }) {
                     }
                   }}
                 />
-              ) : (
-                <span className="text-slate-400">Not started</span>
-              )}
-            </Row>
+              ) : <span className="text-xs text-slate-400 italic">Not started</span>}
+            </div>
+            <DataField label="Visa Deadline" value={lead.visa_deadline} />
+            <DataField label="Departure" value={lead.departure_date} />
             {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') && (
               <>
-                <Row label="Payment Agreement">{lead.payment_agreement || 'Standard'}</Row>
-                <Row label="Hardcopy">{lead.hardcopy_status || 'Not Received'}</Row>
+                <DataField label="Payment Agreement" value={lead.payment_agreement} colSpan={2} />
+                <DataField label="Hardcopy Status" value={lead.hardcopy_status} colSpan={2} />
                 {lead.hardcopy_status === 'Received (In Office)' && lead.hardcopy_documents && (
-                  <Row label="Documents List">
-                    <span className="whitespace-pre-wrap">{lead.hardcopy_documents}</span>
-                  </Row>
+                  <DataField label="Hardcopy Docs" value={lead.hardcopy_documents} colSpan={2} />
                 )}
               </>
             )}
-            <Row label="Visa deadline">{lead.visa_deadline || '—'}</Row>
-            <Row label="Departure">{lead.departure_date || '—'}</Row>
-            {!isAgentUser && (
-              <>
-                <Row label="Source">{lead.source || '—'}</Row>
-                <Row label="Referrer">{lead.referrer || '—'}</Row>
-                <Row label="Lead source">
-                  {lead.lead_source === 'WhatsApp' ? (
-                    <a href={lead.phone ? `https://wa.me/${lead.phone.replace(/\D/g, '')}` : '#'} target="_blank" rel="noopener noreferrer" 
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 hover:bg-emerald-100 transition-colors" title="Message on WhatsApp">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                      <span>WhatsApp (Message)</span>
-                    </a>
-                  ) : lead.lead_source === 'Messenger' ? (
-                    <a href="https://business.facebook.com/latest/inbox/all" target="_blank" rel="noopener noreferrer" 
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 hover:bg-blue-100 transition-colors" title="Message on Messenger">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse flex-shrink-0"></span>
-                      <span>Messenger (Message)</span>
-                    </a>
-                  ) : (
-                    lead.lead_source || '—'
-                  )}
-                </Row>
-                {lead.page_name && <Row label="Page Name">{lead.page_name}</Row>}
-                {lead.ad_name && <Row label="Ad Name">{lead.ad_name}</Row>}
-              </>
-            )}
-            <Row label="Follow-up">{lead.next_followup || '—'}</Row>
+          </Card>
+          
+          {/* Medical & Emergency */}
+          <Card title="Medical & Emergency" icon={<HeartPulse size={14}/>} grid>
+            <DataField label="Blood Group" value={lead.blood_group} />
+            <DataField label="Height / Weight" value={lead.height || lead.weight ? `${lead.height || '-'} / ${lead.weight || '-'}` : ''} />
+            <DataField label="Emergency Contact" value={lead.emergency_contact} colSpan={2} />
+            {lead.medical_notes && <DataField label="Medical Notes" value={lead.medical_notes} colSpan={2} />}
           </Card>
 
           {unis.length > 0 && (
@@ -487,14 +481,21 @@ function StatCard({ icon, label, value, sub, color }) {
   );
 }
 
-function Card({ title, icon, children }) {
+const DataField = ({ label, value, colSpan = 1 }) => (
+  <div className={`flex flex-col gap-0.5 ${colSpan > 1 ? `col-span-${colSpan}` : ''}`}>
+    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+    <span className="text-xs text-slate-700 font-medium whitespace-pre-wrap">{value || <span className="text-slate-300 italic">—</span>}</span>
+  </div>
+);
+
+function Card({ title, icon, children, grid }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-[0_1px_3px_0_rgb(0,0,0,0.02)]">
+      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
         <span className="text-slate-400">{icon}</span>
         <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide">{title}</p>
       </div>
-      <div className="p-4 space-y-1.5">{children}</div>
+      <div className={`p-4 ${grid ? 'grid grid-cols-2 gap-y-4 gap-x-2' : 'space-y-1.5'}`}>{children}</div>
     </div>
   );
 }
@@ -504,7 +505,7 @@ function Row({ label, icon, children, mono }) {
     <div className="flex items-start gap-2 text-xs">
       {icon && <span className="text-slate-400 mt-0.5 flex-shrink-0">{icon}</span>}
       {label && <span className="text-slate-400 font-medium min-w-[100px]">{label}</span>}
-      <span className={`text-slate-700 break-all ${mono ? 'font-mono' : ''}`}>{children}</span>
+      <span className={`text-slate-700 break-words flex-1 ${mono ? 'font-mono' : ''}`}>{children}</span>
     </div>
   );
 }
