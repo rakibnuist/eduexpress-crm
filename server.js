@@ -1463,23 +1463,8 @@ app.get('/api/admin/backfill-meta', async (req, res) => {
 
 
 
-  }
-});
 
 
-
-       } else if (throughContact && throughContact.name) {
-         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
-         fixedCount++;
-         details.push({ lead: l.lead_id, name: l.client_name, page: throughContact.name });
-       }
-    }
-    db.flush();
-    res.json({ ok: true, totalFound: leadsToFix.length, fixedCount, details });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
