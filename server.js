@@ -1417,7 +1417,15 @@ app.get('/api/debug/webhooks', (req, res) => {
 
 app.get('/api/admin/debug-leads', async (req, res) => {
   try {
-    const leads = db.prepare("SELECT lead_id, client_name, page_name, meta_form_id FROM leads ORDER BY id ASC LIMIT 50").all();
+    const leads = db.prepare("SELECT id, lead_id, client_name, page_name, lead_source, meta_form_id FROM leads WHERE page_name IS NULL ORDER BY id ASC LIMIT 50").all();
+    
+    // For each lead, try to find the channel name through conversations and contacts
+    for (const l of leads) {
+       const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
+       const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
+       l.debug = { throughConv, throughContact };
+    }
+    
     res.json({ ok: true, leads });
   } catch (e) {
     res.status(500).json({ error: e.message });
