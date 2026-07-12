@@ -57,6 +57,25 @@ if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
 }
 const DB_DIR = dirname(DB_PATH);
 
+// Auto-recover from an OOM-induced corruption backup if the current DB is freshly created (small)
+try {
+  const fs = require('fs');
+  const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
+  if (dbSize < 100000) {
+    const corruptFiles = fs.readdirSync(DB_DIR).filter(f => f.startsWith('crm.db.corrupt-'));
+    if (corruptFiles.length > 0) {
+      const latestCorrupt = corruptFiles.sort().pop();
+      const corruptPath = join(DB_DIR, latestCorrupt);
+      if (fs.statSync(corruptPath).size > 100000) {
+        fs.copyFileSync(corruptPath, DB_PATH);
+        console.log(`[database] Auto-recovered corrupt database from ${latestCorrupt}`);
+      }
+    }
+  }
+} catch (err) {
+  console.error('[database] Auto-recovery failed:', err.message);
+}
+
 // Override console logging to log to a persistent file for diagnostics
 const LOG_PATH = join(DB_DIR, 'server.log');
 function logToFile(msg) {
