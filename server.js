@@ -4526,7 +4526,7 @@ app.get('/api/leads/source-stats', (req, res) => {
       SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
       SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
     FROM leads
-    WHERE ad_name IS NOT NULL
+    WHERE ((ad_name IS NOT NULL AND ad_name != '') OR (meta_ad_id IS NOT NULL AND meta_ad_id != ''))
       AND date_added >= ? ${extraWhere}
     GROUP BY ad_name, meta_ad_id, page_name, meta_campaign, meta_adset_name
   `).all(...params);
@@ -4620,7 +4620,8 @@ app.get('/api/leads/source-stats', (req, res) => {
       date_added as date,
       COUNT(id) as total_leads
     FROM leads
-    WHERE date_added >= ? ${extraWhere}
+    WHERE ((ad_name IS NOT NULL AND ad_name != '') OR (meta_ad_id IS NOT NULL AND meta_ad_id != ''))
+      AND date_added >= ? ${extraWhere}
     GROUP BY date_added
   `).all(...params);
 
