@@ -10,7 +10,7 @@ import {
   Paperclip, Smile, FileText, X, ChevronRight, Info, Hash, Calendar, Inbox,
   Star, Tag, Plus, ClipboardList, UserPlus, Loader2, Music, Clock,
   Filter, ArrowLeft, Bell, LayoutTemplate,
-  ChevronDown, Menu as MenuIcon, Zap, Edit2
+  ChevronDown, Menu as MenuIcon, Zap, Edit2, Wand2
 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import { timeAgo, initials, formatLastMessageTime, toDate, getDhakaDateParts } from '../lib/format';
@@ -104,6 +104,7 @@ export default function Conversations({ user }) {
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [updatingConv, setUpdatingConv] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
 
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') || '');
@@ -800,6 +801,51 @@ export default function Conversations({ user }) {
     } catch (e) { toast.error(e.message); } finally { setConvertingLead(false); }
   };
 
+  const handleScanChat = async () => {
+    if (!selectedConv || messages.length === 0) return;
+    setIsScanning(true);
+    try {
+      const allText = messages.map(m => m.content).join(' ');
+      const phoneRegex = /(?:(?:\+|00)?88)?01[3-9]\d{8}/g;
+      const phones = allText.match(phoneRegex);
+      
+      if (!phones || phones.length === 0) {
+        toast.info('No Bangladeshi phone number found in chat.');
+        setIsScanning(false);
+        return;
+      }
+      
+      const extractedPhone = phones[0];
+      
+      const adMatch = allText.match(/ad_id=(\d+)/i) || allText.match(/campaign_id=(\d+)/i);
+      const adDetails = adMatch ? `Found Ad/Campaign ID: ${adMatch[1]}` : 'No obvious ad details found';
+      
+      const extractedName = selectedConv.contact_name || 'Chat Contact';
+      
+      if (selectedConv.lead_id) {
+        await api.updateLead(selectedConv.lead_id, { phone: extractedPhone });
+        await api.addNote(selectedConv.lead_id, `Extracted from Chat: Phone - ${extractedPhone}, Ads: ${adDetails}`);
+        toast.success('Lead updated with extracted info!');
+      } else {
+        const res = await api.convertLead(selectedConv.id, { 
+          destination: 'Bangladesh', 
+          phone: extractedPhone, 
+          client_name: extractedName 
+        });
+        if (res && res.lead_id) {
+          await api.addNote(res.lead_id, `Extracted from Chat: Ads: ${adDetails}`);
+          setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); 
+          setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c));
+          toast.success('New lead created from extracted info!');
+        }
+      }
+    } catch (e) {
+      toast.error('Failed to extract and sync lead: ' + e.message);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleSelectQuickReply = (qr) => {
     setReplyText(prev => prev + (prev ? '\n' : '') + qr.content);
     setShowQuickReplyPicker(false);
@@ -1214,6 +1260,13 @@ export default function Conversations({ user }) {
 
                 {/* Right: action buttons — Meta style icon bar */}
                 <div className="flex items-center gap-0.5 flex-shrink-0">
+                  {/* Scan Chat button */}
+                  <button onClick={handleScanChat} disabled={isScanning}
+                    className="bg-[#f0f2f5] hover:bg-[#e4e6eb] text-[#1c1e21] font-semibold text-[12px] px-3 py-1.5 rounded-full flex items-center gap-1 transition-all mr-1 disabled:opacity-50">
+                    {isScanning ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                    <span className="hidden sm:inline">Scan Chat</span>
+                  </button>
+
                   {/* Add to Lead / Lead button */}
                   {!selectedConv.lead_id ? (
                     <button onClick={handleOpenLeadModal}
