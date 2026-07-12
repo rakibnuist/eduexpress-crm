@@ -23,6 +23,7 @@ const Reports       = lazy(() => import('./pages/Reports'));
 const Finance       = lazy(() => import('./pages/Finance'));
 const HR            = lazy(() => import('./pages/HR'));
 const Settings      = lazy(() => import('./pages/Settings'));
+const AdPerformance = lazy(() => import('./pages/AdPerformance'));
 const LegalNotice   = lazy(() => import('./pages/LegalNotice'));
 const StudentPortal = lazy(() => import('./pages/StudentPortal'));
 const Conversations = lazy(() => import('./pages/Conversations'));
@@ -95,6 +96,7 @@ export default function App() {
                         {canViewAutomation(user) && <Route path="/automation" element={<Automation />} />}
                         {hasPermission(user, PERMISSIONS.VIEW_FINANCE) && <Route path="/finance" element={<Finance />} />}
                         {hasPermission(user, PERMISSIONS.VIEW_HR) && <Route path="/hr" element={<HR user={user} />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_AD_PERFORMANCE) && <Route path="/ad-performance" element={<AdPerformance user={user} />} />}
                         {isFullAdmin(user) && <Route path="/destinations" element={<Destinations />} />}
                         {isFullAdmin(user) && <Route path="/settings" element={<Settings />} />}
                         <Route path="*" element={<Navigate to="/" replace />} />

@@ -55,6 +55,7 @@ export const PERMISSIONS = {
   VIEW_HR:                  'view_hr',
 
   // Settings & Admin
+  VIEW_AD_PERFORMANCE:      'view_ad_performance',
   MANAGE_SETTINGS:          'manage_settings',
   MANAGE_USERS:             'manage_users',
   MANAGE_ROLES:             'manage_roles',
@@ -205,6 +206,14 @@ export const NAV_ITEMS = [
     label: 'Daily Workspace',
     permission: PERMISSIONS.VIEW_MY_DAY,
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
+  },
+  {
+    id: 'ad_performance',
+    to: '/ad-performance',
+    icon: 'MousePointerClick',
+    label: 'Ad Performance',
+    permission: PERMISSIONS.VIEW_AD_PERFORMANCE,
+    roles: ['founder_ceo', 'managing_director'],
   },
   {
     id: 'leads',
