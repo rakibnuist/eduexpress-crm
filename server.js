@@ -4501,7 +4501,24 @@ app.get('/api/leads/source-stats', (req, res) => {
     WHERE date_added >= ? ${extraWhere}
   `).get(...params);
 
-  res.json({ bySource, byPage, byAd, totals, days: parseInt(days), since });
+  // Daily breakdown
+  const daily = db.prepare(`
+    SELECT
+      l.date_added as date,
+      COUNT(l.id) as total_leads,
+      COALESCE(SUM(c.spend), 0) as total_spend
+    FROM leads l
+    LEFT JOIN (
+      SELECT ad_id, date, SUM(spend) as spend
+      FROM ad_performance_cache
+      GROUP BY ad_id, date
+    ) c ON l.meta_ad_id = c.ad_id AND l.date_added = c.date
+    WHERE l.date_added >= ? ${extraWhereAd}
+    GROUP BY l.date_added
+    ORDER BY l.date_added ASC
+  `).all(...paramsByAd);
+
+  res.json({ bySource, byPage, byAd, daily, totals, days: parseInt(days), since });
 });
 
 app.get('/api/leads', (req, res) => {
@@ -7553,7 +7570,7 @@ app.post('/webhook/meta', async (req, res) => {
             const channel = db.prepare("SELECT * FROM channels WHERE (page_id=? OR ig_account_id=?)").get(pageId, pageId);
             const token = channel?.access_token || getConfig('page_access_token');
             if (!token) continue;
-            const metaRes = await fetch(`https://graph.facebook.com/v19.0/${leadgen_id}?fields=field_data,ad_id,ad_name,campaign_id,campaign_name,form_id&access_token=${token}`);
+            const metaRes = await fetch(`https://graph.facebook.com/v19.0/${leadgen_id}?fields=field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id&access_token=${token}`);
             const metaData = await metaRes.json();
             if (metaData.error) continue;
             const fields = {};
@@ -7580,10 +7597,10 @@ app.post('/webhook/meta', async (req, res) => {
 
             const lead_id = nextLeadId();
             const client_name = fields.full_name||fields.name||`${fields.first_name||''} ${fields.last_name||''}`.trim()||'Unknown';
-            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,source,assigned_consultant,notes,page_name,channel_id)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            db.prepare(`INSERT OR IGNORE INTO leads (lead_id,date_added,client_name,phone,email,destination,lead_source,lead_status,meta_lead_id,meta_form_id,meta_ad_id,meta_campaign,meta_adset_id,meta_adset_name,source,assigned_consultant,notes,page_name,channel_id)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
               .run(lead_id, new Date().toISOString().slice(0,10), client_name, fields.phone_number||null, fields.email||null, destination,
-                source,'New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,source,assigned_consultant,JSON.stringify(fields), channel?.name||null, channel?.id||null);
+                source,'New Lead',leadgen_id,form_id,ad_id||null,metaData.campaign_name||null,metaData.adset_id||null,metaData.adset_name||null,source,assigned_consultant,JSON.stringify(fields), channel?.name||null, channel?.id||null);
             const lead = db.prepare("SELECT * FROM leads WHERE meta_lead_id=?").get(leadgen_id);
             if (lead) {
               sendCAPIEvent('Lead', { ...lead, event_source_url: fields.link_url || fields.page_url || undefined });

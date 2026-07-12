@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { isFullAdmin } from '../lib/roles';
 import { MousePointerClick, X } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 function FilterSelect({ value, onChange, options, placeholder, formatOption = x => x }) {
   return (
@@ -118,6 +119,33 @@ export default function AdPerformance({ user }) {
             </div>
           ) : (
             <div className="space-y-6">
+
+              {/* Daily Trend Chart */}
+              {sourceStats.daily?.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                  <h4 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                    <span className="text-blue-500">📈</span> Lead Volume vs Ad Spend
+                  </h4>
+                  <div className="h-72 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={sourceStats.daily} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis dataKey="date" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} tickMargin={10} />
+                        <YAxis yAxisId="left" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                        <YAxis yAxisId="right" orientation="right" tick={{fontSize: 12, fill: '#64748b'}} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                        <Tooltip 
+                          contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)'}}
+                          itemStyle={{fontSize: '13px', fontWeight: 600}}
+                        />
+                        <Legend wrapperStyle={{fontSize: '13px'}} />
+                        <Line yAxisId="left" type="monotone" dataKey="total_leads" name="Leads" stroke="#3b82f6" strokeWidth={3} dot={{r:4, strokeWidth:2}} activeDot={{r:6}} />
+                        <Line yAxisId="right" type="monotone" dataKey="total_spend" name="Spend ($)" stroke="#10b981" strokeWidth={3} dot={{r:4, strokeWidth:2}} activeDot={{r:6}} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
               {/* By Source */}
               {sourceStats.bySource?.length > 0 && (
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -226,12 +254,12 @@ export default function AdPerformance({ user }) {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-white text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
-                          <th className="text-left px-5 py-3">Ad Name</th>
+                          <th className="text-left px-5 py-3">Campaign / Ad Set / Ad</th>
                           <th className="text-left px-5 py-3">Page</th>
+                          <th className="text-center px-5 py-3">Spend</th>
                           <th className="text-center px-5 py-3">Leads</th>
-                          <th className="text-center px-5 py-3">Active</th>
-                          <th className="text-center px-5 py-3">Positive</th>
-                          <th className="text-center px-5 py-3">Office Visited</th>
+                          <th className="text-center px-5 py-3">CPL</th>
+                          <th className="text-center px-5 py-3">CPA</th>
                           <th className="text-center px-5 py-3">File Opened</th>
                           <th className="text-center px-5 py-3">Conv. Rate</th>
                         </tr>
@@ -241,14 +269,15 @@ export default function AdPerformance({ user }) {
                           const rate = row.total_leads > 0 ? ((row.file_opened / row.total_leads) * 100).toFixed(1) : '0.0';
                           return (
                             <tr key={i} className="hover:bg-blue-50/30 transition-colors">
-                              <td className="px-5 py-3.5 font-semibold text-slate-700 max-w-[250px] truncate" title={row.ad_name}>
-                                {row.ad_name || '—'}
+                              <td className="px-5 py-3.5">
+                                <div className="font-semibold text-slate-700 max-w-[250px] truncate" title={row.ad_name}>{row.ad_name || '—'}</div>
+                                <div className="text-[11px] text-slate-500 max-w-[250px] truncate" title={`${row.meta_campaign} > ${row.meta_adset_name}`}>{row.meta_campaign || 'Unknown Campaign'} • {row.meta_adset_name || 'Unknown AdSet'}</div>
                               </td>
                               <td className="px-5 py-3.5 text-slate-500 text-xs">{row.page_name || '—'}</td>
-                              <td className="px-5 py-3.5 text-center font-bold text-slate-800">{row.total_leads}</td>
-                              <td className="px-5 py-3.5 text-center text-emerald-600 font-semibold">{row.active}</td>
-                              <td className="px-5 py-3.5 text-center text-cyan-600 font-semibold">{row.positive}</td>
-                              <td className="px-5 py-3.5 text-center text-purple-600 font-semibold">{row.office_visited}</td>
+                              <td className="px-5 py-3.5 text-center font-bold text-slate-700">${row.spend?.toFixed(2) || '0.00'}</td>
+                              <td className="px-5 py-3.5 text-center font-bold text-blue-600">{row.total_leads}</td>
+                              <td className="px-5 py-3.5 text-center text-amber-600 font-semibold">${row.total_leads ? (row.spend/row.total_leads).toFixed(2) : '0.00'}</td>
+                              <td className="px-5 py-3.5 text-center text-rose-500 font-semibold">${row.file_opened ? (row.spend/row.file_opened).toFixed(2) : '—'}</td>
                               <td className="px-5 py-3.5 text-center text-indigo-600 font-bold">{row.file_opened}</td>
                               <td className="px-5 py-3.5 text-center">
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
