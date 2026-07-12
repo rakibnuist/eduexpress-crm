@@ -61,7 +61,7 @@ const DB_DIR = dirname(DB_PATH);
 try {
   const fs = require('fs');
   const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-  if (dbSize < 100000) {
+  if (dbSize < 2000000) {
     const corruptFiles = fs.readdirSync(DB_DIR).filter(f => f.startsWith('crm.db.corrupt-'));
     if (corruptFiles.length > 0) {
       const latestCorrupt = corruptFiles.sort().pop();
