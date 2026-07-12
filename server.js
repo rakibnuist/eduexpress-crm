@@ -4919,12 +4919,6 @@ app.post('/api/leads', async (req, res) => {
 
 app.put('/api/leads/:id', async (req, res) => {
   try {
-    const d = req.body;
-    // Backward compat for old source field
-    if (d.source === 'China') d.lead_market = 'China';
-    if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
-    if (d.source === 'In-House') d.lead_type = 'B2C';
-    if (!d.lead_market) d.lead_market = 'Bangladesh';
     const oldLead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
     if (!oldLead) return res.status(404).json({ error: 'Not found' });
     // China data isolation: block unauthorized access to China leads
@@ -4934,6 +4928,17 @@ app.put('/api/leads/:id', async (req, res) => {
     if (!leadIsVisibleTo(oldLead, req.user)) {
       return res.status(403).json({ error: 'Access denied to this lead record' });
     }
+
+    // Merge existing lead data with new updates to prevent wiping out data
+    // on partial updates (e.g. from the Scan Chat button)
+    const d = { ...oldLead, ...req.body };
+
+    // Backward compat for old source field
+    if (d.source === 'China') d.lead_market = 'China';
+    if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
+    if (d.source === 'In-House') d.lead_type = 'B2C';
+    if (!d.lead_market) d.lead_market = 'Bangladesh';
+
     const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
     const params = leadParams(d, oldLead.lead_id, balance);
     delete params.lead_id;
