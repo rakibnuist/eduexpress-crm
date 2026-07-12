@@ -6690,16 +6690,53 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
         }
 
         if (lead_id_val) {
-          let updateSql = "UPDATE leads SET ";
-          let params = [];
-          let updates = [];
-          if (extractedPhone) { updates.push("phone=?"); params.push(extractedPhone); }
-          if (adId) { updates.push("meta_ad_id=?"); params.push(adId); }
-          if (updates.length > 0) {
-            updateSql += updates.join(", ") + " WHERE id=?";
-            params.push(lead_id_val);
-            db.prepare(updateSql).run(...params);
-            updated++;
+          const existingLead = db.prepare("SELECT * FROM leads WHERE id=?").get(lead_id_val);
+          if (existingLead) {
+            let updateSql = "UPDATE leads SET ";
+            let params = [];
+            let updates = [];
+            
+            if (extractedPhone && (!existingLead.phone || existingLead.phone === '')) { 
+              updates.push("phone=?"); params.push(extractedPhone); 
+            }
+            if (adId && !existingLead.meta_ad_id) { 
+              updates.push("meta_ad_id=?"); params.push(adId); 
+            }
+            
+            // Fix broken or missing data on existing leads
+            if (!existingLead.lead_id) {
+              let new_lead_id;
+              for(let i=0; i<10; i++) {
+                const r = Math.floor(100000 + Math.random() * 900000);
+                new_lead_id = 'L26' + String(r).slice(-4);
+                const existing = db.prepare("SELECT id FROM leads WHERE lead_id=?").get(new_lead_id);
+                if (!existing) break;
+              }
+              if (!new_lead_id) new_lead_id = 'L26' + Date.now().toString().slice(-4);
+              updates.push("lead_id=?"); params.push(new_lead_id);
+            }
+            if (!existingLead.client_name || existingLead.client_name === 'Unknown' || existingLead.client_name === '') {
+               updates.push("client_name=?"); params.push(client_name);
+            }
+            if (!existingLead.lead_status || existingLead.lead_status === 'New') {
+               updates.push("lead_status=?"); params.push('New Lead');
+            }
+            if (!existingLead.page_name || existingLead.page_name === 'Unknown' || existingLead.page_name === '') {
+               updates.push("page_name=?"); params.push(channel.name);
+            }
+            if (!existingLead.channel_id) {
+               updates.push("channel_id=?"); params.push(channel.id);
+            }
+            if (!existingLead.date_added) {
+               updates.push("date_added=?"); params.push(new Date().toISOString().slice(0, 10));
+            }
+
+            if (updates.length > 0) {
+              updateSql += updates.join(", ") + " WHERE id=?";
+              params.push(lead_id_val);
+              db.prepare(updateSql).run(...params);
+              updated++;
+            }
           }
         } else {
           let new_lead_id;
