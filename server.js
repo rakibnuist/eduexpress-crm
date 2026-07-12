@@ -9413,7 +9413,7 @@ function scanOldChatsForLeads() {
 
 // Retroactively fix page names for old leads
 try {
-  const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL").all();
+  const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL OR page_name = ''").all();
   let fixedCount = 0;
   for (const l of leadsToFix) {
      const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
@@ -9425,6 +9425,23 @@ try {
      } else if (throughContact && throughContact.name) {
        db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
        fixedCount++;
+     } else {
+       // If channel is missing from DB, try to find another lead that used this conversation's channel_id and has a page_name
+       const orphanConv = db.prepare(`SELECT channel_id FROM conversations WHERE lead_id = ? LIMIT 1`).get(l.id);
+       if (orphanConv && orphanConv.channel_id) {
+         // Try to find an existing lead with this channel_id that HAS a page_name
+         const peerLead = db.prepare(`SELECT page_name FROM leads l JOIN conversations c ON l.id = c.lead_id WHERE c.channel_id = ? AND l.page_name IS NOT NULL AND l.page_name != '' LIMIT 1`).get(orphanConv.channel_id);
+         if (peerLead && peerLead.page_name) {
+           db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(peerLead.page_name, orphanConv.channel_id, l.id);
+           fixedCount++;
+         } else {
+           db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run("Unknown Page", orphanConv.channel_id, l.id);
+           fixedCount++;
+         }
+       } else {
+           db.prepare("UPDATE leads SET page_name = ? WHERE id = ?").run("Unknown Page", l.id);
+           fixedCount++;
+       }
      }
   }
   console.log(`[Startup] Fixed page_name for ${fixedCount} existing leads.`);
