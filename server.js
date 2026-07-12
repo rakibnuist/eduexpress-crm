@@ -4444,37 +4444,81 @@ app.get('/api/leads/source-stats', (req, res) => {
   `).all(...params);
 
   // Per-ad breakdown
-  const paramsByAd = [since, ...params];
-  const extraWhereAd = extraWhere.replace(/AND /g, 'AND l.');
-  
-  const byAd = db.prepare(`
+  const leadsAds = db.prepare(`
     SELECT
-      l.ad_name,
-      l.meta_ad_id,
-      l.page_name,
-      l.meta_campaign,
-      l.meta_adset_name,
-      COUNT(l.id) as total_leads,
-      SUM(CASE WHEN l.lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
-      SUM(CASE WHEN l.lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
-      SUM(CASE WHEN l.lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
-      SUM(CASE WHEN l.lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active,
-      COALESCE(c.total_spend, 0) as spend,
-      COALESCE(c.total_impressions, 0) as impressions,
-      COALESCE(c.total_clicks, 0) as clicks
-    FROM leads l
-    LEFT JOIN (
-      SELECT ad_id, SUM(spend) as total_spend, SUM(impressions) as total_impressions, SUM(clicks) as total_clicks
-      FROM ad_performance_cache
-      WHERE date >= ?
-      GROUP BY ad_id
-    ) c ON l.meta_ad_id = c.ad_id
-    WHERE l.ad_name IS NOT NULL
-      AND l.date_added >= ? ${extraWhereAd}
-    GROUP BY l.ad_name, l.meta_ad_id, l.page_name, l.meta_campaign, l.meta_adset_name
-    ORDER BY total_leads DESC
-    LIMIT 20
-  `).all(...paramsByAd);
+      ad_name,
+      meta_ad_id,
+      page_name,
+      meta_campaign,
+      meta_adset_name,
+      COUNT(id) as total_leads,
+      SUM(CASE WHEN lead_status = 'File Opened' THEN 1 ELSE 0 END) as file_opened,
+      SUM(CASE WHEN lead_status = 'Office Visited' THEN 1 ELSE 0 END) as office_visited,
+      SUM(CASE WHEN lead_status = 'Positive' THEN 1 ELSE 0 END) as positive,
+      SUM(CASE WHEN lead_status NOT IN ('Not Interested') THEN 1 ELSE 0 END) as active
+    FROM leads
+    WHERE ad_name IS NOT NULL
+      AND date_added >= ? ${extraWhere}
+    GROUP BY ad_name, meta_ad_id, page_name, meta_campaign, meta_adset_name
+  `).all(...params);
+
+  const cacheAds = db.prepare(`
+    SELECT 
+      ad_id as meta_ad_id,
+      ad_name,
+      campaign_name as meta_campaign,
+      adset_name as meta_adset_name,
+      SUM(spend) as spend,
+      SUM(impressions) as impressions,
+      SUM(clicks) as clicks
+    FROM ad_performance_cache
+    WHERE date >= ?
+    GROUP BY ad_id, ad_name, campaign_name, adset_name
+  `).all(since);
+
+  const adMap = new Map();
+  for (const row of leadsAds) {
+    const key = row.meta_ad_id || row.ad_name; 
+    adMap.set(key, { ...row, spend: 0, impressions: 0, clicks: 0 });
+  }
+
+  for (const row of cacheAds) {
+    let match = adMap.get(row.meta_ad_id) || adMap.get(row.ad_name);
+    if (match) {
+      match.spend = row.spend;
+      match.impressions = row.impressions;
+      match.clicks = row.clicks;
+      if (!match.meta_campaign) match.meta_campaign = row.meta_campaign;
+      if (!match.meta_adset_name) match.meta_adset_name = row.meta_adset_name;
+    } else {
+      if (req.query.page_name) continue; 
+      if (req.query.source && req.query.source !== 'meta') continue;
+      if (req.query.ad_name && req.query.ad_name !== row.ad_name) continue;
+      
+      adMap.set(row.meta_ad_id || row.ad_name, {
+        ad_name: row.ad_name,
+        meta_ad_id: row.meta_ad_id,
+        page_name: null,
+        meta_campaign: row.meta_campaign,
+        meta_adset_name: row.meta_adset_name,
+        total_leads: 0,
+        file_opened: 0,
+        office_visited: 0,
+        positive: 0,
+        active: 0,
+        spend: row.spend,
+        impressions: row.impressions,
+        clicks: row.clicks
+      });
+    }
+  }
+
+  let byAd = Array.from(adMap.values());
+  byAd.sort((a, b) => {
+    if (b.total_leads !== a.total_leads) return b.total_leads - a.total_leads;
+    return (b.spend || 0) - (a.spend || 0);
+  });
+  byAd = byAd.slice(0, 50);
 
   // Per-source breakdown
   const bySource = db.prepare(`
@@ -4502,21 +4546,40 @@ app.get('/api/leads/source-stats', (req, res) => {
   `).get(...params);
 
   // Daily breakdown
-  const daily = db.prepare(`
+  const dailyLeads = db.prepare(`
     SELECT
-      l.date_added as date,
-      COUNT(l.id) as total_leads,
-      COALESCE(SUM(c.spend), 0) as total_spend
-    FROM leads l
-    LEFT JOIN (
-      SELECT ad_id, date, SUM(spend) as spend
-      FROM ad_performance_cache
-      GROUP BY ad_id, date
-    ) c ON l.meta_ad_id = c.ad_id AND l.date_added = c.date
-    WHERE l.date_added >= ? ${extraWhereAd}
-    GROUP BY l.date_added
-    ORDER BY l.date_added ASC
+      date_added as date,
+      COUNT(id) as total_leads
+    FROM leads
+    WHERE date_added >= ? ${extraWhere}
+    GROUP BY date_added
   `).all(...params);
+
+  let spendQuery = `SELECT date, SUM(spend) as spend FROM ad_performance_cache WHERE date >= ?`;
+  const spendParams = [since];
+  if (req.query.ad_name) {
+    spendQuery += ` AND ad_name = ?`;
+    spendParams.push(req.query.ad_name);
+  }
+  spendQuery += ` GROUP BY date`;
+  const dailySpend = db.prepare(spendQuery).all(...spendParams);
+
+  const dailyMap = new Map();
+  for (const r of dailyLeads) {
+    dailyMap.set(r.date, { date: r.date, total_leads: r.total_leads, total_spend: 0 });
+  }
+  for (const r of dailySpend) {
+    let match = dailyMap.get(r.date);
+    if (match) {
+      match.total_spend = r.spend;
+    } else {
+      if (req.query.page_name) continue; 
+      if (req.query.source && req.query.source !== 'meta') continue;
+      dailyMap.set(r.date, { date: r.date, total_leads: 0, total_spend: r.spend });
+    }
+  }
+  
+  let daily = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
   res.json({ bySource, byPage, byAd, daily, totals, days: parseInt(days), since });
 });
