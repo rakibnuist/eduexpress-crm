@@ -4504,7 +4504,7 @@ app.get('/api/leads/source-stats', (req, res) => {
   const { days = 30, source, page_name, ad_name } = req.query;
   const since = new Date(Date.now() - parseInt(days) * 86400000).toISOString().slice(0, 10);
 
-  let extraWhere = '';
+  let extraWhere = " AND ((ad_name IS NOT NULL AND ad_name != '') OR (meta_ad_id IS NOT NULL AND meta_ad_id != ''))";
   const params = [since];
 
   if (source) {
