@@ -1477,6 +1477,18 @@ app.get('/api/public/diag', (req, res) => {
   }
 });
 
+
+app.get('/api/public/diag2', (req, res) => {
+  try {
+    const l = db.prepare("SELECT * FROM leads WHERE lead_id = 'L260023'").get();
+    const conv = db.prepare("SELECT * FROM conversations WHERE lead_id = ?").all(l.id);
+    const cont = db.prepare("SELECT * FROM contacts WHERE lead_id = ?").all(l.id);
+    res.json({ lead: l, conv, cont });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
 // ── Init DB async in background ────────────────────────────
