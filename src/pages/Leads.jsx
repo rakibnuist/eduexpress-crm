@@ -87,6 +87,7 @@ export default function Leads({ user }) {
       lead_type: '',
       intake: '',
       page_name: '',
+      ad_name: '',
       follow_up: '',
       page: 1,
     };
@@ -189,7 +190,7 @@ export default function Leads({ user }) {
     setFilters(f => ({ ...f, [key]: val, page: 1 }));
   }
 
-  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.intake, filters.page_name, filters.follow_up].filter(Boolean).length;
+  const activeFilters = [filters.status, filters.consultant, filters.destination, filters.intake, filters.page_name, filters.ad_name, filters.source, filters.follow_up].filter(Boolean).length;
 
   async function handleBulkStatus() {
     if (!bulkStatusValue) { toast.error('Please select a status'); return; }
@@ -590,13 +591,14 @@ export default function Leads({ user }) {
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
               <FilterSelect value={filters.intake} onChange={v => setFilter('intake', v)} options={settings.intakes || []} placeholder="All Intakes" />
               <FilterSelect value={filters.page_name} onChange={v => setFilter('page_name', v)} options={settings.pages || []} placeholder="All Pages" formatOption={p => p === 'EduExpress International Bangladesh' ? 'EduExpress Bangladesh' : p === 'EduExpress International China' ? 'EduExpress China' : p} />
+              <FilterSelect value={filters.ad_name} onChange={v => setFilter('ad_name', v)} options={settings.ads || []} placeholder="All Ads" />
               <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources || []} placeholder="All Sources" />
               <FilterSelect value={filters.follow_up} onChange={v => setFilter('follow_up', v)} options={['Today', 'Upcoming', 'Overdue']} placeholder="All Follow-ups" />
               {!canViewOwnLeadsOnly(user) && (
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
               {(activeFilters > 0 || filters.search) && (
-                <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
+                <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', ad_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
                   className="flex items-center gap-1.5 h-10 px-4 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white rounded-xl transition-all select-none cursor-pointer shadow-sm">
                   <X size={15} strokeWidth={2.5} /> Reset Filters
                 </button>
@@ -606,13 +608,14 @@ export default function Leads({ user }) {
         </div>
 
         {/* Active-filter chips */}
-        {(filters.status || filters.consultant || filters.destination || filters.intake || filters.page_name || filters.source || filters.follow_up || filters.search) && (
+        {(filters.status || filters.consultant || filters.destination || filters.intake || filters.page_name || filters.ad_name || filters.source || filters.follow_up || filters.search) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
             {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
             {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
             {filters.intake && <Chip onClear={() => setFilter('intake', '')}>Intake: <strong>{filters.intake}</strong></Chip>}
             {filters.page_name && <Chip onClear={() => setFilter('page_name', '')}>Page: <strong>{filters.page_name}</strong></Chip>}
+            {filters.ad_name && <Chip onClear={() => setFilter('ad_name', '')}>Ad: <strong>{filters.ad_name}</strong></Chip>}
             {filters.source && <Chip onClear={() => setFilter('source', '')}>Source: <strong>{filters.source}</strong></Chip>}
             {filters.follow_up && <Chip onClear={() => setFilter('follow_up', '')}>Follow-up: <strong>{filters.follow_up}</strong></Chip>}
             {filters.consultant && <Chip onClear={() => setFilter('consultant', '')}>Consultant: <strong>{filters.consultant}</strong></Chip>}

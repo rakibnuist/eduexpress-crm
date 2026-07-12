@@ -8059,6 +8059,10 @@ app.get('/api/settings', (req, res) => {
       try { return db.prepare("SELECT DISTINCT page_name FROM leads WHERE page_name IS NOT NULL AND page_name != '' AND page_name != 'Unknown Page' ORDER BY page_name").all().map(r => r.page_name); } catch(e){}
       return [];
     })(),
+    ads: (function(){
+      try { return db.prepare("SELECT DISTINCT ad_name FROM leads WHERE ad_name IS NOT NULL AND ad_name != '' ORDER BY ad_name").all().map(r => r.ad_name); } catch(e){}
+      return [];
+    })(),
     leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
     fileStages: getList('settings_fileStages', [
       'Documents Collecting',
