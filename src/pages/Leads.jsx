@@ -597,12 +597,10 @@ export default function Leads({ user }) {
               {!canViewOwnLeadsOnly(user) && (
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
-              {(activeFilters > 0 || filters.search) && (
-                <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', ad_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
-                  className="flex items-center gap-1.5 h-10 px-4 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white rounded-xl transition-all select-none cursor-pointer shadow-sm">
-                  <X size={15} strokeWidth={2.5} /> Reset Filters
-                </button>
-              )}
+              <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', ad_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
+                className="flex items-center gap-1.5 h-10 px-4 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white rounded-xl transition-all select-none cursor-pointer shadow-sm">
+                <X size={15} strokeWidth={2.5} /> Reset Filters
+              </button>
             </div>
           )}
         </div>
