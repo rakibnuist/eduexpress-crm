@@ -1,30 +1,21 @@
-/* LeadDetail — one student's full chronological story.
-   Three-column modern layout: Profile, Operations, and Timeline.
-   Real-time: subscribes to the existing SSE feed and prepends any new activity
-   for this lead instantly. */
-import { useEffect, useState, useCallback, useRef } from 'react';
+/* LeadDetail — Professional CRM Layout with inline "Click-to-Edit".
+   All fields are instantly editable, matching the schema of LeadForm. */
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import Modal from '../components/Modal';
-import LeadForm from './LeadForm';
 import { useToast } from '../components/Toast';
 import { isFullAdmin } from '../lib/roles';
 import {
-  ArrowLeft, Pencil, Trash2, Phone, Mail, User, Hash,
-  GraduationCap, Building2, FileText, DollarSign, Activity, Send, AlertCircle,
-  ExternalLink, Globe, CreditCard, CheckCircle2,
-  Tag, UserPlus, Receipt, Plane, MessageSquare, Loader2,
-  Heart, FolderOpen, HeartPulse, Wallet, BookOpen, Calendar,
-  Clock, Check, MapPin, ClipboardList, Stethoscope, Briefcase
+  ArrowLeft, Trash2, Phone, Mail, User, 
+  GraduationCap, Building2, FileText, Activity, Send, AlertCircle,
+  ExternalLink, CheckCircle2, MessageSquare, Loader2,
+  FolderOpen, Wallet, Calendar, Clock, Stethoscope, Briefcase, Pencil, Plane
 } from 'lucide-react';
 
-const fmt = (n) => {
-  const v = Number(n || 0);
-  if (v >= 100000) return `৳${(v / 100000).toFixed(1)}L`;
-  if (v >= 1000)   return `৳${(v / 1000).toFixed(1)}K`;
-  return `৳${v.toLocaleString()}`;
-};
+const DEGREES = ['Diploma', 'Bachelor', 'Masters', 'PhD', 'Language', 'Foundation', 'L+Diploma +', 'L + Bachelor', 'F+Bachelor'];
+const BLOOD = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+
 const fmtFull = (n) => `৳${Number(n || 0).toLocaleString()}`;
 const timeAgo = (iso) => {
   if (!iso) return '';
@@ -51,34 +42,38 @@ export default function LeadDetail({ user }) {
   const isAgentUser = user?.roles?.includes('agent');
   const { id } = useParams();
   const navigate = useNavigate();
-  const [lead, setLead]         = useState(null);
-
-  useEffect(() => {
-    if (lead) {
-      document.title = `${lead.client_name} - Profile | EduExpress Core`;
-    } else {
-      document.title = "Client Profile | EduExpress Core";
-    }
-  }, [lead]);
-
+  
+  const [lead, setLead] = useState(null);
   const [timeline, setTimeline] = useState([]);
-  const [docs, setDocs]         = useState([]);
-  const [unis, setUnis]         = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
-  const [editing, setEditing]   = useState(false);
+  const [docs, setDocs] = useState([]);
+  const [unis, setUnis] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
   const [settings, setSettings] = useState(null);
-  const [stages, setStages]     = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [referrerList, setReferrerList] = useState([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const toast = useToast();
+
+  const mappedStages = useMemo(() => {
+    return (settings?.fileStages || []).map(label => {
+      let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (key === 'documents_collecting') key = 'documents';
+      if (key === 'documents_ready') key = 'ready';
+      if (key === 'applied_to_university') key = 'submitted';
+      if (key === 'admission_jw_received' || key === 'admission_notice_received' || key === 'offer_letter_received') key = 'admitted';
+      return { value: key, label };
+    });
+  }, [settings]);
+
+  const refOptions = Array.from(new Set([...referrerList, ...(settings?.consultants || [])])).sort();
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const t = await api.leadTimeline(id);
       setLead(t.lead);
       setTimeline(t.timeline);
-      // Best-effort load of related data; ignore failures (e.g. lead not in
-      // application pipeline yet).
       const [d, u] = await Promise.all([
         api.documents(t.lead.id).catch(() => []),
         api.universityApps(t.lead.id).catch(() => []),
@@ -91,12 +86,22 @@ export default function LeadDetail({ user }) {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (lead) document.title = `${lead.client_name} - CRM | EduExpress Core`;
+  }, [lead]);
+
   useEffect(() => {
     api.settings().then(setSettings).catch(() => {});
-    api.applicationMeta().then(d => setStages(d.stages)).catch(() => {});
+    api.employeesActive().then(setEmployees).catch(() => {});
+    api.leads({ limit: 2000 }).then(d => {
+      const set = new Set();
+      (d.leads || []).forEach(l => { if (l.referrer) set.add(l.referrer); });
+      setReferrerList(Array.from(set).sort());
+    }).catch(() => {});
   }, []);
 
-  // Real-time: prepend any new activity for this lead as it happens
+  // Real-time Activity
   useEffect(() => {
     if (!lead?.id) return;
     const es = new EventSource('/api/events', { withCredentials: true });
@@ -112,40 +117,50 @@ export default function LeadDetail({ user }) {
     return () => { try { es.close(); } catch {} };
   }, [lead?.id]);
 
-  const toast = useToast();
-  const [startingChat, setStartingChat] = useState(false);
+  const handleFieldSave = async (field, value) => {
+    try {
+      const payload = { [field]: value };
+      
+      // Formatting intercepts
+      if (field === 'phone' && value) {
+        let finalPhone = value.trim();
+        const digits = finalPhone.replace(/[^\d]/g, '');
+        if (digits.startsWith('01') && digits.length === 11) finalPhone = '+88' + digits;
+        else if (digits.startsWith('8801') && digits.length === 13) finalPhone = '+' + digits;
+        payload.phone = finalPhone;
+      }
+      if (field === 'assigned_employee_id') {
+        payload.assigned_employee_id = value ? Number(value) : null;
+        if (payload.assigned_employee_id) {
+          const emp = employees.find(e => e.id === payload.assigned_employee_id);
+          if (emp) payload.assigned_consultant = emp.name;
+        } else {
+          payload.assigned_consultant = '';
+        }
+      }
 
-  const handleStartCRMChat = async () => {
-    if (!lead?.phone) {
-      toast.error('This lead does not have a phone number.');
-      return;
+      await api.updateLead(lead.id, payload);
+      toast.success('Updated');
+      load(); // refresh data to ensure sync
+    } catch (err) {
+      toast.error('Failed to update: ' + err.message);
+      throw err; // bubble up so EditableField knows
     }
+  };
+
+  const [startingChat, setStartingChat] = useState(false);
+  const handleStartCRMChat = async () => {
+    if (!lead?.phone) return toast.error('This lead does not have a phone number.');
     setStartingChat(true);
     try {
       const activeChannels = await api.channels();
-      if (!activeChannels || activeChannels.length === 0) {
-        toast.error('No messaging channels configured. Please add one in settings.');
-        return;
-      }
-      // Prefer whatsapp, then messenger, then any
-      const channel = activeChannels.find(c => c.type === 'whatsapp') || 
-                      activeChannels.find(c => c.type === 'messenger') || 
-                      activeChannels[0];
-      
-      const conv = await api.createConversation({
-        channel_id: channel.id,
-        phone: lead.phone,
-        name: lead.client_name,
-        lead_id: lead.id
-      });
-      
+      if (!activeChannels || activeChannels.length === 0) return toast.error('No messaging channels configured.');
+      const channel = activeChannels.find(c => c.type === 'whatsapp') || activeChannels.find(c => c.type === 'messenger') || activeChannels[0];
+      const conv = await api.createConversation({ channel_id: channel.id, phone: lead.phone, name: lead.client_name, lead_id: lead.id });
       toast.success('Conversation initiated!');
       navigate(`/conversations?id=${conv.id}`);
-    } catch (err) {
-      toast.error('Failed to start CRM chat: ' + err.message);
-    } finally {
-      setStartingChat(false);
-    }
+    } catch (err) { toast.error('Failed to start chat: ' + err.message); }
+    finally { setStartingChat(false); }
   };
 
   const handleDelete = async () => {
@@ -153,316 +168,187 @@ export default function LeadDetail({ user }) {
     catch (e) { toast.error(e.message || 'Could not delete'); }
   };
 
-  if (loading && !lead) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 size={36} className="text-indigo-500 animate-spin" />
-      </div>
-    );
-  }
-  if (error || !lead) {
-    return (
-      <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center max-w-xl mx-auto shadow-sm mt-10">
-        <AlertCircle size={48} className="text-rose-400 mx-auto mb-4" />
-        <p className="text-slate-700 font-bold text-lg mb-2">{error || 'Lead not found'}</p>
-        <p className="text-slate-500 text-sm mb-6">The lead you are trying to view doesn't exist or you don't have permission to see it.</p>
-        <Link to="/leads" className="inline-flex items-center justify-center gap-2 bg-slate-900 text-white font-semibold px-6 py-3 rounded-xl hover:bg-slate-800 transition-colors">
-          <ArrowLeft size={16} /> Back to Leads
-        </Link>
-      </div>
-    );
-  }
+  if (loading && !lead) return <div className="flex justify-center mt-20"><Loader2 size={36} className="text-blue-500 animate-spin" /></div>;
+  if (error || !lead) return <div className="text-center mt-20 text-slate-500">{error || 'Not found'}</div>;
 
   const balance = (lead.service_fee || 0) - (lead.paid || 0);
-  const docsReceived = docs.filter(d => ['received', 'verified'].includes(d.status)).length;
-  const unisAdmitted = unis.filter(u => u.status === 'admitted').length;
-
-  const initials = (lead.client_name || 'C').substring(0, 2).toUpperCase();
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-12 px-4 sm:px-6 lg:px-8 xl:px-0">
+    <div className="max-w-[1600px] mx-auto pb-12 px-4 sm:px-6 lg:px-8 xl:px-0 space-y-6">
       
-      {/* ── Hero Header ── */}
-      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/30" />
-        <div className="relative px-6 py-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          {/* Left: Identity */}
-          <div className="flex items-center gap-5 min-w-0">
-            <button onClick={() => navigate(-1)} className="p-3 bg-white shadow-sm border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-2xl transition-all active:scale-95" aria-label="Go back">
-              <ArrowLeft size={20} />
-            </button>
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-blue-200 flex items-center justify-center text-white text-2xl sm:text-3xl font-black flex-shrink-0">
-              {initials}
+      {/* ── Professional Header ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate(-1)} className="p-2.5 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-xl transition-all">
+            <ArrowLeft size={18} />
+          </button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{lead.client_name}</h1>
+              <span className="font-mono text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{lead.lead_id}</span>
+              <StatusBadge status={lead.lead_status} />
             </div>
-            <div className="min-w-0 flex flex-col gap-1.5">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight truncate">{lead.client_name}</h2>
-                <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-100 px-2.5 py-1 rounded-lg shadow-sm border border-indigo-200">{lead.lead_id}</span>
-                <StatusBadge status={lead.lead_status} />
-              </div>
-              <div className="flex items-center gap-4 text-sm text-slate-500 font-medium flex-wrap">
-                {lead.phone && (
-                  <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" 
-                     className="flex items-center gap-1.5 hover:text-emerald-600 transition-colors group">
-                    <Phone size={14} className="group-hover:scale-110 transition-transform"/> {lead.phone}
-                  </a>
-                )}
-                {lead.email && (
-                  <span className="flex items-center gap-1.5"><Mail size={14}/> {lead.email}</span>
-                )}
-                <span className="flex items-center gap-1.5"><Calendar size={14}/> Added {lead.date_added || 'Unknown'}</span>
-              </div>
+            <div className="flex items-center gap-4 text-sm text-slate-500 font-medium mt-1">
+              {lead.phone && <span className="flex items-center gap-1.5"><Phone size={14}/> {lead.phone}</span>}
+              {lead.email && <span className="flex items-center gap-1.5"><Mail size={14}/> {lead.email}</span>}
+              <span className="flex items-center gap-1.5"><Calendar size={14}/> Added {lead.date_added}</span>
             </div>
           </div>
-
-          {/* Right: Actions */}
-          <div className="flex items-center gap-3 flex-wrap w-full md:w-auto mt-2 md:mt-0">
-            {lead.phone && (
-              <button disabled={startingChat} onClick={handleStartCRMChat}
-                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl transition-all shadow-sm shadow-indigo-200 active:scale-95">
-                {startingChat ? <Loader2 size={18} className="animate-spin" /> : <MessageSquare size={18} />}
-                CRM Chat
-              </button>
-            )}
-            {lead.drive_link && (
-              <a href={ensureAbsoluteUrl(lead.drive_link)} target="_blank" rel="noreferrer"
-                className="flex-1 md:flex-none flex items-center justify-center gap-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-3 sm:py-2.5 rounded-xl border border-blue-200 shadow-sm transition-all active:scale-95">
-                <ExternalLink size={18} /> Drive
-              </a>
-            )}
-            <button onClick={() => setEditing(true)}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 px-4 py-3 sm:py-2.5 rounded-xl border border-slate-200 shadow-sm transition-all active:scale-95">
-              <Pencil size={18} /> Edit
+        </div>
+        
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          {lead.phone && (
+            <button disabled={startingChat} onClick={handleStartCRMChat}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-all shadow-sm">
+              {startingChat ? <Loader2 size={16} className="animate-spin" /> : <MessageSquare size={16} />}
+              CRM Chat
             </button>
-            {isFullAdmin(user) && (
-              <button onClick={() => setDeleteOpen(true)}
-                className="flex items-center justify-center p-3 sm:p-2.5 text-rose-600 bg-white hover:bg-rose-50 rounded-xl border border-rose-200 shadow-sm transition-all active:scale-95" aria-label="Delete">
-                <Trash2 size={20} />
-              </button>
-            )}
-          </div>
+          )}
+          {lead.drive_link && (
+            <a href={ensureAbsoluteUrl(lead.drive_link)} target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 shadow-sm transition-all">
+              <ExternalLink size={16} /> Drive
+            </a>
+          )}
+          {isFullAdmin(user) && (
+            <button onClick={() => setDeleteOpen(true)} className="flex items-center p-2.5 text-rose-600 bg-white hover:bg-rose-50 rounded-lg border border-slate-200 shadow-sm transition-all">
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── Financial & Operations Summary (Top Stats Row) ── */}
-      {!isAgentUser && (
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-4">
-          <StatCard label="Service fee" value={fmt(lead.service_fee)} icon={<DollarSign size={22}/>} color="blue" />
-          <StatCard label="Total Paid" value={fmt(lead.paid)} icon={<CheckCircle2 size={22}/>} color="emerald"
-                    sub={lead.deposit ? `Includes Deposit: ${fmtFull(lead.deposit)}` : 'No deposit'} />
-          <StatCard label="Balance Due" value={fmt(balance)} icon={<CreditCard size={22}/>} color={balance > 0 ? 'rose' : 'slate'} />
-          <StatCard label="Payment Status" value={lead.payment_status || 'Pending'} icon={<Wallet size={22}/>} 
-                    color={lead.payment_status === 'Paid' ? 'emerald' : lead.payment_status === 'Partial' ? 'amber' : 'slate'} 
-                    valueClass={lead.payment_status === 'Paid' ? 'text-emerald-600' : lead.payment_status === 'Partial' ? 'text-amber-600' : 'text-slate-600'} />
-          <StatCard label="Documents" value={`${docsReceived}/${docs.length}`} icon={<FileText size={22}/>} color="violet" className="col-span-2 md:col-span-4 xl:col-span-1"
-                    sub={unis.length > 0 ? `${unisAdmitted}/${unis.length} unis admitted` : 'No applications yet'} />
-        </div>
-      )}
-
-      {/* ── Main Layout: 3 Columns ── */}
+      {/* ── Main Layout: 2 Columns ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* LEFT COLUMN: Profile & Academics */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card title="Personal Details" icon={<User size={18}/>} color="blue">
-             <div className="grid grid-cols-2 gap-4">
-               <DataField label="Nationality" value={lead.nationality} />
-               <DataField label="Passport Number" value={lead.passport} mono />
-             </div>
-             <div className="h-px bg-slate-100 my-1" />
-             <div className="grid grid-cols-2 gap-4">
-               <DataField label="Date of Birth" value={lead.date_of_birth} />
-               <DataField label="Age" value={lead.age ? `${lead.age} years` : null} />
-             </div>
-          </Card>
-
-          <Card title="Academic Background" icon={<GraduationCap size={18}/>} color="orange">
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="Last Education" value={lead.last_education} />
-              <DataField label="Major/Group" value={lead.last_education_major} />
-            </div>
-            <div className="h-px bg-slate-100 my-1" />
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="GPA / Result" value={lead.gpa} />
-              <DataField label="Passing Year" value={lead.passing_year} />
-            </div>
-            <div className="h-px bg-slate-100 my-1" />
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="English Test" value={lead.english_test_type} />
-              <DataField label="Test Score" value={lead.english_score} />
-            </div>
-          </Card>
-
-          <Card title="Medical & Emergency" icon={<Stethoscope size={18}/>} color="rose">
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="Blood Group" value={lead.blood_group} />
-              <DataField label="Height / Weight" value={lead.height || lead.weight ? `${lead.height || '-'} / ${lead.weight || '-'}` : null} />
-            </div>
-            <div className="h-px bg-slate-100 my-1" />
-            <DataField label="Emergency Contact" value={lead.emergency_contact} />
-            {lead.medical_notes && (
-              <div className="mt-3 p-4 bg-rose-50/50 rounded-2xl border border-rose-100">
-                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5"><AlertCircle size={14}/> Medical Notes</span>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{lead.medical_notes}</p>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* CENTER COLUMN: CRM, Target Program, Documents */}
-        <div className="lg:col-span-4 space-y-6">
+        {/* LEFT COLUMN: Details Sections */}
+        <div className="lg:col-span-8 space-y-6">
           
+          <Section title="Contact Info" icon={<User size={16}/>}>
+            <EditableField label="Full Name" field="client_name" value={lead.client_name} onSave={handleFieldSave} />
+            <EditableField label="Phone" field="phone" value={lead.phone} type="tel" onSave={handleFieldSave} />
+            <EditableField label="Email" field="email" value={lead.email} type="email" onSave={handleFieldSave} />
+            <EditableField label="Nationality" field="nationality" value={lead.nationality} list="nat-list" options={['Bangladesh', 'Pakistan', 'India', 'Nepal', 'Sri Lanka', 'Morocco', 'Egypt']} onSave={handleFieldSave} />
+            <EditableField label="Passport Number" field="passport" value={lead.passport} mono onSave={handleFieldSave} />
+            <EditableField label="Date of Birth" field="date_of_birth" value={lead.date_of_birth} type="date" onSave={handleFieldSave} />
+            <EditableField label="Age" field="age" value={lead.age} type="number" onSave={handleFieldSave} />
+            <EditableField label="Google Drive Folder" field="drive_link" value={lead.drive_link} mono onSave={handleFieldSave} />
+          </Section>
+
+          <Section title="Academic Profile" icon={<GraduationCap size={16}/>}>
+            <EditableField label="Last Education" field="last_education" value={lead.last_education} type="select" options={['SSC', 'HSC', 'O Level', 'A Level', 'Dakhil', 'Alim', 'Diploma', 'Degree', 'Bachelor', 'Masters']} onSave={handleFieldSave} />
+            <EditableField label="Major / Group" field="last_education_major" value={lead.last_education_major} onSave={handleFieldSave} />
+            <EditableField label="GPA / CGPA" field="gpa" value={lead.gpa} type="number" step="0.01" onSave={handleFieldSave} />
+            <EditableField label="Passing Year" field="passing_year" value={lead.passing_year} onSave={handleFieldSave} />
+            <EditableField label="English Test Type" field="english_test_type" value={lead.english_test_type} type="select" options={['IELTS', 'TOEFL', 'PTE', 'Duolingo', 'MOI', 'OET', 'Oxford ELLT', 'Cambridge', 'LanguageCert', 'EFSET']} onSave={handleFieldSave} />
+            <EditableField label="Test Score" field="english_score" value={lead.english_score} onSave={handleFieldSave} />
+          </Section>
+
+          <Section title="Target Program" icon={<Plane size={16}/>}>
+            <EditableField label="Destination" field="destination" value={lead.destination} type="select" options={settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia']} onSave={handleFieldSave} />
+            <EditableField label="Intake Term" field="intake_term" value={lead.intake_term} list="intake-list" options={['Spring 2026', 'March 2026', 'September 2026', 'Spring 2027', 'September 2027']} onSave={handleFieldSave} />
+            <EditableField label="Target Degree" field="degree" value={lead.degree} type="select" options={DEGREES} onSave={handleFieldSave} />
+            <EditableField label="Target Major" field="major" value={lead.major || lead.program} onSave={handleFieldSave} />
+            <EditableField label="Primary University (Pref)" field="university" value={lead.university} onSave={handleFieldSave} />
+          </Section>
+
           {!isAgentUser && (
-            <Card title="Sales & Operations" icon={<Briefcase size={18}/>} color="indigo">
-              <div className="bg-indigo-50/80 rounded-2xl p-5 border border-indigo-100 mb-5 shadow-sm">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-bold text-indigo-500 uppercase tracking-wider">Next Follow-up</span>
-                  <Clock size={16} className="text-indigo-500" />
-                </div>
-                <p className={`text-base font-black ${new Date(lead.next_followup) < new Date() ? 'text-rose-600' : 'text-indigo-900'}`}>
-                  {lead.next_followup ? new Date(lead.next_followup).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }) : 'Not scheduled'}
-                </p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-y-5 gap-x-4">
-                <DataField label="Assigned To" value={lead.assigned_consultant || 'Unassigned'} />
-                <DataField label="Referrer / Agent" value={lead.referrer || 'None'} />
-              </div>
-              <div className="h-px bg-slate-100 my-1" />
-              <div className="grid grid-cols-2 gap-y-5 gap-x-4">
-                <DataField label="Lead Source" value={lead.lead_source} badge={lead.lead_source === 'WhatsApp' ? 'emerald' : lead.lead_source === 'Messenger' ? 'blue' : 'slate'} />
-                <DataField label="Page Name" value={lead.page_name} />
-                <DataField label="Lead Market" value={lead.lead_market} />
-                <DataField label="Lead Type" value={lead.lead_type} />
-              </div>
-            </Card>
+            <Section title="Sales & Operations" icon={<Briefcase size={16}/>}>
+              <EditableField label="Lead Status" field="lead_status" value={lead.lead_status} type="select" options={settings?.leadStatuses || []} onSave={handleFieldSave} />
+              <EditableField label="Assigned Consultant" field="assigned_employee_id" value={lead.assigned_employee_id} type="select" options={employees.map(e => ({value: e.id, label: e.name}))} onSave={handleFieldSave} />
+              <EditableField label="Next Follow-up" field="next_followup" value={lead.next_followup} type="date" onSave={handleFieldSave} />
+              <EditableField label="Market" field="lead_market" value={lead.lead_market} type="select" options={['Bangladesh', 'China']} onSave={handleFieldSave} />
+              <EditableField label="Lead Type" field="lead_type" value={lead.lead_type} type="select" options={['B2C', 'B2B']} onSave={handleFieldSave} />
+              <EditableField label="Acquisition Channel" field="lead_source" value={lead.lead_source} type="select" options={settings?.leadSources || []} onSave={handleFieldSave} />
+              <EditableField label="Referrer / Agent" field="referrer" value={lead.referrer} list="ref-list" options={refOptions} onSave={handleFieldSave} />
+              <EditableField label="Page Name" field="page_name" value={lead.page_name} list="page-list" options={settings?.pages || []} onSave={handleFieldSave} />
+            </Section>
           )}
 
-          <Card title="Target Program" icon={<Plane size={18}/>} color="violet">
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="Destination" value={lead.destination} badge="violet" />
-              <DataField label="Intake Term" value={lead.intake_term} />
-            </div>
-            <div className="h-px bg-slate-100 my-1" />
-            <div className="grid grid-cols-2 gap-4">
-              <DataField label="Target Degree" value={lead.degree} />
-              <DataField label="Target Major" value={lead.major || lead.program} />
-            </div>
-            <div className="h-px bg-slate-100 my-1" />
-            <DataField label="University Pref" value={lead.university} />
-          </Card>
+          {!isAgentUser && (
+            <Section title="Financial & Logistics" icon={<Wallet size={16}/>}>
+              <EditableField label="Service Fee (৳)" field="service_fee" value={lead.service_fee} type="number" onSave={handleFieldSave} />
+              <EditableField label="Paid So Far (৳)" field="paid" value={lead.paid} type="number" onSave={handleFieldSave} />
+              <EditableField label="Deposit (৳)" field="deposit" value={lead.deposit} type="number" onSave={handleFieldSave} />
+              <div className="flex flex-col gap-1 p-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Balance Due</label>
+                <div className={`text-sm font-semibold ${balance > 0 ? 'text-rose-600' : 'text-slate-700'}`}>৳{balance.toLocaleString()}</div>
+              </div>
+              <EditableField label="Payment Status" field="payment_status" value={lead.payment_status} type="select" options={settings?.paymentStatuses || []} onSave={handleFieldSave} />
+              <EditableField label="Application Stage" field="application_stage" value={lead.application_stage} type="select" options={mappedStages} onSave={handleFieldSave} />
+              <EditableField label="Payment Agreement" field="payment_agreement" value={lead.payment_agreement} type="select" options={['Standard', 'All Payment After VISA (Hardcopy Required)', 'All Payment After VISA (Deposit Required)']} onSave={handleFieldSave} />
+              <EditableField label="Hardcopy Status" field="hardcopy_status" value={lead.hardcopy_status} type="select" options={['Not Received', 'Received (In Office)', 'Returned to Student']} onSave={handleFieldSave} />
+            </Section>
+          )}
 
-          <Card title="Application & File Status" icon={<ClipboardList size={18}/>} color="emerald">
-            <div className="mb-5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Application Stage</span>
-              {(lead.lead_status === 'File Opened' || lead.lead_status === 'Enrolled') ? (
-                <div className="inline-block" onClick={e => e.stopPropagation()}>
-                  <InlineStageSelect
-                    value={lead.application_stage}
-                    stages={stages}
-                    onChange={async (newStage) => {
-                      try {
-                        await api.updateStage(lead.id, { stage: newStage });
-                        toast.success(`Updated stage to ${stages.find(s => s.key === newStage)?.label || newStage}`);
-                        load();
-                      } catch (e) {
-                        toast.error(e.message || 'Could not change stage');
-                      }
-                    }}
-                  />
-                </div>
-              ) : <span className="text-xs text-slate-500 font-medium bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">Not started yet (Lead status is {lead.lead_status})</span>}
+          <Section title="Medical, Notes & Documents" icon={<Stethoscope size={16}/>}>
+            <EditableField label="Blood Group" field="blood_group" value={lead.blood_group} type="select" options={BLOOD} onSave={handleFieldSave} />
+            <EditableField label="Emergency Contact" field="emergency_contact" value={lead.emergency_contact} onSave={handleFieldSave} />
+            <EditableField label="Height" field="height" value={lead.height} onSave={handleFieldSave} />
+            <EditableField label="Weight" field="weight" value={lead.weight} onSave={handleFieldSave} />
+            <div className="md:col-span-2">
+              <EditableField label="Medical History / Notes" field="medical_notes" value={lead.medical_notes} type="textarea" onSave={handleFieldSave} />
             </div>
-            
-            <div className="h-px bg-slate-100 my-2" />
-            
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <DataField label="Payment Agreement" value={lead.payment_agreement} />
-              <DataField label="Hardcopy Status" value={lead.hardcopy_status} badge={lead.hardcopy_status === 'Received (In Office)' ? 'emerald' : 'slate'} />
+            <div className="md:col-span-2">
+              <EditableField label="General Notes" field="notes" value={lead.notes} type="textarea" onSave={handleFieldSave} />
             </div>
-            
-            {lead.hardcopy_status === 'Received (In Office)' && lead.hardcopy_documents && (
-              <div className="mt-4 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
-                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1 block">Received Documents</span>
-                <p className="text-sm text-slate-800 font-medium whitespace-pre-wrap">{lead.hardcopy_documents}</p>
+            {lead.hardcopy_status === 'Received (In Office)' && (
+              <div className="md:col-span-2">
+                <EditableField label="List of Received Hardcopy Documents" field="hardcopy_documents" value={lead.hardcopy_documents} type="textarea" onSave={handleFieldSave} />
               </div>
             )}
-          </Card>
+          </Section>
 
-          {unis.length > 0 && (
-            <Card title={`Universities (${unis.length})`} icon={<Building2 size={18}/>} color="blue" padding="p-0">
+          {/* Quick lists for docs/unis */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 text-sm">Universities ({unis.length})</h3>
+              </div>
               <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-                {unis.map(u => (
-                  <div key={u.id} className="p-4 px-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                    <div className="min-w-0 flex-1 pr-4">
-                      <p className="font-bold text-slate-800 text-sm truncate">{u.university}</p>
-                      {u.program && <p className="text-xs font-medium text-slate-500 truncate mt-0.5">{u.program}</p>}
-                    </div>
-                    <span className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg capitalize whitespace-nowrap border ${UNI_STATUS_CLS[u.status] || ''}`}>
-                      {u.status}
-                    </span>
+                {unis.length === 0 ? <p className="p-5 text-sm text-slate-500 text-center">No applications</p> : unis.map(u => (
+                  <div key={u.id} className="p-3 px-5 flex items-center justify-between">
+                    <div className="min-w-0 flex-1"><p className="font-semibold text-slate-800 text-sm truncate">{u.university}</p></div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase ml-2">{u.status}</span>
                   </div>
                 ))}
               </div>
-            </Card>
-          )}
+            </div>
 
-          {docs.length > 0 && (
-            <Card title={`Documents (${docsReceived}/${docs.length})`} icon={<FolderOpen size={18}/>} color="teal" padding="p-0">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 text-sm">Documents ({docs.length})</h3>
+                <Link to="/applications" className="text-xs text-blue-600 hover:underline">View All</Link>
+              </div>
               <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-                {docs.slice(0, 8).map(d => (
-                  <div key={d.id} className="p-3.5 px-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                    <span className="text-sm font-semibold text-slate-700 truncate pr-4">{d.doc_type}</span>
-                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border capitalize whitespace-nowrap ${DOC_STATUS_CLS[d.status] || ''}`}>
-                      {d.status === 'not_required' ? 'N/A' : d.status}
-                    </span>
+                {docs.length === 0 ? <p className="p-5 text-sm text-slate-500 text-center">No documents</p> : docs.map(d => (
+                  <div key={d.id} className="p-3 px-5 flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-700 truncate pr-4">{d.doc_type}</span>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">{d.status === 'not_required' ? 'N/A' : d.status}</span>
                   </div>
                 ))}
-                {docs.length > 8 && (
-                  <div className="p-4 bg-slate-50 text-center border-t border-slate-100">
-                    <Link to="/applications" className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline inline-flex items-center gap-1">
-                      View all {docs.length} documents <ArrowLeft size={12} className="rotate-180" />
-                    </Link>
-                  </div>
-                )}
               </div>
-            </Card>
-          )}
-          
-          {lead.notes && (
-            <Card title="Lead Notes" icon={<MessageSquare size={18}/>} color="amber">
-              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed font-medium">{lead.notes}</p>
-            </Card>
-          )}
+            </div>
+          </div>
         </div>
 
         {/* RIGHT COLUMN: Activity Timeline */}
-        <div className="lg:col-span-4 h-full min-h-[500px]">
-          <Timeline leadId={lead.id} timeline={timeline} onPosted={load} />
+        <div className="lg:col-span-4">
+          <div className="sticky top-6">
+            <Timeline leadId={lead.id} timeline={timeline} onPosted={load} />
+          </div>
         </div>
       </div>
-
-      {/* Edit modal — reuses existing LeadForm */}
-      {editing && (
-        <Modal title={`✏️ Edit Lead — ${lead.lead_id}`} onClose={() => setEditing(false)} wide>
-          <LeadForm lead={lead} settings={settings} onSave={() => { setEditing(false); load(); }} />
-        </Modal>
-      )}
 
       {/* Delete confirm */}
       {deleteOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 border border-slate-200">
-            <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mb-5 mx-auto">
-              <AlertCircle size={32} />
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 text-center mb-2">Delete this lead?</h3>
-            <p className="text-sm text-slate-500 text-center mb-8">
-              <strong>{lead.client_name}</strong> ({lead.lead_id}) and all its history will be permanently removed. This action cannot be undone.
-            </p>
-            <div className="flex justify-center gap-3">
-              <button onClick={() => setDeleteOpen(false)} className="text-sm font-semibold px-6 py-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">Cancel</button>
-              <button onClick={handleDelete} className="text-sm font-semibold px-6 py-2.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 shadow-sm shadow-rose-200 transition-colors">Delete Permanently</button>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">Delete Lead?</h3>
+            <p className="text-sm text-slate-600 mb-6">Permanently remove <strong>{lead.client_name}</strong> and all history?</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setDeleteOpen(false)} className="text-sm font-semibold px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">Cancel</button>
+              <button onClick={handleDelete} className="text-sm font-semibold px-4 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">Delete</button>
             </div>
           </div>
         </div>
@@ -471,117 +357,154 @@ export default function LeadDetail({ user }) {
   );
 }
 
-/* ─── UI Primitives ─── */
-
-function StatCard({ icon, label, value, sub, color, className = '', valueClass = '' }) {
-  const colors = {
-    blue:    'bg-blue-50 text-blue-600 ring-blue-100 from-blue-50 to-blue-100/50',
-    emerald: 'bg-emerald-50 text-emerald-600 ring-emerald-100 from-emerald-50 to-emerald-100/50',
-    violet:  'bg-violet-50 text-violet-600 ring-violet-100 from-violet-50 to-violet-100/50',
-    rose:    'bg-rose-50 text-rose-600 ring-rose-100 from-rose-50 to-rose-100/50',
-    slate:   'bg-slate-50 text-slate-500 ring-slate-200 from-slate-50 to-slate-100/50',
-    amber:   'bg-amber-50 text-amber-600 ring-amber-100 from-amber-50 to-amber-100/50',
-  };
+/* ─── Layout Primitives ─── */
+function Section({ title, icon, children }) {
   return (
-    <div className={`bg-white rounded-3xl p-6 flex flex-col justify-between shadow-sm border border-slate-200 hover:shadow-md transition-all relative overflow-hidden group ${className}`}>
-      <div className={`absolute -right-6 -top-6 w-32 h-32 rounded-full opacity-30 bg-gradient-to-br group-hover:scale-125 transition-transform duration-500 ${colors[color].split(' ').slice(-2).join(' ')}`} />
-      
-      <div className="flex items-start gap-4 relative z-10">
-        <div className={`p-3.5 rounded-2xl ring-1 shadow-sm bg-white bg-opacity-60 backdrop-blur-sm ${colors[color].split(' ').slice(0, 3).join(' ')}`}>
-          {icon}
-        </div>
-        <div className="min-w-0 pt-0.5">
-          <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">{label}</p>
-          <p className={`text-2xl sm:text-3xl font-black leading-tight tracking-tight ${valueClass || 'text-slate-800'}`}>{value}</p>
-          {sub && <p className="text-[11px] text-slate-500 font-medium mt-1 truncate">{sub}</p>}
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+        <div className="text-slate-400">{icon}</div>
+        <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">{title}</h3>
+      </div>
+      <div className="p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+          {children}
         </div>
       </div>
     </div>
   );
 }
 
-function Card({ title, icon, children, color = 'blue', glass = false, padding = 'p-6' }) {
-  const palettes = {
-    blue:   'bg-blue-50/80 text-blue-700 border-blue-100',
-    orange: 'bg-orange-50/80 text-orange-700 border-orange-100',
-    rose:   'bg-rose-50/80 text-rose-700 border-rose-100',
-    indigo: 'bg-indigo-50/80 text-indigo-700 border-indigo-100',
-    violet: 'bg-violet-50/80 text-violet-700 border-violet-100',
-    emerald:'bg-emerald-50/80 text-emerald-700 border-emerald-100',
-    teal:   'bg-teal-50/80 text-teal-700 border-teal-100',
-    amber:  'bg-amber-50/80 text-amber-700 border-amber-100',
+/* ─── Inline Editable Field ─── */
+function EditableField({ label, field, value, type = 'text', options = [], list, onSave, mono = false, step }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentValue, setCurrentValue] = useState(value ?? '');
+  const [saving, setSaving] = useState(false);
+  
+  useEffect(() => {
+    if (!isEditing) setCurrentValue(value ?? '');
+  }, [value, isEditing]);
+
+  const handleSave = async () => {
+    let raw = currentValue;
+    if (type === 'number') {
+      raw = raw === '' ? 0 : Number(raw);
+      if (field === 'gpa' && raw === 0) raw = null;
+    }
+    const oldRaw = (value ?? '');
+    
+    // loose equality check because empty string vs null vs 0 can be tricky, 
+    // but we only skip if they match exactly in string form (for text).
+    if (String(raw) === String(oldRaw)) {
+      setIsEditing(false);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onSave(field, raw);
+      setIsEditing(false);
+    } catch (e) {
+      // stay in edit mode if error
+    } finally {
+      setSaving(false);
+    }
   };
-  const headerColor = palettes[color] || palettes.blue;
 
-  return (
-    <div className={`border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm ${glass ? 'bg-white/80 backdrop-blur-xl' : 'bg-white'} hover:shadow-md transition-shadow`}>
-      <div className={`px-6 py-4 border-b flex items-center gap-3 ${headerColor}`}>
-        <div className="opacity-80">{icon}</div>
-        <h3 className="font-extrabold text-sm tracking-wide uppercase">{title}</h3>
-      </div>
-      <div className={`${padding}`}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-const DataField = ({ label, value, sub, mono, icon, badge }) => {
-  const badgeClasses = {
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    blue:    'bg-blue-50 text-blue-700 border-blue-200',
-    violet:  'bg-violet-50 text-violet-700 border-violet-200',
-    slate:   'bg-slate-50 text-slate-600 border-slate-200',
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && type !== 'textarea') {
+      e.target.blur(); // triggers blur save
+    }
+    if (e.key === 'Escape') {
+      setIsEditing(false);
+      setCurrentValue(value ?? '');
+    }
   };
 
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-        {icon}
-        {label}
-      </span>
-      <div className={`text-sm text-slate-800 font-bold whitespace-pre-wrap ${mono ? 'font-mono tracking-tight text-slate-600' : ''}`}>
-        {value ? (
-          badge ? (
-            <span className={`inline-block px-2.5 py-1 rounded-lg text-[11px] font-black border shadow-sm ${badgeClasses[badge] || badgeClasses.slate}`}>
-              {value}
-            </span>
-          ) : value
+  if (isEditing) {
+    return (
+      <div className="flex flex-col gap-1 relative z-10 bg-white -m-1.5 p-1.5 rounded-lg shadow-md border border-blue-200 ring-2 ring-blue-50/50">
+        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">{label}</label>
+        
+        {type === 'select' ? (
+          <select 
+            autoFocus
+            value={currentValue} 
+            onChange={e => setCurrentValue(e.target.value)}
+            onBlur={handleSave}
+            disabled={saving}
+            className="w-full text-sm font-semibold border-b-2 border-blue-500 bg-blue-50/30 p-1 focus:outline-none rounded-sm text-slate-800"
+          >
+            <option value="">— select —</option>
+            {options.map(o => {
+              const val = typeof o === 'object' ? o.value : o;
+              const lbl = typeof o === 'object' ? o.label : o;
+              return <option key={val} value={val}>{lbl}</option>
+            })}
+          </select>
+        ) : type === 'textarea' ? (
+           <textarea
+             autoFocus
+             value={currentValue}
+             onChange={e => setCurrentValue(e.target.value)}
+             onBlur={handleSave}
+             disabled={saving}
+             rows={3}
+             className="w-full text-sm font-semibold border-2 border-blue-500 bg-blue-50/30 p-2 focus:outline-none rounded-md resize-y text-slate-800"
+           />
         ) : (
-          <span className="text-slate-300 font-medium italic">—</span>
+          <>
+            <input 
+              autoFocus
+              type={type} 
+              step={step}
+              list={list}
+              value={currentValue} 
+              onChange={e => setCurrentValue(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={handleKeyDown}
+              disabled={saving}
+              className={`w-full text-sm font-semibold border-b-2 border-blue-500 bg-blue-50/30 p-1 focus:outline-none rounded-sm text-slate-800 ${mono ? 'font-mono' : ''}`}
+            />
+            {list && options && (
+              <datalist id={list}>
+                {options.map(o => <option key={o} value={o} />)}
+              </datalist>
+            )}
+          </>
         )}
+        {saving && <span className="absolute right-2 top-2 text-blue-500"><Loader2 size={12} className="animate-spin" /></span>}
       </div>
-      {sub && <span className="text-[11px] text-slate-500 font-semibold mt-0.5">{sub}</span>}
+    );
+  }
+
+  // Display mode
+  let displayValue = value;
+  if (type === 'select' && options.length > 0 && typeof options[0] === 'object') {
+    const opt = options.find(o => String(o.value) === String(value));
+    if (opt) displayValue = opt.label;
+  }
+  
+  return (
+    <div 
+      className="flex flex-col gap-1 group cursor-text -m-1.5 p-1.5 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200"
+      onClick={() => setIsEditing(true)}
+    >
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</label>
+        <Pencil size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+      <div className={`text-sm text-slate-800 ${mono ? 'font-mono tracking-tight text-slate-600' : 'font-semibold'}`}>
+        {displayValue ? displayValue : <span className="text-slate-300 italic font-medium">Click to edit...</span>}
+      </div>
     </div>
   );
-};
-
-const DOC_STATUS_CLS = {
-  pending:      'bg-slate-50 text-slate-600 border-slate-200',
-  received:     'bg-blue-50 text-blue-700 border-blue-200',
-  verified:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  rejected:     'bg-rose-50 text-rose-700 border-rose-200',
-  not_required: 'bg-slate-50 text-slate-400 border-slate-200',
-};
-const UNI_STATUS_CLS = {
-  ready:               'bg-sky-50 text-sky-700 border-sky-200',
-  submitted:           'bg-blue-50 text-blue-700 border-blue-200',
-  pending:             'bg-slate-50 text-slate-700 border-slate-200',
-  processing:          'bg-indigo-50 text-indigo-700 border-indigo-200',
-  initial_review_pass: 'bg-teal-50 text-teal-700 border-teal-200',
-  interview:           'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
-  pre_admission:       'bg-purple-50 text-purple-700 border-purple-200',
-  admitted:            'bg-emerald-50 text-emerald-700 border-emerald-200',
-  returned:            'bg-amber-50 text-amber-700 border-amber-200',
-  rejected:            'bg-rose-50 text-rose-700 border-rose-200',
-};
-
+}
 
 /* ─── Timeline ─── */
 function Timeline({ leadId, timeline, onPosted }) {
   const [text, setText] = useState('');
   const [posting, setPosting] = useState(false);
-  const [mode, setMode] = useState('note'); // 'note' (internal) | 'reply' (to student)
+  const [mode, setMode] = useState('note');
   const inputRef = useRef(null);
   const toast = useToast();
 
@@ -592,7 +515,7 @@ function Timeline({ leadId, timeline, onPosted }) {
     try {
       if (mode === 'reply') {
         await api.replyToStudent(leadId, text.trim());
-        toast.success('Reply sent — the student will see it on their portal');
+        toast.success('Reply sent');
       } else {
         await api.addNote(leadId, text.trim());
         toast.success('Note saved');
@@ -604,70 +527,38 @@ function Timeline({ leadId, timeline, onPosted }) {
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-[2rem] shadow-sm hover:shadow-md transition-shadow flex flex-col h-full max-h-[900px] overflow-hidden">
-      <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 text-blue-600 rounded-xl shadow-sm">
-            <Activity size={18} />
-          </div>
-          <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wide">Activity Timeline</h3>
-        </div>
-        <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full shadow-sm">{timeline.length} events</span>
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col max-h-[85vh]">
+      <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+        <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider flex items-center gap-2"><Activity size={16} className="text-slate-400"/> Activity Timeline</h3>
+        <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2.5 py-0.5 rounded-md">{timeline.length}</span>
       </div>
 
-      {/* Compose note */}
-      <form onSubmit={submit} className="p-6 pb-5 border-b border-slate-100 bg-white z-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02)]">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md shadow-blue-200">
-            <MessageSquare size={16} />
+      <form onSubmit={submit} className="p-4 border-b border-slate-100 bg-white shadow-sm relative z-10">
+        <textarea ref={inputRef} value={text} onChange={e => setText(e.target.value)}
+          placeholder={mode === 'reply' ? 'Reply to student...' : 'Add an internal note...'} rows={2}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e); }}
+          className={`w-full border rounded-xl px-3 py-2 text-sm focus:outline-none transition-colors resize-none 
+            ${mode === 'reply' ? 'border-emerald-200 bg-emerald-50 focus:border-emerald-500' : 'border-slate-200 bg-slate-50 focus:border-blue-500'}`} />
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg">
+            <button type="button" onClick={() => setMode('note')} className={`text-xs font-semibold px-2 py-1 rounded-md ${mode === 'note' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>Internal</button>
+            <button type="button" onClick={() => setMode('reply')} className={`text-xs font-semibold px-2 py-1 rounded-md ${mode === 'reply' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500'}`}>To Student</button>
           </div>
-          <div className="flex-1">
-            <textarea ref={inputRef} value={text} onChange={e => setText(e.target.value)}
-              placeholder={mode === 'reply'
-                ? 'Reply to the student — they will see this on their portal...'
-                : 'Add a note — what happened, what’s next, what the next person should know…'}
-              rows={2}
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e); }}
-              className={`w-full border-2 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none transition-colors resize-none placeholder-slate-400
-                ${mode === 'reply' ? 'border-emerald-100 bg-emerald-50/50 focus:border-emerald-400 focus:bg-white' : 'border-slate-200 bg-slate-50/50 focus:border-blue-500 focus:bg-white'}`} />
-            
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
-                <button type="button" onClick={() => setMode('note')}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${mode === 'note' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
-                  Internal note
-                </button>
-                <button type="button" onClick={() => setMode('reply')}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all ${mode === 'reply' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
-                  Reply to student
-                </button>
-              </div>
-              <button type="submit" disabled={posting || !text.trim()}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl disabled:opacity-50 text-white shadow-sm transition-transform active:scale-95
-                  ${mode === 'reply' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}>
-                <Send size={14} /> {posting ? 'Sending…' : (mode === 'reply' ? 'Send Reply' : 'Post Note')}
-              </button>
-            </div>
-          </div>
+          <button type="submit" disabled={posting || !text.trim()} className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50 text-white bg-slate-800 hover:bg-slate-900 transition-colors">
+            <Send size={12} /> {posting ? 'Sending…' : 'Post'}
+          </button>
         </div>
       </form>
 
-      {/* Feed */}
-      {timeline.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50/50">
-          <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-            <Activity size={32} className="text-slate-300" />
-          </div>
-          <p className="text-base font-bold text-slate-700">No activity yet</p>
-          <p className="text-sm text-slate-500 mt-1 max-w-[200px]">Any updates, notes, or status changes will appear here.</p>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto bg-slate-50/30 p-2">
-          <div className="space-y-2">
+      <div className="flex-1 overflow-y-auto p-2">
+        {timeline.length === 0 ? (
+          <div className="p-10 text-center text-slate-500 text-sm">No activity yet.</div>
+        ) : (
+          <div className="space-y-1">
             {timeline.map(a => <TimelineItem key={a.id} a={a} />)}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -675,35 +566,25 @@ function Timeline({ leadId, timeline, onPosted }) {
 function TimelineItem({ a }) {
   const meta = describe(a);
   let details = null;
-  if (a.details) {
-    try { const j = JSON.parse(a.details); details = j; }
-    catch { details = a.details; }
-  }
+  if (a.details) { try { details = JSON.parse(a.details); } catch { details = a.details; } }
+  
   return (
-    <div className="flex items-start gap-4 px-4 py-4 hover:bg-white rounded-2xl transition-colors group">
-      <div className={`p-2.5 rounded-2xl flex-shrink-0 shadow-sm border border-white ${meta.bg}`}>{meta.icon}</div>
-      <div className="flex-1 min-w-0 pt-0.5">
-        <p className="text-sm text-slate-700 leading-snug">
-          {a.actor_name && <strong className="text-slate-900 font-bold">{a.actor_name}</strong>}{' '}{meta.text}
+    <div className="flex gap-3 px-3 py-3 hover:bg-slate-50 rounded-xl transition-colors group">
+      <div className={`mt-0.5 p-1.5 rounded-lg flex-shrink-0 ${meta.bg}`}>{meta.icon}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] text-slate-700 leading-snug">
+          {a.actor_name && <strong className="text-slate-900 font-semibold">{a.actor_name}</strong>}{' '}{meta.text}
         </p>
-        {a.type === 'note' && (
-          <div className="mt-2 p-3.5 bg-amber-50/80 border border-amber-100 rounded-2xl text-sm font-medium text-amber-900 whitespace-pre-wrap shadow-sm">
-            {typeof details === 'string' ? details : a.details}
-          </div>
-        )}
-        {a.type === 'reply_to_student' && (
-          <div className="mt-2 p-3.5 bg-emerald-50/80 border border-emerald-100 rounded-2xl text-sm font-medium text-emerald-900 whitespace-pre-wrap shadow-sm">
-            {typeof details === 'string' ? details : a.details}
-          </div>
-        )}
+        {a.type === 'note' && <div className="mt-1.5 p-2.5 bg-amber-50 rounded-lg text-[13px] text-amber-900 whitespace-pre-wrap">{typeof details === 'string' ? details : a.details}</div>}
+        {a.type === 'reply_to_student' && <div className="mt-1.5 p-2.5 bg-emerald-50 rounded-lg text-[13px] text-emerald-900 whitespace-pre-wrap">{typeof details === 'string' ? details : a.details}</div>}
         {a.type !== 'note' && typeof details === 'object' && details && (
-          <div className="text-[11px] font-medium text-slate-500 mt-2 flex flex-wrap gap-x-3 gap-y-1.5 bg-slate-100/50 p-2.5 rounded-xl border border-slate-100">
+          <div className="text-[11px] text-slate-500 mt-1.5 flex flex-wrap gap-1.5">
             {Object.entries(details).filter(([, v]) => v != null && v !== '').slice(0, 4).map(([k, v]) => (
-              <span key={k} className="bg-white px-2 py-1 rounded-md shadow-sm border border-slate-100"><strong className="text-slate-700">{k}:</strong> {String(v).slice(0, 60)}</span>
+              <span key={k} className="bg-white px-1.5 py-0.5 rounded border border-slate-200 font-medium"><strong className="text-slate-700">{k}:</strong> {String(v).slice(0, 40)}</span>
             ))}
           </div>
         )}
-        <p className="text-[11px] font-bold text-slate-400 mt-2 flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity" title={fullDate(a.created_at)}>
+        <p className="text-[10px] font-semibold text-slate-400 mt-1.5 flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
           <Clock size={10} /> {timeAgo(a.created_at)}
         </p>
       </div>
@@ -714,73 +595,16 @@ function TimelineItem({ a }) {
 function describe(a) {
   const v = a.to_value, from = a.from_value;
   switch (a.type) {
-    case 'lead_created':
-      return { icon: <UserPlus size={16}/>, bg: 'bg-blue-100 text-blue-700',
-               text: <>added this lead</> };
-    case 'lead_status_changed':
-      return { icon: <Tag size={16}/>, bg: 'bg-violet-100 text-violet-700',
-               text: <>moved status: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
-    case 'lead_assigned':
-      return { icon: <User size={16}/>, bg: 'bg-indigo-100 text-indigo-700',
-               text: <>assigned to <strong className="text-indigo-900">{v || '—'}</strong>{from ? <> (was {from})</> : null}</> };
-    case 'lead_payment':
-      return { icon: <DollarSign size={16}/>, bg: 'bg-emerald-100 text-emerald-700',
-               text: <>recorded a payment of <strong className="text-emerald-900">{fmtFull(a.amount)}</strong></> };
-    case 'payment_recorded':
-      return { icon: <Receipt size={16}/>, bg: 'bg-emerald-100 text-emerald-700',
-               text: <>logged income of <strong className="text-emerald-900">{fmtFull(a.amount)}</strong></> };
-    case 'application_stage_changed':
-      return { icon: <Plane size={16}/>, bg: 'bg-orange-100 text-orange-700',
-               text: <>advanced application: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
-    case 'uni_app_status':
-      return { icon: <Building2 size={16}/>, bg: 'bg-violet-100 text-violet-700',
-               text: <>updated a university application: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
-    case 'note':
-      return { icon: <MessageSquare size={16}/>, bg: 'bg-amber-100 text-amber-700',
-               text: <>added a note</> };
-    case 'reply_to_student':
-      return { icon: <Send size={16}/>, bg: 'bg-emerald-100 text-emerald-700',
-               text: <>replied to the student</> };
-    case 'student_doc_upload':
-      return { icon: <Receipt size={16}/>, bg: 'bg-blue-100 text-blue-700',
-               text: <>uploaded a document via the portal</> };
-    default:
-      return { icon: <Activity size={16}/>, bg: 'bg-slate-200 text-slate-600',
-               text: <><span className="capitalize">{a.type.replace(/_/g, ' ')}</span></> };
+    case 'lead_created':              return { icon: <User size={14}/>, bg: 'bg-blue-100 text-blue-700', text: <>added this lead</> };
+    case 'lead_status_changed':       return { icon: <Activity size={14}/>, bg: 'bg-violet-100 text-violet-700', text: <>status: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
+    case 'lead_assigned':             return { icon: <User size={14}/>, bg: 'bg-indigo-100 text-indigo-700', text: <>assigned to <strong className="text-indigo-900">{v || '—'}</strong></> };
+    case 'lead_payment':              return { icon: <Wallet size={14}/>, bg: 'bg-emerald-100 text-emerald-700', text: <>recorded payment: <strong>{fmtFull(a.amount)}</strong></> };
+    case 'payment_recorded':          return { icon: <Wallet size={14}/>, bg: 'bg-emerald-100 text-emerald-700', text: <>logged income: <strong>{fmtFull(a.amount)}</strong></> };
+    case 'application_stage_changed': return { icon: <Plane size={14}/>, bg: 'bg-orange-100 text-orange-700', text: <>advanced app: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
+    case 'uni_app_status':            return { icon: <Building2 size={14}/>, bg: 'bg-violet-100 text-violet-700', text: <>university status: <strong>{from || '—'}</strong> → <strong>{v || '—'}</strong></> };
+    case 'note':                      return { icon: <MessageSquare size={14}/>, bg: 'bg-amber-100 text-amber-700', text: <>added a note</> };
+    case 'reply_to_student':          return { icon: <Send size={14}/>, bg: 'bg-emerald-100 text-emerald-700', text: <>replied to student</> };
+    case 'student_doc_upload':        return { icon: <FileText size={14}/>, bg: 'bg-blue-100 text-blue-700', text: <>uploaded a document</> };
+    default:                          return { icon: <Activity size={14}/>, bg: 'bg-slate-100 text-slate-600', text: <><span className="capitalize">{a.type.replace(/_/g, ' ')}</span></> };
   }
-}
-
-const STAGE_COLORS_LIST = [
-  { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-700 hover:bg-slate-100' },
-  { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800 hover:bg-blue-100' },
-  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-800 hover:bg-violet-100' },
-  { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-800 hover:bg-amber-100' },
-  { bg: 'bg-orange-50',  border: 'border-orange-200',  text: 'text-orange-800 hover:bg-orange-100' },
-  { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-800 hover:bg-teal-100' },
-  { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800 hover:bg-emerald-100' },
-  { bg: 'bg-green-50',   border: 'border-green-200',   text: 'text-green-800 hover:bg-green-100' },
-  { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-800 hover:bg-indigo-100' },
-  { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-800 hover:bg-fuchsia-100' },
-  { bg: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-800 hover:bg-pink-100' },
-  { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-800 hover:bg-sky-100' },
-];
-
-function InlineStageSelect({ value, onChange, stages }) {
-  if (!stages || stages.length === 0) return null;
-  const idx = stages.findIndex(s => s.key === value);
-  const color = STAGE_COLORS_LIST[idx !== -1 ? idx % STAGE_COLORS_LIST.length : 0];
-  const selectValue = value || stages[0]?.key || '';
-  
-  return (
-    <select
-      value={selectValue}
-      onClick={e => e.stopPropagation()} // prevent click
-      onChange={e => onChange(e.target.value)}
-      className={`px-3.5 py-1.5 rounded-lg text-[11px] font-black border transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 shadow-sm ${color.bg} ${color.text} ${color.border}`}
-    >
-      {stages.map(s => (
-        <option key={s.key} value={s.key} className="bg-white text-slate-800 font-bold">{s.label}</option>
-      ))}
-    </select>
-  );
 }
