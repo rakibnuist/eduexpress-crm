@@ -4398,7 +4398,7 @@ app.get('/api/leads', (req, res) => {
   if (destination) { where.push("destination=@destination");      params.destination = destination; }
   if (intake)      { where.push("intake_term=@intake");           params.intake = intake; }
   if (page_name)   { where.push("page_name=@page_name");          params.page_name = page_name; }
-  
+  if (source)      { where.push("lead_source=@source");           params.source = source; }
   if (follow_up) {
     const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
     const todayStr = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
