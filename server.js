@@ -4925,7 +4925,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
     if (d.source === 'In-House') d.lead_type = 'B2C';
     if (!d.lead_market) d.lead_market = 'Bangladesh';
-    const oldLead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+    const oldLead = db.prepare("SELECT * FROM leads WHERE id=? OR lead_id=?").get(req.params.id, req.params.id);
     if (!oldLead) return res.status(404).json({ error: 'Not found' });
     // China data isolation: block unauthorized access to China leads
     if (isChinaBlockedForUser(oldLead, req.user)) {
@@ -4938,8 +4938,8 @@ app.put('/api/leads/:id', async (req, res) => {
     const params = leadParams(d, oldLead.lead_id, balance);
     delete params.lead_id;
     delete params.date_added;
-    db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: req.params.id });
-    let lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
+    db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: oldLead.id });
+    let lead = db.prepare("SELECT * FROM leads WHERE id=?").get(oldLead.id);
 
     // Audit the changes that matter to an owner.
     let autoUpdates = [];
