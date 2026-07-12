@@ -1461,6 +1461,16 @@ app.get('/api/admin/backfill-meta', async (req, res) => {
   }
 });
 
+
+app.get('/api/public/check-lead', async (req, res) => {
+  try {
+    const lead = db.prepare("SELECT * FROM leads WHERE lead_id = 'L260283'").get();
+    res.json(lead);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhost:${PORT}`));
 
 // ── Init DB async in background ────────────────────────────
