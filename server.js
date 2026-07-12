@@ -9343,7 +9343,7 @@ async function backfillMetaLeadAds() {
     if (missingLeads.length === 0) return;
     
     console.log(`[Startup] Found ${missingLeads.length} unique form_ids to backfill from Meta API.`);
-    const channels = db.prepare("SELECT * FROM channels WHERE type='facebook' AND access_token IS NOT NULL").all();
+    const channels = db.prepare("SELECT * FROM channels WHERE type IN ('messenger', 'facebook', 'instagram') AND access_token IS NOT NULL").all();
     
     for (const { meta_form_id } of missingLeads) {
       let found = false;
