@@ -4501,10 +4501,15 @@ app.get('/api/leads/source-stats', (req, res) => {
     (Array.isArray(u?.roles) && (u.roles.includes('founder_ceo') || u.roles.includes('managing_director')));
   if (!isAdminOrCEO) return res.status(403).json({ error: 'Forbidden' });
 
-  const { days = 30, source, page_name, ad_name } = req.query;
+  const { days = 30, source, page_name, ad_name, type = 'paid' } = req.query;
   const since = new Date(Date.now() - parseInt(days) * 86400000).toISOString().slice(0, 10);
 
-  let extraWhere = " AND ((ad_name IS NOT NULL AND ad_name != '') OR (meta_ad_id IS NOT NULL AND meta_ad_id != ''))";
+  let extraWhere = '';
+  if (type === 'paid') {
+    extraWhere = " AND ((ad_name IS NOT NULL AND ad_name != '') OR (meta_ad_id IS NOT NULL AND meta_ad_id != ''))";
+  } else if (type === 'organic') {
+    extraWhere = " AND (ad_name IS NULL OR ad_name = '') AND (meta_ad_id IS NULL OR meta_ad_id = '')";
+  }
   const params = [since];
 
   if (source) {
@@ -4588,6 +4593,7 @@ app.get('/api/leads/source-stats', (req, res) => {
       if (req.query.page_name) continue; 
       if (req.query.source && req.query.source !== 'meta') continue;
       if (req.query.ad_name && req.query.ad_name !== row.ad_name) continue;
+      if (req.query.type === 'organic') continue;
       
       adMap.set(row.meta_ad_id || row.ad_name, {
         ad_name: row.ad_name,

@@ -26,6 +26,7 @@ export default function AdPerformance({ user }) {
   
   const [settings, setSettings] = useState(null);
   const [statsDays, setStatsDays] = useState(30);
+  const [statsType, setStatsType] = useState('paid');
   const [statsFilters, setStatsFilters] = useState({ source: '', page_name: '', ad_name: '' });
   const [sourceStats, setSourceStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -39,7 +40,7 @@ export default function AdPerformance({ user }) {
   useEffect(() => {
     if (!isAdmin) return;
     setStatsLoading(true);
-    const params = new URLSearchParams({ days: statsDays });
+    const params = new URLSearchParams({ days: statsDays, type: statsType });
     if (statsFilters.source) params.append('source', statsFilters.source);
     if (statsFilters.page_name) params.append('page_name', statsFilters.page_name);
     if (statsFilters.ad_name) params.append('ad_name', statsFilters.ad_name);
@@ -49,7 +50,7 @@ export default function AdPerformance({ user }) {
       .then(setSourceStats)
       .catch(console.error)
       .finally(() => setStatsLoading(false));
-  }, [isAdmin, statsDays, statsFilters]);
+  }, [isAdmin, statsDays, statsType, statsFilters]);
 
   if (!isAdmin) {
     return (
@@ -73,7 +74,7 @@ export default function AdPerformance({ user }) {
           <div>
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2.5">
               <MousePointerClick className="text-blue-500" />
-              Ad Performance
+              Source & Ad Performance
             </h1>
             <p className="text-slate-500 text-sm mt-1">Analytics for Messenger, Instagram, WhatsApp & Web Leads</p>
           </div>
@@ -97,6 +98,15 @@ export default function AdPerformance({ user }) {
         <div className="max-w-[1600px] mx-auto w-full space-y-6">
           {/* Filters */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-wrap gap-3 items-center">
+             <select
+               value={statsType}
+               onChange={e => setStatsType(e.target.value)}
+               className="h-9 px-3 text-xs font-bold border border-blue-200 rounded-xl bg-blue-50 text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-colors cursor-pointer"
+             >
+               <option value="paid">Paid Ads Only</option>
+               <option value="organic">Organic Only</option>
+               <option value="all">Paid + Organic (All)</option>
+             </select>
              <FilterSelect value={statsFilters.source} onChange={v => setStatsFilters(s => ({ ...s, source: v }))} options={settings?.leadSources || []} placeholder="All Sources" />
              <FilterSelect value={statsFilters.page_name} onChange={v => setStatsFilters(s => ({ ...s, page_name: v }))} options={settings?.pages || []} placeholder="All Pages" />
              <FilterSelect value={statsFilters.ad_name} onChange={v => setStatsFilters(s => ({ ...s, ad_name: v }))} options={settings?.ads || []} placeholder="All Ads" />
