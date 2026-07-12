@@ -4524,68 +4524,67 @@ app.get('/api/leads/source-stats', (req, res) => {
 app.get('/api/leads', (req, res) => {
   const { search, status, consultant, destination, source, lead_market, lead_type, intake, page_name, follow_up, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
-  if (lead_market) { where.push("lead_market=@lead_market"); params.lead_market = lead_market; }
-  if (lead_type) { where.push("lead_type=@lead_type"); params.lead_type = lead_type; }
-  if (search && search !== 'undefined' && search !== 'null') { where.push("(client_name LIKE @search OR phone LIKE @search OR lead_id LIKE @search OR email LIKE @search)"); params.search = `%${search}%`; }
-  if (status)      { where.push("lead_status=@status");           params.status = status; }
-  if (consultant)  { where.push("assigned_consultant=@consultant");params.consultant = consultant; }
-  if (destination) { where.push("destination=@destination");      params.destination = destination; }
-  if (intake)      { where.push("intake_term=@intake");           params.intake = intake; }
-  if (page_name)   { where.push("page_name=@page_name");          params.page_name = page_name; }
-  if (source)      { where.push("lead_source=@source");           params.source = source; }
+  if (lead_market) { where.push("l.lead_market=@lead_market"); params.lead_market = lead_market; }
+  if (lead_type) { where.push("l.lead_type=@lead_type"); params.lead_type = lead_type; }
+  if (search && search !== 'undefined' && search !== 'null') { where.push("(l.client_name LIKE @search OR l.phone LIKE @search OR l.lead_id LIKE @search OR l.email LIKE @search)"); params.search = `%${search}%`; }
+  if (status)      { where.push("l.lead_status=@status");           params.status = status; }
+  if (consultant)  { where.push("l.assigned_consultant=@consultant");params.consultant = consultant; }
+  if (destination) { where.push("l.destination=@destination");      params.destination = destination; }
+  if (intake)      { where.push("l.intake_term=@intake");           params.intake = intake; }
+  if (page_name)   { where.push("l.page_name=@page_name");          params.page_name = page_name; }
+  if (source) {
+    if (source === 'meta') {
+      where.push("l.meta_lead_id IS NOT NULL");
+    } else {
+      where.push("l.lead_source=@source");
+      params.source = source;
+    }
+  }
   if (follow_up) {
     const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
     const todayStr = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
     
     if (follow_up === 'Today') {
-      where.push("next_followup LIKE @today");
+      where.push("l.next_followup LIKE @today");
       params.today = `${todayStr}%`;
     } else if (follow_up === 'Overdue') {
-      where.push("next_followup < @today AND next_followup IS NOT NULL AND next_followup != ''");
+      where.push("l.next_followup < @today AND l.next_followup IS NOT NULL AND l.next_followup != ''");
       params.today = todayStr;
     } else if (follow_up === 'Upcoming') {
-      where.push("next_followup > @today AND next_followup IS NOT NULL AND next_followup != ''");
+      where.push("l.next_followup > @today AND l.next_followup IS NOT NULL AND l.next_followup != ''");
       params.today = todayStr;
     }
   }
 
-  if (source) {
-    if (source === 'meta') {
-      where.push("meta_lead_id IS NOT NULL");
-    } else {
-      where.push("lead_source=@source");
-      params.source = source;
-    }
-  }
   // Consultants are scoped to their own assigned leads — enforced server-side.
   // Admins, Managing Directors, Investors, and Application Managers see everything.
   if (canViewOwnLeadsOnly(req.user)) {
     const meName = req.user.consultant_name || req.user.name || '';
     const meClean = meName.split(' ')[0];
-    where.push("(TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(assigned_consultant)) || '%' OR TRIM(LOWER(assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
+    where.push("(TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@me)) OR TRIM(LOWER(l.assigned_consultant)) = TRIM(LOWER(@meClean)) OR TRIM(LOWER(@me)) LIKE '%' || TRIM(LOWER(l.assigned_consultant)) || '%' OR TRIM(LOWER(l.assigned_consultant)) LIKE '%' || TRIM(LOWER(@meClean)) || '%')");
     params.me = meName;
     params.meClean = meClean;
   }
   // Agency isolation: Agents can ONLY see their own agency's leads
   if (isAgent(req.user)) {
-    where.push("agency_id=@agency_id");
+    where.push("l.agency_id=@agency_id");
     params.agency_id = req.user.agency_id;
   }
   // China data isolation: exclude China leads for unauthorized users unless they own/are assigned to them
   if (!canViewChinaData(req.user) && !canViewOwnLeadsOnly(req.user)) {
-    where.push("(destination != 'China' AND lead_market != 'China')");
+    where.push("(l.destination != 'China' AND l.lead_market != 'China')");
   }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (parseInt(page) - 1) * parseInt(limit);
-  const total  = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws}`).get(params).c;
+  const total  = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws}`).get(params).c;
   const leads  = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id ${ws} ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}`).all(params);
   
   // Compute global stats based on the current filters
-  const consultations = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} lead_status='Office Visited'`).get(params).c;
-  const activeFiles = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} (lead_status='File Opened' OR lead_status='Enrolled')`).get(params).c;
+  const consultations = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws ? ws + " AND" : "WHERE"} l.lead_status='Office Visited'`).get(params).c;
+  const activeFiles = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws ? ws + " AND" : "WHERE"} (l.lead_status='File Opened' OR l.lead_status='Enrolled')`).get(params).c;
   const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
   const todayStrForStats = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
-  const dueToday = db.prepare(`SELECT COUNT(*) as c FROM leads ${ws ? ws + " AND" : "WHERE"} next_followup LIKE @todayForStats`).get({...params, todayForStats: `${todayStrForStats}%`}).c;
+  const dueToday = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws ? ws + " AND" : "WHERE"} l.next_followup LIKE @todayForStats`).get({...params, todayForStats: `${todayStrForStats}%`}).c;
   
   res.json({ 
     leads, 
