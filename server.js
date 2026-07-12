@@ -4516,7 +4516,7 @@ app.get('/api/leads/source-stats', (req, res) => {
     WHERE l.date_added >= ? ${extraWhereAd}
     GROUP BY l.date_added
     ORDER BY l.date_added ASC
-  `).all(...paramsByAd);
+  `).all(...params);
 
   res.json({ bySource, byPage, byAd, daily, totals, days: parseInt(days), since });
 });
