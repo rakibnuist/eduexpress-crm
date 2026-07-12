@@ -1622,6 +1622,14 @@ process.on('SIGINT',  () => { if (db) db.flush(); process.exit(0); });
 // SCHEMA / MIGRATIONS / SEED  (called after DB ready)
 // ─────────────────────────────────────────────────────────
 function setupSchema() { db.exec(`
+  CREATE TABLE IF NOT EXISTS ad_performance_cache (
+    ad_id TEXT,
+    date TEXT,
+    spend REAL DEFAULT 0,
+    impressions INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    PRIMARY KEY (ad_id, date)
+  );
   CREATE TABLE IF NOT EXISTS leads (
     lead_market TEXT DEFAULT 'Bangladesh',
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2594,6 +2602,8 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN channel_id INTEGER`,
     `ALTER TABLE leads ADD COLUMN lead_market TEXT DEFAULT 'Bangladesh'`,
     `ALTER TABLE contacts ADD COLUMN referral_data TEXT`,
+    `ALTER TABLE leads ADD COLUMN meta_adset_id TEXT`,
+    `ALTER TABLE leads ADD COLUMN meta_adset_name TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
