@@ -1419,14 +1419,25 @@ app.get('/api/admin/debug-leads', async (req, res) => {
   try {
     const leads = db.prepare("SELECT id, lead_id, client_name, page_name, lead_source, meta_form_id FROM leads WHERE page_name IS NULL ORDER BY id ASC LIMIT 50").all();
     
-    // For each lead, try to find the channel name through conversations and contacts
+    let fixedCount = 0;
     for (const l of leads) {
        const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
        const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
+       
+       if (throughConv && throughConv.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughConv.name, throughConv.id, l.id);
+         l.fixed_page_name = throughConv.name;
+         fixedCount++;
+       } else if (throughContact && throughContact.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
+         l.fixed_page_name = throughContact.name;
+         fixedCount++;
+       }
+       
        l.debug = { throughConv, throughContact };
     }
     
-    res.json({ ok: true, leads });
+    res.json({ ok: true, fixedCount, leads });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
