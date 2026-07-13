@@ -3725,7 +3725,17 @@ function upsertConversation(contactId, channelId, channelType) {
 function createLeadFromContact(contactId, source, initialMessage, creatorUser, options = {}) {
   const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
   if (!contact) throw new Error("Contact not found for conversion");
-  if (contact.lead_id) throw new Error("Contact already converted to lead (lead_id: " + contact.lead_id + ")");
+  
+  if (contact.lead_id) {
+    const existingLead = db.prepare("SELECT id FROM leads WHERE id=?").get(contact.lead_id);
+    if (existingLead) {
+      throw new Error("Contact already converted to lead (lead_id: " + contact.lead_id + ")");
+    } else {
+      // Clear the dangling reference so we can proceed
+      db.prepare("UPDATE contacts SET lead_id=NULL WHERE id=?").run(contactId);
+      db.prepare("UPDATE conversations SET lead_id=NULL WHERE contact_id=?").run(contactId);
+    }
+  }
 
   const lead_id = nextLeadId();
     const sourceMap = {
@@ -5114,6 +5124,8 @@ app.delete('/api/leads/:id', (req, res) => {
   if (!leadIsVisibleTo(lead, req.user)) {
     return res.status(403).json({ error: 'Access denied to this lead record' });
   }
+  db.prepare("UPDATE contacts SET lead_id=NULL WHERE lead_id=?").run(req.params.id);
+  db.prepare("UPDATE conversations SET lead_id=NULL WHERE lead_id=?").run(req.params.id);
   db.prepare("DELETE FROM leads WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 });

@@ -823,12 +823,7 @@ export default function Conversations({ user }) {
       
       const extractedName = selectedConv.contact_name || 'Chat Contact';
       
-      const targetLeadId = selectedConv.lead_id || selectedConv.contact_lead_id;
-      if (targetLeadId) {
-        await api.updateLead(targetLeadId, { phone: extractedPhone });
-        await api.addNote(targetLeadId, `Extracted from Chat: Phone - ${extractedPhone}, Ads: ${adDetails}`);
-        toast.success('Lead updated with extracted info!');
-      } else {
+      const createNewFromScan = async () => {
         const res = await api.convertLead(selectedConv.id, { 
           destination: 'Bangladesh', 
           phone: extractedPhone, 
@@ -838,8 +833,27 @@ export default function Conversations({ user }) {
           await api.addNote(res.lead_id, `Extracted from Chat: Ads: ${adDetails}`);
           setSelectedConv(p => ({ ...p, lead_id: res.lead_id })); 
           setConversations(p => p.map(c => c.id === selectedConv.id ? { ...c, lead_id: res.lead_id } : c));
-          toast.success('New lead created from extracted info!');
         }
+        return res;
+      };
+
+      const targetLeadId = selectedConv.lead_id || selectedConv.contact_lead_id;
+      if (targetLeadId) {
+        try {
+          await api.updateLead(targetLeadId, { phone: extractedPhone });
+          await api.addNote(targetLeadId, `Extracted from Chat: Phone - ${extractedPhone}, Ads: ${adDetails}`);
+          toast.success('Lead updated with extracted info!');
+        } catch (updateErr) {
+          if (updateErr.message === 'Not found' || updateErr.message.includes('404')) {
+            await createNewFromScan();
+            toast.success('Linked lead was missing; new lead created with extracted info!');
+          } else {
+            throw updateErr;
+          }
+        }
+      } else {
+        await createNewFromScan();
+        toast.success('New lead created from extracted info!');
       }
     } catch (e) {
       toast.error('Failed to extract and sync lead: ' + e.message);
