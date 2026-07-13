@@ -6677,8 +6677,17 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
       const allText = messages.map(m => m.content).join(' ');
       const inboundText = messages.filter(m => m.direction === 'in').map(m => m.content).join(' ');
       
-      const phoneRegex = /(?:(?:\+|00)?88[\s\-]?)?01[3-9](?:[\s\-]*\d){8}/g;
-      const rawPhones = inboundText.match(phoneRegex) || allText.match(phoneRegex) || [];
+      const phoneRegex = /(?:(?:\+|00)?880?[\s\-]?)?(?:0[\s\-]?)?1[\s\-]?[3-9](?:[\s\-]*\d){8}/g;
+      
+      const banglaToEnglish = (str) => {
+        const banglaDigits = {'০':'0','১':'1','২':'2','৩':'3','৪':'4','৫':'5','৬':'6','৭':'7','৮':'8','৯':'9'};
+        return str.replace(/[০-৯]/g, (match) => banglaDigits[match]);
+      };
+      
+      const englishAllText = banglaToEnglish(allText);
+      const englishInboundText = banglaToEnglish(inboundText);
+      
+      let rawPhones = englishInboundText.match(phoneRegex) || englishAllText.match(phoneRegex) || [];
       
       const companyNumbers = ['+8801983333566', '+8801333099608'];
       

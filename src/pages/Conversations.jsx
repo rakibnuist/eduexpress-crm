@@ -807,8 +807,19 @@ export default function Conversations({ user }) {
     try {
       const allText = messages.map(m => m.content).join(' ');
       const inboundText = messages.filter(m => m.direction === 'in').map(m => m.content).join(' ');
-      const phoneRegex = /(?:(?:\+|00)?88[\s\-]?)?01[3-9](?:[\s\-]*\d){8}/g;
-      const phones = inboundText.match(phoneRegex);
+      
+      const banglaToEnglish = (str) => {
+        const banglaDigits = {'০':'0','১':'1','২':'2','৩':'3','৪':'4','৫':'5','৬':'6','৭':'7','৮':'8','৯':'9'};
+        return str.replace(/[০-৯]/g, (match) => banglaDigits[match]);
+      };
+      const englishAllText = banglaToEnglish(allText);
+      const englishInboundText = banglaToEnglish(inboundText);
+
+      const phoneRegex = /(?:(?:\+|00)?880?[\s\-]?)?(?:0[\s\-]?)?1[\s\-]?[3-9](?:[\s\-]*\d){8}/g;
+      let phones = englishInboundText.match(phoneRegex);
+      if (!phones || phones.length === 0) {
+        phones = englishAllText.match(phoneRegex);
+      }
       
       if (!phones || phones.length === 0) {
         toast.info('No Bangladeshi phone number found in chat.');
