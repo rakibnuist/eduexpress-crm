@@ -19,7 +19,6 @@
     "@hello-pangea/dnd": "^18.0.1",
     "@tailwindcss/vite": "^4.3.0",
     "@vitejs/plugin-react": "^6.0.1",
-    "better-sqlite3": "^8.7.0",
     "clsx": "^2.1.1",
     "concurrently": "^9.2.1",
     "cors": "^2.8.6",
