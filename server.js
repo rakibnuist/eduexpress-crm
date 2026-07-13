@@ -3723,11 +3723,11 @@ function upsertConversation(contactId, channelId, channelType) {
 }
 
 function createLeadFromContact(contactId, source, initialMessage, creatorUser, options = {}) {
-  try {
-    const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
-    if (!contact || contact.lead_id) return null;
+  const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(contactId);
+  if (!contact) throw new Error("Contact not found for conversion");
+  if (contact.lead_id) throw new Error("Contact already converted to lead (lead_id: " + contact.lead_id + ")");
 
-    const lead_id = nextLeadId();
+  const lead_id = nextLeadId();
     const sourceMap = {
       whatsapp: 'WhatsApp Inquiry',
       messenger: 'Messenger Inquiry',
@@ -3824,10 +3824,7 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
       console.log(`✅ Auto-created Lead from ${source}: ${lead_id} — ${client_name}`);
       return lead;
     }
-  } catch(e) {
-    console.error('Error auto-creating lead from contact:', e.message);
-  }
-  return null;
+    throw new Error("Lead could not be retrieved after insert");
 }
 
 function createLeadFromReferral({ contact, channel, referralData, sourcePlatform }) {
@@ -7335,10 +7332,14 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
         lead.assigned_consultant = consultant;
       }
     } else {
-      // Create new lead
-      lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user, {
-        destination, phone, degree, client_name
-      });
+      try {
+        lead = createLeadFromContact(conv.contact_id, conv.channel_type, conv.last_message, req.user, {
+          destination, phone, degree, client_name
+        });
+      } catch (err) {
+        console.error('Convert lead error:', err);
+        return res.status(500).json({ error: err.message || 'Failed to create lead' });
+      }
       if (!lead) return res.status(500).json({ error: 'Failed to create lead' });
     }
 

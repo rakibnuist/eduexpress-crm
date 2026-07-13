@@ -823,9 +823,10 @@ export default function Conversations({ user }) {
       
       const extractedName = selectedConv.contact_name || 'Chat Contact';
       
-      if (selectedConv.lead_id) {
-        await api.updateLead(selectedConv.lead_id, { phone: extractedPhone });
-        await api.addNote(selectedConv.lead_id, `Extracted from Chat: Phone - ${extractedPhone}, Ads: ${adDetails}`);
+      const targetLeadId = selectedConv.lead_id || selectedConv.contact_lead_id;
+      if (targetLeadId) {
+        await api.updateLead(targetLeadId, { phone: extractedPhone });
+        await api.addNote(targetLeadId, `Extracted from Chat: Phone - ${extractedPhone}, Ads: ${adDetails}`);
         toast.success('Lead updated with extracted info!');
       } else {
         const res = await api.convertLead(selectedConv.id, { 
@@ -1251,8 +1252,8 @@ export default function Conversations({ user }) {
                     </div>
                     <p className="text-[11px] text-[#8a8d91] flex items-center gap-1.5">
                       {selectedConv.contact_phone && <><Phone size={9} />{selectedConv.contact_phone}</>}
-                      {selectedConv.lead_id
-                        ? <><span className="text-[#e4e6eb]">·</span><Link to={`/leads/${selectedConv.lead_id}`} className="text-[#1877f2] hover:underline font-semibold inline-flex items-center gap-0.5">Lead #{selectedConv.lead_id} <ExternalLink size={9} /></Link></>
+                      {(selectedConv.lead_id || selectedConv.contact_lead_id)
+                        ? <><span className="text-[#e4e6eb]">·</span><Link to={`/leads/${selectedConv.lead_id || selectedConv.contact_lead_id}`} className="text-[#1877f2] hover:underline font-semibold inline-flex items-center gap-0.5">Lead #{selectedConv.lead_id || selectedConv.contact_lead_id} <ExternalLink size={9} /></Link></>
                         : <><span className="text-[#e4e6eb]">·</span><button onClick={handleOpenLeadModal} className="text-amber-600 hover:text-amber-700 font-semibold">+ Convert to Lead</button></>
                       }
                     </p>

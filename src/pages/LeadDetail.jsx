@@ -261,7 +261,7 @@ export default function LeadDetail({ user }) {
               <EditableField label="Lead Type" field="lead_type" value={lead.lead_type} type="select" options={['B2C', 'B2B']} onSave={handleFieldSave} />
               <EditableField label="Acquisition Channel" field="lead_source" value={lead.lead_source} type="select" options={settings?.leadSources || []} onSave={handleFieldSave} />
               <EditableField label="Referrer / Agent" field="referrer" value={lead.referrer} list="ref-list" options={refOptions} onSave={handleFieldSave} />
-              <EditableField label="Page Name" field="page_name" value={lead.page_name} list="page-list" options={settings?.pages || []} onSave={handleFieldSave} />
+              <EditableField label="Page Name" field="page_name" value={lead.page_name} list="page-list" options={Array.from(new Set([...(settings?.pages || []), 'WhatsApp']))} onSave={handleFieldSave} />
             </Section>
           )}
 
