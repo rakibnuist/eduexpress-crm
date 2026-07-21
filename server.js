@@ -1136,6 +1136,9 @@ app.put('/api/leads/:id/stage', (req, res) => {
   if (stage && oldStage !== stage) {
     logActivity({ type: 'application_stage_changed', actor: req.user, lead: fresh, from: oldStage, to: stage });
   }
+  if (lead.lead_status !== fresh.lead_status) {
+    setImmediate(() => fireLeadStatusChangeRules(fresh, lead.lead_status, fresh.lead_status).catch(() => {}));
+  }
   res.json(fresh);
 });
 
@@ -2574,6 +2577,20 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS lead_routing_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_key TEXT UNIQUE,
+    keywords TEXT,            -- JSON array of matching keywords
+    destination TEXT,
+    source TEXT,
+    consultants TEXT,         -- JSON array of consultant names
+    strategy TEXT DEFAULT 'round_robin',  -- 'round_robin' | 'fixed'
+    last_index INTEGER DEFAULT -1,
+    priority INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS message_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -3178,6 +3195,16 @@ function runMigrations() {
       }
       console.log(`[migration] Seeded ${seedData.defaultRules.length} automation rules.`);
     }
+
+    // Seed lead routing rules (replaces old hardcoded consultant routing)
+    if (db.prepare("SELECT COUNT(*) as c FROM lead_routing_rules").get().c === 0) {
+      const insertRoute = db.prepare(`INSERT INTO lead_routing_rules (rule_key, keywords, destination, source, consultants, strategy, priority)
+        VALUES (?,?,?,?,?,?,?)`);
+      insertRoute.run('china', JSON.stringify(['china','chinese','中国']), 'China', 'China', JSON.stringify(['Abdullah Al Rakib']), 'round_robin', 30);
+      insertRoute.run('b2b', JSON.stringify(['b2b','agent']), 'Bangladesh', 'B2B', JSON.stringify(['Tahmid Imam']), 'round_robin', 20);
+      insertRoute.run('bd_office', JSON.stringify(['bangladesh','bd','office']), 'Bangladesh', 'In-House', JSON.stringify(['Taj Ahmed']), 'round_robin', 10);
+      console.log('[migration] Seeded 3 lead routing rules (china, b2b, bd_office).');
+    }
   } catch (e) {
     console.error('[migration] Seed data failed:', e.message);
   }  // ── Professional SMM Pipeline v3.0: Recreate content_posts with new status pipeline ──
@@ -3446,6 +3473,43 @@ function setConfig(key, value) {
     .run(key, value == null ? null : String(value));
 }
 
+// ─── Lead Routing (DB-driven, replaces hardcoded consultant names) ────────
+// Matches free text (campaign name, ad title, webhook source) against
+// lead_routing_rules keywords and picks a consultant via round-robin.
+function routeLeadByText(text) {
+  try {
+    const t = (text || '').toLowerCase();
+    if (!t) return null;
+    const rules = db.prepare("SELECT * FROM lead_routing_rules WHERE active=1 ORDER BY priority DESC, id ASC").all();
+    for (const rule of rules) {
+      let kws = [];
+      try { kws = JSON.parse(rule.keywords || '[]'); } catch {}
+      if (!kws.some(k => t.includes(String(k).toLowerCase()))) continue;
+      let list = [];
+      try { list = JSON.parse(rule.consultants || '[]'); } catch {}
+      let consultant = null;
+      if (list.length) {
+        if (rule.strategy === 'fixed') {
+          consultant = list[0];
+        } else {
+          const next = ((Number(rule.last_index) || -1) + 1) % list.length;
+          db.prepare("UPDATE lead_routing_rules SET last_index=? WHERE id=?").run(next, rule.id);
+          consultant = list[next];
+        }
+      }
+      return {
+        rule_key: rule.rule_key,
+        destination: rule.destination || null,
+        source: rule.source || null,
+        assigned_consultant: consultant,
+      };
+    }
+  } catch (e) {
+    console.error('[routing] routeLeadByText failed:', e.message);
+  }
+  return null;
+}
+
 /* ─── Auto attendance helpers ─────────────────────────────────────────────
    - Find the employee record linked to a logged-in user (by emp_id or email)
    - Close any of their previous-day open check-ins to the configured close time
@@ -3612,16 +3676,10 @@ function autoLinkOrCreateLead(contact) {
           const bodyText = ref.body || '';
           notes = adTitle ? `Click-to-${ref.sourcePlatform} Referral Ad: "${adTitle}" ${bodyText ? '- ' + bodyText : ''}` : `Auto-created from Click-to-${ref.sourcePlatform} ad.`;
 
-          const textToCheck = (adTitle + ' ' + bodyText).toLowerCase();
-          if (textToCheck.includes('china') || textToCheck.includes('chinese') || textToCheck.includes('中国')) {
-            source = 'China';
-            assigned_consultant = 'Abdullah Al Rakib';
-          } else if (textToCheck.includes('b2b') || textToCheck.includes('agent')) {
-            source = 'B2B';
-            assigned_consultant = 'Tahmid Imam';
-          } else if (textToCheck.includes('bangladesh') || textToCheck.includes('bd') || textToCheck.includes('office')) {
-            source = 'In-House';
-            assigned_consultant = 'Taj Ahmed';
+          const route = routeLeadByText(adTitle + ' ' + bodyText);
+          if (route) {
+            if (route.source) source = route.source;
+            if (route.assigned_consultant) assigned_consultant = route.assigned_consultant;
           }
         }
       } catch (e) {}
@@ -3911,20 +3969,12 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
     let destination = 'Bangladesh';
     let source = 'In-House';
 
-    // Routing rules
-    const textToCheck = (adTitle + ' ' + bodyText).toLowerCase();
-    if (textToCheck.includes('china') || textToCheck.includes('chinese') || textToCheck.includes('中国')) {
-      destination = 'China';
-      source = 'China';
-      assigned_consultant = 'Abdullah Al Rakib';
-    } else if (textToCheck.includes('b2b') || textToCheck.includes('agent')) {
-      destination = 'Bangladesh';
-      source = 'B2B';
-      assigned_consultant = 'Tahmid Imam';
-    } else if (textToCheck.includes('bangladesh') || textToCheck.includes('bd') || textToCheck.includes('office')) {
-      destination = 'Bangladesh';
-      source = 'In-House';
-      assigned_consultant = 'Taj Ahmed';
+    // Routing rules (DB-driven with round-robin)
+    const route = routeLeadByText(adTitle + ' ' + bodyText);
+    if (route) {
+      if (route.destination) destination = route.destination;
+      if (route.source) source = route.source;
+      if (route.assigned_consultant) assigned_consultant = route.assigned_consultant;
     }
 
     const platformSourceMap = {
@@ -4338,6 +4388,269 @@ async function executeAutomationRules({ conversation, message, channel, contact 
     }
   }
 }
+
+// ─── Shared action executor ───────────────────────────────
+// Runs one rule's action against a conversation (used by the scheduler for
+// time_based rules and by lead_status_change rules). Mirrors the action
+// handling in executeAutomationRules but without needing an inbound message.
+async function executeRuleAction(rule, { conversation, contact, channel, lead }) {
+  const actCfg = JSON.parse(rule.action_config || '{}');
+  let executed = false;
+
+  switch (rule.action_type) {
+    case 'reply': {
+      if (!actCfg.template_id || !conversation) break;
+      const template = db.prepare("SELECT * FROM message_templates WHERE id=?").get(actCfg.template_id);
+      if (!template) break;
+      // Anti-spam: never auto-message the same conversation more than once per hour
+      const lastAuto = db.prepare("SELECT created_at FROM messages WHERE conversation_id=? AND direction='out' AND sent_by='auto' ORDER BY created_at DESC LIMIT 1").get(conversation.id);
+      if (lastAuto && (Date.now() - new Date(lastAuto.created_at).getTime()) / 60000 < 60) break;
+
+      const vars = {
+        name: contact?.name || lead?.client_name || 'there',
+        destination: lead?.destination || 'our university',
+        program: lead?.program || 'your program',
+        consultant: lead?.assigned_consultant || conversation.assigned_to || 'our team',
+        phone: contact?.phone || lead?.phone || '',
+        email: contact?.email || lead?.email || '',
+        channel: channel?.name || 'WhatsApp',
+      };
+      const replyText = substituteTemplateVars(template.content, vars);
+
+      let sent = null;
+      if (channel?.type === 'whatsapp' && (contact?.phone || contact?.wa_id)) {
+        sent = await sendWhatsApp(channel, contact.wa_id || contact.phone, replyText);
+      } else if (channel?.type === 'messenger' && contact?.messenger_id) {
+        sent = await sendMessenger(channel, contact.messenger_id, replyText);
+      }
+      if (sent && !sent.error) {
+        const waMsgId = sent.messages?.[0]?.id || null;
+        db.prepare(`INSERT INTO messages (conversation_id, direction, type, content, wa_message_id, status, sent_by, created_at)
+          VALUES (?, 'out', 'text', ?, ?, 'delivered', 'auto', datetime('now'))`).run(conversation.id, replyText, waMsgId);
+        db.prepare("UPDATE message_templates SET usage_count = COALESCE(usage_count, 0) + 1 WHERE id=?").run(template.id);
+        db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), last_message_direction='out' WHERE id=?").run(replyText, conversation.id);
+        broadcast('new_message', { conversation_id: conversation.id, message: { content: replyText, direction: 'out', sent_by: 'auto', created_at: new Date().toISOString() } });
+        executed = true;
+        console.log(`[auto] Rule ${rule.id} (${rule.trigger_type}) → sent: "${replyText.slice(0, 60)}"`);
+      } else if (sent?.error) {
+        console.error(`[auto] Rule ${rule.id} send failed:`, sent.error.message || sent.error);
+      }
+      break;
+    }
+    case 'assign': {
+      if (!actCfg.assignee) break;
+      const emp = db.prepare("SELECT * FROM employees WHERE id=? OR name=? LIMIT 1").get(actCfg.assignee, actCfg.assignee);
+      if (!emp) break;
+      if (conversation) {
+        db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?").run(emp.name, emp.id, conversation.id);
+        broadcast('conversation_updated', { id: conversation.id, assigned_to: emp.name, assigned_to_id: emp.id });
+      }
+      if (lead) {
+        db.prepare("UPDATE leads SET assigned_consultant=?, assigned_employee_id=? WHERE id=?").run(emp.name, emp.id, lead.id);
+        logActivity({ type: 'lead_assigned', actor: { name: 'Automation' }, lead, to: emp.name });
+      }
+      executed = true;
+      break;
+    }
+    case 'add_tag': {
+      if (!actCfg.tag || !contact) break;
+      const tag = db.prepare("SELECT * FROM contact_tags WHERE id=? OR name=? LIMIT 1").get(actCfg.tag, actCfg.tag);
+      if (tag) {
+        db.prepare("INSERT OR IGNORE INTO contact_tag_assignments (contact_id, tag_id, assigned_by) VALUES (?, ?, 'auto')").run(contact.id, tag.id);
+        executed = true;
+      }
+      break;
+    }
+    case 'send_webhook': {
+      if (!actCfg.webhook_url) break;
+      try {
+        await fetch(actCfg.webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'automation_rule_triggered',
+            rule_id: rule.id,
+            rule_name: rule.name,
+            trigger_type: rule.trigger_type,
+            conversation_id: conversation?.id || null,
+            lead: lead ? { id: lead.id, lead_id: lead.lead_id, name: lead.client_name, status: lead.lead_status, destination: lead.destination } : null,
+            contact: contact ? { name: contact.name, phone: contact.phone } : null,
+            timestamp: new Date().toISOString(),
+          })
+        });
+        executed = true;
+      } catch (e) { console.error('[auto] Webhook failed:', e.message); }
+      break;
+    }
+  }
+
+  if (executed) {
+    db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'executed', ?, datetime('now'))").run(rule.id, conversation?.id || null);
+  }
+  return executed;
+}
+
+// ─── Lead Status Change rules ─────────────────────────────
+// Fired from every endpoint that changes lead_status. trigger_config may
+// scope which statuses fire the rule: { to_status }, { statuses: [...] } or —
+// since the UI exposes a keywords field — { keywords: [...] } listing statuses.
+async function fireLeadStatusChangeRules(lead, fromStatus, toStatus) {
+  try {
+    if (!lead || fromStatus === toStatus) return;
+    const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 AND trigger_type='lead_status_change' ORDER BY priority DESC, id DESC").all();
+    if (!rules.length) return;
+
+    const conversation = db.prepare("SELECT * FROM conversations WHERE lead_id=? ORDER BY last_message_at DESC LIMIT 1").get(lead.id) || null;
+    const contact = conversation ? db.prepare("SELECT * FROM contacts WHERE id=?").get(conversation.contact_id) : db.prepare("SELECT * FROM contacts WHERE lead_id=? LIMIT 1").get(lead.id);
+    const channel = conversation?.channel_id ? db.prepare("SELECT * FROM channels WHERE id=?").get(conversation.channel_id) : null;
+
+    for (const rule of rules) {
+      try {
+        let cfg = {};
+        try { cfg = JSON.parse(rule.trigger_config || '{}'); } catch {}
+        const scoped = cfg.statuses || (cfg.to_status ? [cfg.to_status] : null) || (Array.isArray(cfg.keywords) && cfg.keywords.length ? cfg.keywords : null);
+        if (scoped && !scoped.some(s => String(s).toLowerCase() === String(toStatus || '').toLowerCase())) continue;
+        if (cfg.from_status && String(cfg.from_status).toLowerCase() !== String(fromStatus || '').toLowerCase()) continue;
+
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'triggered', ?, datetime('now'))").run(rule.id, conversation?.id || null);
+        await executeRuleAction(rule, { conversation, contact, channel, lead });
+      } catch (e) {
+        console.error(`[auto] status-change rule ${rule.id} error:`, e.message);
+        try { db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'failed', ?, datetime('now'))").run(rule.id, conversation?.id || null); } catch {}
+      }
+    }
+  } catch (e) {
+    console.error('[auto] fireLeadStatusChangeRules error:', e.message);
+  }
+}
+
+// ─── Automation Scheduler (runs every minute) ─────────────
+// 1. time_based rules — re-engage conversations inactive for N minutes
+// 2. scheduled broadcasts — send campaigns whose scheduled_at has passed
+// 3. morning follow-up nudges — 9:30 Dhaka digest to each consultant
+
+function dhakaNowString() {
+  const bd = getBangladeshTime();
+  const p = n => String(n).padStart(2, '0');
+  return `${bd.getFullYear()}-${p(bd.getMonth() + 1)}-${p(bd.getDate())} ${p(bd.getHours())}:${p(bd.getMinutes())}`;
+}
+
+async function processTimeBasedRules() {
+  // Don't message customers in the middle of the night (Dhaka 9:00–21:00 window)
+  const hour = getBangladeshTime().getHours();
+  if (hour < 9 || hour >= 21) return;
+
+  const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 AND trigger_type='time_based' ORDER BY priority DESC, id DESC").all();
+  for (const rule of rules) {
+    let cfg = {};
+    try { cfg = JSON.parse(rule.trigger_config || '{}'); } catch {}
+    const delayMin = Math.max(Number(cfg.delay) || 1440, 15); // default 24h, min 15m
+
+    // Open conversations inactive for delayMin where this rule hasn't fired
+    // since the last message (one execution per inactivity period).
+    const convs = db.prepare(`
+      SELECT c.* FROM conversations c
+      WHERE c.status='open'
+        AND c.last_message_at IS NOT NULL
+        AND c.last_message_at <= datetime('now', '-' || ? || ' minutes')
+        AND NOT EXISTS (
+          SELECT 1 FROM automation_analytics a
+          WHERE a.rule_id = ? AND a.conversation_id = c.id
+            AND a.event_type = 'executed' AND a.created_at >= c.last_message_at
+        )
+      ORDER BY c.last_message_at ASC
+      LIMIT 20`).all(delayMin, rule.id);
+
+    for (const conversation of convs) {
+      try {
+        const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conversation.contact_id);
+        const channel = conversation.channel_id ? db.prepare("SELECT * FROM channels WHERE id=?").get(conversation.channel_id) : null;
+        const lead = conversation.lead_id ? db.prepare("SELECT * FROM leads WHERE id=?").get(conversation.lead_id) : null;
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'triggered', ?, datetime('now'))").run(rule.id, conversation.id);
+        await executeRuleAction(rule, { conversation, contact, channel, lead });
+      } catch (e) {
+        console.error(`[scheduler] time_based rule ${rule.id} conv ${conversation.id}:`, e.message);
+      }
+    }
+  }
+}
+
+async function processScheduledBroadcasts() {
+  const now = dhakaNowString(); // scheduled_at is entered in Dhaka local time
+  const pending = db.prepare("SELECT id, name, scheduled_at FROM broadcast_campaigns WHERE scheduled_at IS NOT NULL AND scheduled_at != '' AND status IN ('draft','scheduled')").all();
+  for (const c of pending) {
+    const sched = String(c.scheduled_at).replace('T', ' ').slice(0, 16);
+    if (sched <= now) {
+      console.log(`[scheduler] Sending scheduled broadcast #${c.id} "${c.name}" (scheduled ${c.scheduled_at})`);
+      await sendBroadcast(c.id);
+    }
+  }
+}
+
+async function sendMorningFollowupNudges() {
+  const bd = getBangladeshTime();
+  if (bd.getDay() === 5 || bd.getDay() === 6) return;            // office closed Fri/Sat
+  if (bd.getHours() !== 9 || bd.getMinutes() < 30) return;        // fire in the 9:30–9:59 window
+  const today = dhakaNowString().slice(0, 10);
+  if (getConfig('last_followup_nudge_date') === today) return;    // once per day
+  setConfig('last_followup_nudge_date', today);
+
+  const overdue = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, lead_status, assigned_consultant, next_followup
+    FROM leads
+    WHERE next_followup IS NOT NULL AND next_followup != ''
+      AND next_followup <= ?
+      AND lead_status NOT IN ('Enrolled','Not Interested')
+    ORDER BY next_followup ASC`).all(today);
+  if (!overdue.length) return;
+
+  // Group per consultant (unassigned bucket goes to admins via the bell only)
+  const byConsultant = {};
+  for (const l of overdue) {
+    const key = l.assigned_consultant || '__unassigned__';
+    (byConsultant[key] = byConsultant[key] || []).push(l);
+  }
+
+  for (const [consultant, leads] of Object.entries(byConsultant)) {
+    const lines = leads.slice(0, 15).map(l =>
+      `• ${l.client_name || l.lead_id} (${l.destination || '—'}, ${l.lead_status}) — due ${l.next_followup}`);
+    const more = leads.length > 15 ? `\n…and ${leads.length - 15} more.` : '';
+    const text = `Good morning! You have ${leads.length} follow-up${leads.length > 1 ? 's' : ''} due or overdue today:\n${lines.join('\n')}${more}\n\nOpen My Day in the CRM to action them.`;
+
+    // In-app: activity log entry → bell + Cockpit feed (scoped by consultant)
+    logActivity({
+      type: 'followup_nudge',
+      actor: { name: 'Automation' },
+      details: { consultant: consultant === '__unassigned__' ? null : consultant, count: leads.length, message: `${leads.length} follow-ups due for ${consultant === '__unassigned__' ? 'unassigned leads' : consultant}` },
+    });
+
+    // WhatsApp to the consultant's own number via linked device
+    if (consultant !== '__unassigned__' && isWaLinkedConnected()) {
+      try {
+        const emp = db.prepare("SELECT phone FROM employees WHERE name=? LIMIT 1").get(consultant);
+        if (emp?.phone) {
+          await sendWaLinkedMessage(emp.phone.replace(/[^0-9]/g, ''), text);
+          console.log(`[scheduler] Follow-up nudge sent to ${consultant} (${leads.length} leads)`);
+        } else {
+          console.log(`[scheduler] No phone on employee record for ${consultant} — in-app nudge only`);
+        }
+      } catch (e) {
+        console.error(`[scheduler] WhatsApp nudge to ${consultant} failed:`, e.message);
+      }
+    }
+  }
+}
+
+let schedulerBusy = false;
+async function runAutomationScheduler() {
+  if (!dbReady || schedulerBusy) return;
+  schedulerBusy = true;
+  try { await processTimeBasedRules(); } catch (e) { console.error('[scheduler] time_based:', e.message); }
+  try { await processScheduledBroadcasts(); } catch (e) { console.error('[scheduler] broadcasts:', e.message); }
+  try { await sendMorningFollowupNudges(); } catch (e) { console.error('[scheduler] nudges:', e.message); }
+  schedulerBusy = false;
+}
+setInterval(runAutomationScheduler, 60 * 1000);
 
 async function sendBroadcast(campaignId) {
   try {
@@ -5038,6 +5351,8 @@ app.put('/api/leads/:id', async (req, res) => {
     let autoUpdates = [];
     if (oldLead?.lead_status !== lead.lead_status) {
       logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
+      // Fire lead_status_change automation rules (async, non-blocking)
+      setImmediate(() => fireLeadStatusChangeRules(lead, oldLead?.lead_status, lead.lead_status).catch(() => {}));
       // Funnel mapping: WhatsApp knock fires 'Lead' at creation; then
       // Positive → Schedule, Office Visited → InitiateCheckout, File Opened → Purchase.
       // (Enrolled intentionally fires nothing — Purchase already fired at File Opened.)
@@ -5168,11 +5483,15 @@ app.post('/api/leads/bulk-status', (req, res) => requireManagerOrAdmin(req, res,
           db.prepare("UPDATE leads SET lead_status=? WHERE id=?").run(status, id);
           const newLead = db.prepare("SELECT * FROM leads WHERE id=?").get(id);
           logActivity({ type: 'lead_status_changed', actor: req.user, lead: newLead, from: oldLead.lead_status, to: status });
-          updated.push(newLead);
+          updated.push({ lead: newLead, from: oldLead.lead_status });
         }
       }
     })();
-    res.json({ ok: true, updated: updated.length, leads: updated });
+    // Fire status-change automation rules outside the transaction
+    for (const u of updated) {
+      setImmediate(() => fireLeadStatusChangeRules(u.lead, u.from, status).catch(() => {}));
+    }
+    res.json({ ok: true, updated: updated.length, leads: updated.map(u => u.lead) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
@@ -5188,6 +5507,9 @@ app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res
         updated.push(newLead);
       }
     })();
+    for (const l of updated) {
+      setImmediate(() => fireLeadStatusChangeRules(l, 'New Lead', 'Follow-up').catch(() => {}));
+    }
     res.json({ ok: true, cleaned: updated.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
@@ -7845,17 +8167,11 @@ app.post('/api/webhook/website-lead', async (req, res) => {
     let actualSource = source || null;
     let actualDestination = destination || null;
 
-    if (source === 'China') {
-      assigned_consultant = 'Abdullah Al Rakib';
-      actualDestination = actualDestination || 'China';
-    } else if (source === 'Bangladesh Office') {
-      assigned_consultant = 'Taj Ahmed';
-      actualDestination = actualDestination || 'Bangladesh';
-      actualSource = actualSource || 'In-House';
-    } else if (source === 'B2B') {
-      assigned_consultant = 'Tahmid Imam';
-      actualDestination = actualDestination || 'Bangladesh';
-      actualSource = actualSource || 'B2B';
+    const route = routeLeadByText(`${source || ''} ${destination || ''}`);
+    if (route) {
+      assigned_consultant = route.assigned_consultant;
+      actualDestination = actualDestination || route.destination;
+      if (route.rule_key !== 'china') actualSource = actualSource || route.source;
     }
 
     const params = leadParams({
@@ -8013,18 +8329,11 @@ app.post('/webhook/meta', async (req, res) => {
             let destination = fields.destination || null;
             let source = metaData.campaign_name || 'Meta Ad';
             let assigned_consultant = null;
-            if (campaignName.includes('china') || campaignName.includes('chinese') || campaignName.includes('中国')) {
-              destination = 'China';
-              source = 'China';
-              assigned_consultant = 'Abdullah Al Rakib';
-            } else if (campaignName.includes('bangladesh') || campaignName.includes('bd') || campaignName.includes('office')) {
-              destination = 'Bangladesh';
-              source = 'In-House';
-              assigned_consultant = 'Taj Ahmed';
-            } else if (campaignName.includes('b2b') || campaignName.includes('agent')) {
-              destination = 'Bangladesh';
-              source = 'B2B';
-              assigned_consultant = 'Tahmid Imam';
+            const route = routeLeadByText(campaignName);
+            if (route) {
+              if (route.destination) destination = route.destination;
+              if (route.source) source = route.source;
+              if (route.assigned_consultant) assigned_consultant = route.assigned_consultant;
             }
 
             const lead_id = nextLeadId();
@@ -8294,11 +8603,78 @@ app.delete('/api/automation/rules/:id', (req, res) => requireAdmin(req, res, () 
   res.json({ ok: true });
 }));
 
-// Test automation rule
+// Test automation rule — real dry-run: validates config and shows what would happen
 app.post('/api/automation/rules/:id/test', (req, res) => requireAdmin(req, res, () => {
   const rule = db.prepare("SELECT * FROM automation_rules WHERE id=?").get(req.params.id);
   if (!rule) return res.status(404).json({ error: 'Rule not found' });
-  res.json({ ok: true, message: 'Rule test would be triggered here' });
+  const issues = [];
+  const preview = { rule: rule.name, trigger_type: rule.trigger_type, action_type: rule.action_type };
+  let trigCfg = {}, actCfg = {};
+  try { trigCfg = JSON.parse(rule.trigger_config || '{}'); } catch { issues.push('trigger_config is not valid JSON'); }
+  try { actCfg = JSON.parse(rule.action_config || '{}'); } catch { issues.push('action_config is not valid JSON'); }
+
+  if (rule.trigger_type === 'keyword' && !(trigCfg.keywords || []).length) issues.push('No keywords configured');
+  if ((rule.trigger_type === 'no_response' || rule.trigger_type === 'time_based') && !(Number(trigCfg.delay) > 0)) issues.push('Delay is 0 or missing — using default');
+
+  if (rule.action_type === 'reply') {
+    if (!actCfg.template_id) issues.push('No template selected');
+    else {
+      const t = db.prepare("SELECT * FROM message_templates WHERE id=?").get(actCfg.template_id);
+      if (!t) issues.push(`Template #${actCfg.template_id} not found`);
+      else preview.sample_message = substituteTemplateVars(t.content, {
+        name: 'Test Student', destination: 'China', program: 'BSc CSE',
+        consultant: 'Your Consultant', phone: '+8801XXXXXXXXX', email: 'test@example.com', channel: 'WhatsApp',
+      });
+    }
+  } else if (rule.action_type === 'assign') {
+    if (!actCfg.assignee) issues.push('No assignee configured');
+    else if (!db.prepare("SELECT id FROM employees WHERE id=? OR name=? LIMIT 1").get(actCfg.assignee, actCfg.assignee)) issues.push(`Assignee "${actCfg.assignee}" not found in employees`);
+  } else if (rule.action_type === 'add_tag') {
+    if (!actCfg.tag) issues.push('No tag configured');
+    else if (!db.prepare("SELECT id FROM contact_tags WHERE id=? OR name=? LIMIT 1").get(actCfg.tag, actCfg.tag)) issues.push(`Tag "${actCfg.tag}" not found`);
+  } else if (rule.action_type === 'send_webhook') {
+    if (!actCfg.webhook_url) issues.push('No webhook_url configured');
+  }
+
+  res.json({ ok: issues.length === 0, valid: issues.length === 0, issues, preview, active: rule.active === 1 });
+}));
+
+// ─── Lead Routing Rules CRUD ─────────────────────────────
+app.get('/api/routing-rules', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM lead_routing_rules ORDER BY priority DESC, id ASC").all();
+  res.json(rows.map(r => ({ ...r, keywords: JSON.parse(r.keywords || '[]'), consultants: JSON.parse(r.consultants || '[]'), is_active: r.active === 1 })));
+}));
+
+app.post('/api/routing-rules', (req, res) => requireAdmin(req, res, () => {
+  const { rule_key, keywords, destination, source, consultants, strategy, priority, active } = req.body || {};
+  if (!rule_key || !Array.isArray(keywords) || !keywords.length) return res.status(400).json({ error: 'rule_key and keywords[] are required' });
+  try {
+    const info = db.prepare(`INSERT INTO lead_routing_rules (rule_key, keywords, destination, source, consultants, strategy, priority, active)
+      VALUES (?,?,?,?,?,?,?,?)`).run(rule_key, JSON.stringify(keywords), destination || null, source || null,
+      JSON.stringify(consultants || []), strategy === 'fixed' ? 'fixed' : 'round_robin', priority ?? 0, active === false ? 0 : 1);
+    res.json(db.prepare("SELECT * FROM lead_routing_rules WHERE id=?").get(info.lastInsertRowid));
+  } catch (e) {
+    res.status(400).json({ error: e.message.includes('UNIQUE') ? 'rule_key already exists' : e.message });
+  }
+}));
+
+app.put('/api/routing-rules/:id', (req, res) => requireAdmin(req, res, () => {
+  const cur = db.prepare("SELECT * FROM lead_routing_rules WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  const { rule_key, keywords, destination, source, consultants, strategy, priority, active } = req.body || {};
+  db.prepare(`UPDATE lead_routing_rules SET
+      rule_key=COALESCE(?,rule_key), keywords=COALESCE(?,keywords), destination=COALESCE(?,destination),
+      source=COALESCE(?,source), consultants=COALESCE(?,consultants), strategy=COALESCE(?,strategy),
+      priority=COALESCE(?,priority), active=COALESCE(?,active) WHERE id=?`)
+    .run(rule_key ?? null, Array.isArray(keywords) ? JSON.stringify(keywords) : null, destination ?? null,
+      source ?? null, Array.isArray(consultants) ? JSON.stringify(consultants) : null,
+      strategy ?? null, priority ?? null, active === undefined ? null : (active ? 1 : 0), req.params.id);
+  res.json(db.prepare("SELECT * FROM lead_routing_rules WHERE id=?").get(req.params.id));
+}));
+
+app.delete('/api/routing-rules/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("DELETE FROM lead_routing_rules WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
 }));
 
 // Message Templates
