@@ -8174,10 +8174,11 @@ app.get('/api/meta/config', (req, res) => {
   const config = Object.fromEntries(rows.map(r => [r.key, r.value]));
   if (config.page_access_token) config.page_access_token = config.page_access_token.slice(0,12)+'••••••••';
   if (config.capi_token) config.capi_token = config.capi_token.slice(0,12)+'••••••••';
+  if (config.meta_ads_access_token) config.meta_ads_access_token = config.meta_ads_access_token.slice(0,12)+'••••••••';
   res.json(config);
 });
 app.post('/api/meta/config', (req, res) => {
-  const allowed = ['page_access_token','capi_token','pixel_id','app_secret','verify_token','test_event_code','office_open','grace_minutes'];
+  const allowed = ['page_access_token','capi_token','pixel_id','app_secret','verify_token','test_event_code','office_open','grace_minutes','meta_ads_access_token','meta_ad_account_id','wa_linked_auto_lead'];
   for (const [key,value] of Object.entries(req.body)) {
     if (!allowed.includes(key)||!value||value.includes('••')) continue;
     db.prepare("INSERT INTO meta_config (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key,value);
