@@ -96,7 +96,7 @@ function isPersonalChat(jid) {
 }
 
 async function handleIncoming(msg, { fromHistory = false } = {}) {
-  const { db, upsertContact, upsertConversation, createLeadFromReferral, createLeadFromContact, saveInboundMessage, getConfig } = state.deps;
+  const { db, upsertContact, upsertConversation, createLeadFromReferral, saveInboundMessage } = state.deps;
   try {
     const jid = jidNormalizedUser ? jidNormalizedUser(msg.key.remoteJid) : msg.key.remoteJid;
     if (!isPersonalChat(jid)) return;                 // skip groups, broadcast, status
@@ -123,13 +123,9 @@ async function handleIncoming(msg, { fromHistory = false } = {}) {
       if (updated) contact.lead_id = updated.lead_id;
     }
 
-    // ── Organic first message → auto-create lead (toggleable) ──
-    if (!referral && !contact.lead_id && !fromHistory) {
-      const autoLead = (getConfig('wa_linked_auto_lead') ?? '1') !== '0';
-      if (autoLead) {
-        createLeadFromContact(contact.id, 'whatsapp', content, null, {});
-      }
-    }
+    // Organic (non-ad) messages: lead creation happens inside saveInboundMessage →
+    // saveMessage, which auto-links every WhatsApp number to an existing lead by
+    // phone (de-duped) or creates a new one with full data + CAPI 'Lead' event.
 
     // Dedup by WhatsApp message id (also protects on reconnect replays)
     const exists = msg.key.id ? db.prepare('SELECT id FROM messages WHERE wa_message_id=?').get(msg.key.id) : null;

@@ -3668,6 +3668,8 @@ function autoLinkOrCreateLead(contact) {
     if (newLead) {
       broadcast('new_lead', { lead: newLead });
       logActivity({ type: 'lead_created', actor: { name: 'Auto-Lead Bot' }, lead: newLead, details: { source: 'Chat Auto-Link' } });
+      // Every WhatsApp knock is a 'Lead' conversion (CAPI); ctwa_clid attaches automatically when present
+      sendCAPIEvent('Lead', newLead).catch(() => {});
     }
   }
   return contact;
@@ -4018,22 +4020,37 @@ function saveMessage(convId, direction, content, type = 'text', waMessageId = nu
     if (conv) {
       let currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
 
-      // Auto-Lead Creation from Message Content (Bangladeshi numbers)
-      if (direction === 'in' && type === 'text' && content && !conv.lead_id) {
-        const bdPhoneRegex = /(?:\+?88[\s-]*)?01[3-9](?:[\s-]*\d){8}/;
-        const match = content.match(bdPhoneRegex);
-        if (match) {
-          const extractedPhone = match[0];
-          db.prepare("UPDATE contacts SET phone=? WHERE id=? AND (phone IS NULL OR phone = '')").run(extractedPhone, conv.contact_id);
-          currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
-          if (currentContact) {
-            const oldLeadId = conv.lead_id;
-            autoLinkOrCreateLead(currentContact);
-            const freshConvRow = db.prepare("SELECT * FROM conversations WHERE id=?").get(conv.id);
-            if (freshConvRow && freshConvRow.lead_id !== oldLeadId) {
-                const fullConv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conv.id);
-                broadcast('conversation_updated', fullConv);
-            }
+      // ── Auto-Lead Creation ────────────────────────────────────────────
+      if (direction === 'in' && !conv.lead_id) {
+        let shouldLink = false;
+
+        // WhatsApp: EVERY incoming number becomes a lead — the wa_id IS the phone.
+        if (conv.channel_type === 'whatsapp' && currentContact) {
+          if ((!currentContact.phone || currentContact.phone === '') && currentContact.wa_id) {
+            const waPhone = '+' + String(currentContact.wa_id).replace(/\D/g, '');
+            db.prepare("UPDATE contacts SET phone=? WHERE id=?").run(waPhone, currentContact.id);
+            currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
+          }
+          shouldLink = true;
+        }
+        // Other channels (Messenger/Instagram): extract a Bangladeshi number from the text.
+        else if (type === 'text' && content) {
+          const bdPhoneRegex = /(?:\+?88[\s-]*)?01[3-9](?:[\s-]*\d){8}/;
+          const match = content.match(bdPhoneRegex);
+          if (match) {
+            db.prepare("UPDATE contacts SET phone=? WHERE id=? AND (phone IS NULL OR phone = '')").run(match[0], conv.contact_id);
+            currentContact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conv.contact_id);
+            shouldLink = true;
+          }
+        }
+
+        if (shouldLink && currentContact) {
+          const oldLeadId = conv.lead_id;
+          autoLinkOrCreateLead(currentContact);
+          const freshConvRow = db.prepare("SELECT * FROM conversations WHERE id=?").get(conv.id);
+          if (freshConvRow && freshConvRow.lead_id !== oldLeadId) {
+              const fullConv = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(conv.id);
+              broadcast('conversation_updated', fullConv);
           }
         }
       }
@@ -5021,7 +5038,10 @@ app.put('/api/leads/:id', async (req, res) => {
     let autoUpdates = [];
     if (oldLead?.lead_status !== lead.lead_status) {
       logActivity({ type: 'lead_status_changed', actor: req.user, lead, from: oldLead?.lead_status, to: lead.lead_status });
-      const evtMap = { 'Enrolled':'Purchase','File Opened':'InitiateCheckout','Office Visited':'Schedule','Positive':'Lead' };
+      // Funnel mapping: WhatsApp knock fires 'Lead' at creation; then
+      // Positive → Schedule, Office Visited → InitiateCheckout, File Opened → Purchase.
+      // (Enrolled intentionally fires nothing — Purchase already fired at File Opened.)
+      const evtMap = { 'Positive':'Schedule','Office Visited':'InitiateCheckout','File Opened':'Purchase' };
       if (evtMap[lead.lead_status]) sendCAPIEvent(evtMap[lead.lead_status], lead).catch(() => {});
 
       // Auto-move to applications when status becomes 'File Opened'
