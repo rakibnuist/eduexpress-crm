@@ -1733,7 +1733,10 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
         upsertConversation,
         createLeadFromContact,
         createLeadFromReferral,
-        saveInboundMessage,
+        // Adapter: module expects saveInboundMessage(convId, content, type, waId, mediaUrl, caption);
+        // codebase now uses saveMessage(convId, direction, content, ...).
+        saveInboundMessage: (convId, content, type, waId, mediaUrl, caption) =>
+          saveMessage(convId, 'in', content, type, waId, mediaUrl, caption),
         broadcast,
         getConfig,
       });
