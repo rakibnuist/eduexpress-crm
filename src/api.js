@@ -367,6 +367,19 @@ export const api = {
   deleteAutomationRule: (id) => req(`/automation/rules/${id}`, { method: 'DELETE' }),
   testAutomationRule: (id) => req(`/automation/rules/${id}/test`, { method: 'POST' }),
 
+  // Lead routing rules
+  routingRules: () => req('/routing-rules'),
+  createRoutingRule: (d) => req('/routing-rules', { method: 'POST', body: JSON.stringify(d) }),
+  updateRoutingRule: (id, d) => req(`/routing-rules/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteRoutingRule: (id) => req(`/routing-rules/${id}`, { method: 'DELETE' }),
+
+  // Drip sequences
+  dripSequences: () => req('/drip-sequences'),
+  createDripSequence: (d) => req('/drip-sequences', { method: 'POST', body: JSON.stringify(d) }),
+  updateDripSequence: (id, d) => req(`/drip-sequences/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  deleteDripSequence: (id) => req(`/drip-sequences/${id}`, { method: 'DELETE' }),
+  dripEnrollments: (p = {}) => req('/drip-enrollments?' + new URLSearchParams(p)),
+
   templates: () => req('/templates'),
   createTemplate: (d) => req('/templates', { method: 'POST', body: JSON.stringify(d) }),
   updateTemplate: (id, d) => req(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(d) }),

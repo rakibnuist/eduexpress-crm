@@ -18,6 +18,8 @@ import { toDate } from '../lib/format';
 
 const TABS = [
   { id: 'rules',      label: 'Automation Rules',   icon: Zap },
+  { id: 'routing',    label: 'Lead Routing',       icon: ArrowRight },
+  { id: 'drips',      label: 'Drip Sequences',     icon: CalendarDays },
   { id: 'templates',  label: 'Message Templates',  icon: FileText },
   { id: 'broadcasts', label: 'Broadcast Campaigns',icon: Megaphone },
   { id: 'tags',       label: 'Contact Tags',       icon: Tag },
@@ -75,6 +77,8 @@ export default function Automation() {
       </div>
 
       {tab === 'rules'      && <RulesTab />}
+      {tab === 'routing'    && <RoutingTab />}
+      {tab === 'drips'      && <DripsTab />}
       {tab === 'templates'  && <TemplatesTab />}
       {tab === 'broadcasts' && <BroadcastsTab />}
       {tab === 'tags'       && <TagsTab />}
@@ -116,7 +120,11 @@ function RulesTab() {
   };
 
   const handleTest = async (id) => {
-    try { await api.testAutomationRule(id); toast.success('Rule test triggered'); }
+    try {
+      const r = await api.testAutomationRule(id);
+      if (r.valid) toast.success(r.preview?.sample_message ? `Valid ✓ Sample: "${r.preview.sample_message.slice(0, 80)}"` : 'Rule is valid ✓');
+      else toast.error(`Issues: ${(r.issues || []).join('; ')}`);
+    }
     catch (e) { toast.error(e.message); }
   };
 
@@ -1190,5 +1198,353 @@ function AnalyticsTab() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ─────────────────── Tab: Lead Routing ─────────────────── */
+
+function RoutingTab() {
+  const [rules, setRules] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null); // { mode, rule? }
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([api.routingRules(), api.employeesActive().catch(() => [])])
+      .then(([r, e]) => { setRules(r || []); setEmployees(e || []); setLoading(false); })
+      .catch(e => { toast.error(e.message); setLoading(false); });
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const toggleActive = async (r) => {
+    try { await api.updateRoutingRule(r.id, { active: !r.is_active }); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+  const handleDelete = async (id) => {
+    const ok = await confirm({ title: 'Delete routing rule?', tone: 'danger', confirmLabel: 'Delete' });
+    if (!ok) return;
+    try { await api.deleteRoutingRule(id); toast.success('Deleted'); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-slate-500 max-w-xl">
+          New leads from ads, webhooks and chats are matched against these keywords (highest priority first).
+          The matched rule sets destination/source and assigns a consultant — <b>round-robin</b> rotates fairly across the list.
+        </p>
+        <button onClick={() => setModal({ mode: 'create' })}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm">
+          <Plus size={14} /> New Rule
+        </button>
+      </div>
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">Loading…</div> : (
+        <div className="grid gap-3">
+          {rules.map(r => (
+            <div key={r.id} className={`bg-white rounded-2xl border p-4 shadow-sm flex items-center gap-4 ${r.is_active ? 'border-slate-200' : 'border-slate-200 opacity-55'}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-bold text-slate-800">{r.rule_key}</span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">priority {r.priority}</span>
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${r.strategy === 'fixed' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                    {r.strategy === 'fixed' ? 'fixed' : 'round-robin'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 truncate">
+                  Keywords: {(r.keywords || []).join(', ') || '—'} → <b>{r.destination || '—'}</b> / {r.source || '—'}
+                </p>
+                <p className="text-xs text-slate-500 truncate">Consultants: {(r.consultants || []).join(', ') || '—'}</p>
+              </div>
+              <button onClick={() => toggleActive(r)} title={r.is_active ? 'Deactivate' : 'Activate'}
+                className={`p-2 rounded-lg ${r.is_active ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'}`}>
+                {r.is_active ? <Pause size={15} /> : <Play size={15} />}
+              </button>
+              <button onClick={() => setModal({ mode: 'edit', rule: r })} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100"><Pencil size={15} /></button>
+              <button onClick={() => handleDelete(r.id)} className="p-2 rounded-lg text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>
+            </div>
+          ))}
+          {!rules.length && <div className="text-center py-10 text-slate-400 text-sm">No routing rules yet.</div>}
+        </div>
+      )}
+
+      {modal && <RoutingRuleModal modal={modal} employees={employees} onClose={() => setModal(null)}
+        onSaved={() => { setModal(null); load(); }} />}
+    </div>
+  );
+}
+
+function RoutingRuleModal({ modal, employees, onClose, onSaved }) {
+  const r = modal.rule;
+  const [ruleKey, setRuleKey] = useState(r?.rule_key || '');
+  const [keywords, setKeywords] = useState((r?.keywords || []).join(', '));
+  const [destination, setDestination] = useState(r?.destination || '');
+  const [source, setSource] = useState(r?.source || '');
+  const [consultants, setConsultants] = useState(r?.consultants || []);
+  const [strategy, setStrategy] = useState(r?.strategy || 'round_robin');
+  const [priority, setPriority] = useState(r?.priority ?? 0);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const toggleConsultant = (name) =>
+    setConsultants(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+
+  const save = async () => {
+    const payload = {
+      rule_key: ruleKey.trim(),
+      keywords: keywords.split(',').map(s => s.trim()).filter(Boolean),
+      destination: destination.trim() || null,
+      source: source.trim() || null,
+      consultants,
+      strategy,
+      priority: Number(priority) || 0,
+    };
+    if (!payload.rule_key || !payload.keywords.length) { toast.error('Rule key and at least one keyword are required'); return; }
+    setSaving(true);
+    try {
+      if (modal.mode === 'edit') await api.updateRoutingRule(r.id, payload);
+      else await api.createRoutingRule(payload);
+      toast.success('Routing rule saved');
+      onSaved();
+    } catch (e) { toast.error(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <Modal onClose={onClose} title={modal.mode === 'edit' ? 'Edit Routing Rule' : 'New Routing Rule'}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Rule Key</label>
+            <input value={ruleKey} onChange={e => setRuleKey(e.target.value)} placeholder="e.g. china"
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Priority (higher first)</label>
+            <input type="number" value={priority} onChange={e => setPriority(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-slate-500 font-semibold mb-1 block">Keywords (comma-separated, matched in ad/campaign text)</label>
+          <input value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="china, chinese, 中国"
+            className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Destination</label>
+            <input value={destination} onChange={e => setDestination(e.target.value)} placeholder="China"
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Source</label>
+            <input value={source} onChange={e => setSource(e.target.value)} placeholder="China / B2B / In-House"
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-slate-500 font-semibold mb-1 block">Consultants (round-robin rotates through selected)</label>
+          <div className="flex flex-wrap gap-1.5">
+            {employees.map(e => (
+              <button key={e.id} onClick={() => toggleConsultant(e.name)}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium
+                  ${consultants.includes(e.name) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                {e.name}
+              </button>
+            ))}
+            {!employees.length && <span className="text-xs text-slate-400">No active employees found</span>}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-slate-500 font-semibold mb-1 block">Strategy</label>
+          <select value={strategy} onChange={e => setStrategy(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs">
+            <option value="round_robin">Round-robin (rotate fairly)</option>
+            <option value="fixed">Fixed (always first in list)</option>
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+          <button onClick={save} disabled={saving}
+            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save Rule'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ─────────────────── Tab: Drip Sequences ─────────────────── */
+
+const LEAD_STATUSES = ['New Lead', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested'];
+
+function DripsTab() {
+  const [sequences, setSequences] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([api.dripSequences(), api.templates().catch(() => []), api.dripEnrollments({ summary: 1 }).catch(() => null)])
+      .then(([s, t, st]) => { setSequences(s || []); setTemplates(t || []); setStats(st); setLoading(false); })
+      .catch(e => { toast.error(e.message); setLoading(false); });
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const toggleActive = async (s) => {
+    try { await api.updateDripSequence(s.id, { active: !s.is_active }); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+  const handleDelete = async (id) => {
+    const ok = await confirm({ title: 'Delete sequence?', body: 'Active enrollments will stop.', tone: 'danger', confirmLabel: 'Delete' });
+    if (!ok) return;
+    try { await api.deleteDripSequence(id); toast.success('Deleted'); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-slate-500 max-w-xl">
+          When a lead enters the trigger status it's enrolled automatically. Each step sends a template after N days
+          (9:00–21:00 Dhaka only). The sequence <b>stops on reply</b> or when the lead changes status.
+        </p>
+        <button onClick={() => setModal({ mode: 'create' })}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-sm">
+          <Plus size={14} /> New Sequence
+        </button>
+      </div>
+
+      {stats && (
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {[['Active enrollments', stats.active], ['Completed', stats.completed], ['Stopped (replied/status)', stats.stopped]].map(([l, v]) => (
+            <div key={l} className="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm text-center">
+              <p className="text-xl font-bold text-slate-800">{v ?? 0}</p>
+              <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">{l}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">Loading…</div> : (
+        <div className="grid gap-3">
+          {sequences.map(s => (
+            <div key={s.id} className={`bg-white rounded-2xl border p-4 shadow-sm flex items-center gap-4 ${s.is_active ? 'border-slate-200' : 'border-slate-200 opacity-55'}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-bold text-slate-800">{s.name}</span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">on status: {s.enroll_status}</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {(s.steps || []).length} steps: {(s.steps || []).map(st => `day ${st.day_offset}`).join(' → ') || '—'}
+                  {' · '}{s.active_count ?? 0} enrolled
+                </p>
+              </div>
+              <button onClick={() => toggleActive(s)} className={`p-2 rounded-lg ${s.is_active ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'}`}>
+                {s.is_active ? <Pause size={15} /> : <Play size={15} />}
+              </button>
+              <button onClick={() => setModal({ mode: 'edit', sequence: s })} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100"><Pencil size={15} /></button>
+              <button onClick={() => handleDelete(s.id)} className="p-2 rounded-lg text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>
+            </div>
+          ))}
+          {!sequences.length && <div className="text-center py-10 text-slate-400 text-sm">No drip sequences yet. Create one to nurture leads automatically.</div>}
+        </div>
+      )}
+
+      {modal && <DripSequenceModal modal={modal} templates={templates} onClose={() => setModal(null)}
+        onSaved={() => { setModal(null); load(); }} />}
+    </div>
+  );
+}
+
+function DripSequenceModal({ modal, templates, onClose, onSaved }) {
+  const s = modal.sequence;
+  const [name, setName] = useState(s?.name || '');
+  const [enrollStatus, setEnrollStatus] = useState(s?.enroll_status || 'New Lead');
+  const [steps, setSteps] = useState(s?.steps?.length ? s.steps.map(st => ({ day_offset: st.day_offset, template_id: st.template_id })) : [{ day_offset: 1, template_id: '' }]);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const setStep = (i, field, val) => setSteps(prev => prev.map((st, idx) => idx === i ? { ...st, [field]: val } : st));
+  const addStep = () => setSteps(prev => [...prev, { day_offset: (Number(prev[prev.length - 1]?.day_offset) || 0) + 2, template_id: '' }]);
+  const removeStep = (i) => setSteps(prev => prev.filter((_, idx) => idx !== i));
+
+  const save = async () => {
+    const cleanSteps = steps
+      .map(st => ({ day_offset: Number(st.day_offset), template_id: Number(st.template_id) }))
+      .filter(st => st.template_id && st.day_offset >= 0)
+      .sort((a, b) => a.day_offset - b.day_offset);
+    if (!name.trim()) { toast.error('Name is required'); return; }
+    if (!cleanSteps.length) { toast.error('Add at least one step with a template'); return; }
+    setSaving(true);
+    try {
+      const payload = { name: name.trim(), enroll_status: enrollStatus, steps: cleanSteps };
+      if (modal.mode === 'edit') await api.updateDripSequence(s.id, payload);
+      else await api.createDripSequence(payload);
+      toast.success('Sequence saved');
+      onSaved();
+    } catch (e) { toast.error(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <Modal onClose={onClose} title={modal.mode === 'edit' ? 'Edit Drip Sequence' : 'New Drip Sequence'}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="New lead nurture"
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 font-semibold mb-1 block">Enroll when lead status becomes</label>
+            <select value={enrollStatus} onChange={e => setEnrollStatus(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200/70 rounded-xl px-3 py-2 text-xs">
+              {LEAD_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs text-slate-500 font-semibold mb-1 block">Steps (day 0 = same day as enrollment)</label>
+          <div className="space-y-2">
+            {steps.map((st, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-semibold w-8">#{i + 1}</span>
+                <input type="number" min={0} value={st.day_offset} onChange={e => setStep(i, 'day_offset', e.target.value)}
+                  className="w-20 bg-slate-50 border border-slate-200/70 rounded-xl px-2 py-2 text-xs" />
+                <span className="text-xs text-slate-400">days →</span>
+                <select value={st.template_id} onChange={e => setStep(i, 'template_id', e.target.value)}
+                  className="flex-1 bg-slate-50 border border-slate-200/70 rounded-xl px-2 py-2 text-xs">
+                  <option value="">Select template…</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.language})</option>)}
+                </select>
+                <button onClick={() => removeStep(i)} className="p-1.5 rounded-lg text-red-400 hover:bg-red-50"><X size={14} /></button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addStep} className="mt-2 flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700">
+            <Plus size={13} /> Add step
+          </button>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50">Cancel</button>
+          <button onClick={save} disabled={saving}
+            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save Sequence'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

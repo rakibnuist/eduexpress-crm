@@ -2577,6 +2577,28 @@ function setupSchema() { db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS drip_sequences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    enroll_status TEXT NOT NULL,
+    steps TEXT,                       -- JSON [{day_offset, template_id}]
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS drip_enrollments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sequence_id INTEGER REFERENCES drip_sequences(id),
+    lead_id INTEGER REFERENCES leads(id),
+    current_step INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',     -- active | completed | stopped
+    stop_reason TEXT,
+    enrolled_at TEXT DEFAULT (datetime('now')),
+    last_sent_at TEXT,
+    UNIQUE(sequence_id, lead_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_drip_enrollments_active ON drip_enrollments(status, sequence_id);
+
   CREATE TABLE IF NOT EXISTS lead_routing_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_key TEXT UNIQUE,
@@ -2962,6 +2984,13 @@ function runMigrations() {
   } catch (e) {
     console.error("[migration] Seeding partner investments failed:", e.message);
   }
+
+  // Self-healing migration: messages.is_internal_note is referenced by the
+  // automation engine + analytics but was never added to the schema.
+  try {
+    db.run("ALTER TABLE messages ADD COLUMN is_internal_note INTEGER DEFAULT 0");
+    console.log('[migration] Added messages.is_internal_note column.');
+  } catch { /* column already exists */ }
 
   // Self-healing migration to set the WhatsApp channel consultant to "Abdullah Al Rakib"
   try {
@@ -4497,6 +4526,7 @@ async function executeRuleAction(rule, { conversation, contact, channel, lead })
 async function fireLeadStatusChangeRules(lead, fromStatus, toStatus) {
   try {
     if (!lead || fromStatus === toStatus) return;
+    enrollLeadInDrips(lead, toStatus); // drip sequences react to every status change
     const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 AND trigger_type='lead_status_change' ORDER BY priority DESC, id DESC").all();
     if (!rules.length) return;
 
@@ -4641,6 +4671,175 @@ async function sendMorningFollowupNudges() {
   }
 }
 
+// ─── Drip Sequences ───────────────────────────────────────
+// Leads are auto-enrolled when they enter a sequence's enroll_status.
+// The scheduler sends each step after its day_offset. A sequence stops
+// when the student replies or the lead's status changes.
+
+function enrollLeadInDrips(lead, toStatus) {
+  try {
+    if (!lead || !toStatus) return;
+    // Stop active enrollments whose sequence no longer matches this status
+    const active = db.prepare(`
+      SELECT e.id, s.enroll_status FROM drip_enrollments e
+      JOIN drip_sequences s ON s.id = e.sequence_id
+      WHERE e.lead_id=? AND e.status='active'`).all(lead.id);
+    for (const en of active) {
+      if (en.enroll_status !== toStatus) {
+        db.prepare("UPDATE drip_enrollments SET status='stopped', stop_reason='status_changed' WHERE id=?").run(en.id);
+      }
+    }
+    // Enroll in matching active sequences (UNIQUE constraint prevents re-enrollment)
+    const seqs = db.prepare("SELECT id FROM drip_sequences WHERE active=1 AND enroll_status=?").all(toStatus);
+    for (const s of seqs) {
+      try {
+        db.prepare("INSERT OR IGNORE INTO drip_enrollments (sequence_id, lead_id) VALUES (?,?)").run(s.id, lead.id);
+      } catch {}
+    }
+  } catch (e) {
+    console.error('[drip] enroll error:', e.message);
+  }
+}
+
+async function processDripEnrollments() {
+  const hour = getBangladeshTime().getHours();
+  if (hour < 9 || hour >= 21) return; // only message during Dhaka daytime
+
+  const enrollments = db.prepare(`
+    SELECT e.*, s.steps AS seq_steps, s.active AS seq_active, s.enroll_status, s.name AS seq_name
+    FROM drip_enrollments e
+    JOIN drip_sequences s ON s.id = e.sequence_id
+    WHERE e.status='active'
+    ORDER BY e.enrolled_at ASC
+    LIMIT 100`).all();
+
+  let sends = 0;
+  for (const en of enrollments) {
+    if (sends >= 30) break; // rate cap per run
+    try {
+      if (!en.seq_active) continue;
+      let steps = [];
+      try { steps = JSON.parse(en.seq_steps || '[]'); } catch {}
+      if (en.current_step >= steps.length) {
+        db.prepare("UPDATE drip_enrollments SET status='completed' WHERE id=?").run(en.id);
+        continue;
+      }
+
+      const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(en.lead_id);
+      if (!lead) { db.prepare("UPDATE drip_enrollments SET status='stopped', stop_reason='lead_deleted' WHERE id=?").run(en.id); continue; }
+      if (lead.lead_status !== en.enroll_status) {
+        db.prepare("UPDATE drip_enrollments SET status='stopped', stop_reason='status_changed' WHERE id=?").run(en.id);
+        continue;
+      }
+
+      const conversation = db.prepare("SELECT * FROM conversations WHERE lead_id=? ORDER BY last_message_at DESC LIMIT 1").get(lead.id);
+      if (!conversation) continue; // nowhere to send yet — retry next run
+
+      // Stop on reply: any inbound message since enrollment means the student engaged
+      const replied = db.prepare("SELECT 1 FROM messages WHERE conversation_id=? AND direction='in' AND created_at > ? LIMIT 1").get(conversation.id, en.enrolled_at);
+      if (replied) {
+        db.prepare("UPDATE drip_enrollments SET status='stopped', stop_reason='replied' WHERE id=?").run(en.id);
+        continue;
+      }
+
+      // Is the current step due? (enrolled_at is stored as UTC 'YYYY-MM-DD HH:MM:SS')
+      const step = steps[en.current_step];
+      const enrolledMs = Date.parse(String(en.enrolled_at).replace(' ', 'T') + 'Z');
+      if (isNaN(enrolledMs) || Date.now() < enrolledMs + (Number(step.day_offset) || 0) * 86400000) continue;
+
+      const template = db.prepare("SELECT * FROM message_templates WHERE id=?").get(step.template_id);
+      if (!template) {
+        db.prepare("UPDATE drip_enrollments SET current_step=current_step+1 WHERE id=?").run(en.id);
+        continue;
+      }
+
+      const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conversation.contact_id);
+      const channel = conversation.channel_id ? db.prepare("SELECT * FROM channels WHERE id=?").get(conversation.channel_id) : null;
+      const text = substituteTemplateVars(template.content, {
+        name: contact?.name || lead.client_name || 'there',
+        destination: lead.destination || 'your destination',
+        program: lead.program || 'your program',
+        consultant: lead.assigned_consultant || 'our team',
+        phone: contact?.phone || lead.phone || '',
+        email: contact?.email || lead.email || '',
+        channel: channel?.name || 'WhatsApp',
+      });
+
+      let sent = null;
+      if (channel?.type === 'whatsapp' && (contact?.wa_id || contact?.phone)) {
+        sent = await sendWhatsApp(channel, contact.wa_id || contact.phone, text);
+      } else if (channel?.type === 'messenger' && contact?.messenger_id) {
+        sent = await sendMessenger(channel, contact.messenger_id, text);
+      }
+
+      if (sent && !sent.error) {
+        db.prepare(`INSERT INTO messages (conversation_id, direction, type, content, wa_message_id, status, sent_by, created_at)
+          VALUES (?, 'out', 'text', ?, ?, 'delivered', 'auto', datetime('now'))`).run(conversation.id, text, sent.messages?.[0]?.id || null);
+        db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), last_message_direction='out' WHERE id=?").run(text, conversation.id);
+        db.prepare("UPDATE message_templates SET usage_count=COALESCE(usage_count,0)+1 WHERE id=?").run(template.id);
+        const nextStep = en.current_step + 1;
+        db.prepare("UPDATE drip_enrollments SET current_step=?, last_sent_at=datetime('now'), status=? WHERE id=?")
+          .run(nextStep, nextStep >= steps.length ? 'completed' : 'active', en.id);
+        broadcast('new_message', { conversation_id: conversation.id, message: { content: text, direction: 'out', sent_by: 'auto', created_at: new Date().toISOString() } });
+        sends++;
+        console.log(`[drip] "${en.seq_name}" step ${en.current_step + 1} → lead ${lead.lead_id || lead.id}`);
+      } else if (sent?.error) {
+        console.error(`[drip] send failed for enrollment ${en.id}:`, sent.error.message || sent.error);
+      }
+    } catch (e) {
+      console.error(`[drip] enrollment ${en.id} error:`, e.message);
+    }
+  }
+}
+
+// ─── SLA Alerts ───────────────────────────────────────────
+// New leads with no outbound contact after `sla_hours` (Settings, default 4)
+// raise an alert to the assigned consultant (WhatsApp + bell) once per lead.
+async function processSlaAlerts() {
+  const hour = getBangladeshTime().getHours();
+  if (hour < 9 || hour >= 21) return;
+  const slaHours = Number(getConfig('sla_hours') || 4);
+  if (!slaHours || slaHours <= 0) return;
+
+  const breached = db.prepare(`
+    SELECT l.* FROM leads l
+    WHERE l.lead_status = 'New Lead'
+      AND l.created_at <= datetime('now', '-' || ? || ' hours')
+      AND l.created_at >= datetime('now', '-7 days')
+      AND NOT EXISTS (
+        SELECT 1 FROM conversations c JOIN messages m ON m.conversation_id = c.id
+        WHERE c.lead_id = l.id AND m.direction='out' AND m.is_internal_note=0
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM activity_log a WHERE a.lead_id = l.id AND a.type='sla_alert'
+      )
+    ORDER BY l.created_at ASC
+    LIMIT 20`).all(slaHours);
+
+  for (const lead of breached) {
+    try {
+      logActivity({
+        type: 'sla_alert',
+        actor: { name: 'Automation' },
+        lead,
+        details: { hours: slaHours, message: `SLA breach: ${lead.client_name || lead.lead_id} uncontacted for ${slaHours}+ hours` },
+      });
+      if (lead.assigned_consultant && isWaLinkedConnected()) {
+        const emp = db.prepare("SELECT phone FROM employees WHERE name=? LIMIT 1").get(lead.assigned_consultant);
+        if (emp?.phone) {
+          await sendWaLinkedMessage(
+            emp.phone.replace(/[^0-9]/g, ''),
+            `⚠️ SLA alert: new lead "${lead.client_name || lead.lead_id}" (${lead.destination || '—'}) has had no reply for over ${slaHours}h. Please contact them now — phone: ${lead.phone || 'in CRM'}.`
+          );
+        }
+      }
+      console.log(`[sla] Alert raised for lead ${lead.lead_id || lead.id} (${lead.assigned_consultant || 'unassigned'})`);
+    } catch (e) {
+      console.error(`[sla] alert for lead ${lead.id} failed:`, e.message);
+    }
+  }
+}
+
 let schedulerBusy = false;
 async function runAutomationScheduler() {
   if (!dbReady || schedulerBusy) return;
@@ -4648,6 +4847,8 @@ async function runAutomationScheduler() {
   try { await processTimeBasedRules(); } catch (e) { console.error('[scheduler] time_based:', e.message); }
   try { await processScheduledBroadcasts(); } catch (e) { console.error('[scheduler] broadcasts:', e.message); }
   try { await sendMorningFollowupNudges(); } catch (e) { console.error('[scheduler] nudges:', e.message); }
+  try { await processDripEnrollments(); } catch (e) { console.error('[scheduler] drips:', e.message); }
+  try { await processSlaAlerts(); } catch (e) { console.error('[scheduler] sla:', e.message); }
   schedulerBusy = false;
 }
 setInterval(runAutomationScheduler, 60 * 1000);
@@ -8637,6 +8838,59 @@ app.post('/api/automation/rules/:id/test', (req, res) => requireAdmin(req, res, 
   }
 
   res.json({ ok: issues.length === 0, valid: issues.length === 0, issues, preview, active: rule.active === 1 });
+}));
+
+// ─── Drip Sequences CRUD ─────────────────────────────────
+app.get('/api/drip-sequences', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const rows = db.prepare("SELECT * FROM drip_sequences ORDER BY id DESC").all();
+  const counts = db.prepare("SELECT sequence_id, COUNT(*) c FROM drip_enrollments WHERE status='active' GROUP BY sequence_id").all();
+  const countMap = Object.fromEntries(counts.map(c => [c.sequence_id, c.c]));
+  res.json(rows.map(r => {
+    let steps = [];
+    try { steps = JSON.parse(r.steps || '[]'); } catch {}
+    return { ...r, steps, is_active: r.active === 1, active_count: countMap[r.id] || 0 };
+  }));
+}));
+
+app.post('/api/drip-sequences', (req, res) => requireAdmin(req, res, () => {
+  const { name, enroll_status, steps, active } = req.body || {};
+  if (!name || !enroll_status) return res.status(400).json({ error: 'name and enroll_status are required' });
+  if (!Array.isArray(steps) || !steps.length) return res.status(400).json({ error: 'steps[] is required' });
+  const info = db.prepare("INSERT INTO drip_sequences (name, enroll_status, steps, active) VALUES (?,?,?,?)")
+    .run(name, enroll_status, JSON.stringify(steps), active === false ? 0 : 1);
+  res.json(db.prepare("SELECT * FROM drip_sequences WHERE id=?").get(info.lastInsertRowid));
+}));
+
+app.put('/api/drip-sequences/:id', (req, res) => requireAdmin(req, res, () => {
+  const cur = db.prepare("SELECT * FROM drip_sequences WHERE id=?").get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Not found' });
+  const { name, enroll_status, steps, active } = req.body || {};
+  db.prepare(`UPDATE drip_sequences SET name=COALESCE(?,name), enroll_status=COALESCE(?,enroll_status),
+      steps=COALESCE(?,steps), active=COALESCE(?,active) WHERE id=?`)
+    .run(name ?? null, enroll_status ?? null, Array.isArray(steps) ? JSON.stringify(steps) : null,
+      active === undefined ? null : (active ? 1 : 0), req.params.id);
+  res.json(db.prepare("SELECT * FROM drip_sequences WHERE id=?").get(req.params.id));
+}));
+
+app.delete('/api/drip-sequences/:id', (req, res) => requireAdmin(req, res, () => {
+  db.prepare("UPDATE drip_enrollments SET status='stopped', stop_reason='sequence_deleted' WHERE sequence_id=? AND status='active'").run(req.params.id);
+  db.prepare("DELETE FROM drip_sequences WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.get('/api/drip-enrollments', (req, res) => requireManagerOrAdmin(req, res, () => {
+  if (req.query.summary) {
+    const g = (st) => db.prepare("SELECT COUNT(*) c FROM drip_enrollments WHERE status=?").get(st).c;
+    return res.json({ active: g('active'), completed: g('completed'), stopped: g('stopped') });
+  }
+  const where = req.query.sequence_id ? "WHERE e.sequence_id=?" : "";
+  const params = req.query.sequence_id ? [req.query.sequence_id] : [];
+  res.json(db.prepare(`
+    SELECT e.*, l.client_name, l.lead_id AS lead_code, l.lead_status, s.name AS sequence_name
+    FROM drip_enrollments e
+    LEFT JOIN leads l ON l.id = e.lead_id
+    LEFT JOIN drip_sequences s ON s.id = e.sequence_id
+    ${where} ORDER BY e.id DESC LIMIT 200`).all(...params));
 }));
 
 // ─── Lead Routing Rules CRUD ─────────────────────────────
