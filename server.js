@@ -7785,8 +7785,8 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
         const to = conv.wa_id || conv.contact_phone;
         if (!to) throw new Error('No recipient phone number found');
         // Linked-device channel (Baileys) or no Cloud API token → send via linked device
-        if (channel.phone_number_id === 'linked_device' || (!channel.access_token && isWaLinkedConnected())) {
-          apiResult = await sendWaLinkedMessage(to, content, media_url, type);
+        if (String(channel.phone_number_id || '').startsWith('linked_device') || (!channel.access_token && isWaLinkedConnected())) {
+          apiResult = await sendWaLinkedMessage(to, content, media_url, type, channel.phone_number_id);
         } else {
           apiResult = await sendWhatsApp(channel, to, content, type, media_url);
         }
@@ -8226,7 +8226,8 @@ app.get('/api/whatsapp-linked/status', (req, res) => {
 
 app.post('/api/whatsapp-linked/connect', async (req, res) => {
   try {
-    const s = await connectWaLinked();
+    const { id, label, consultant } = req.body || {};
+    const s = await connectWaLinked({ id, label, consultant });
     res.json(s);
   } catch (e) {
     console.error('[wa-linked] connect error:', e.message);
@@ -8236,7 +8237,7 @@ app.post('/api/whatsapp-linked/connect', async (req, res) => {
 
 app.post('/api/whatsapp-linked/logout', async (req, res) => {
   try {
-    res.json(await logoutWaLinked());
+    res.json(await logoutWaLinked(req.body?.id));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

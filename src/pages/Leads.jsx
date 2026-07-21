@@ -28,6 +28,16 @@ import { toDate } from '../lib/format';
 
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
+// Long Meta page names → short labels for table display
+export const shortPageName = (name) => {
+  if (!name) return name;
+  const n = String(name).toLowerCase();
+  if (n.includes('china')) return 'EdX-China';
+  if (n.includes('bangladesh') || /\bbd\b/.test(n)) return 'EdX-BD';
+  if (n.includes('eduexpress')) return 'EdX';
+  return name;
+};
+
 // Lead creation date + time (stored as UTC → shown in Dhaka time)
 export const fmtCreatedAt = (l) => {
   const d = toDate(l.created_at) || toDate(l.date_added);
@@ -446,7 +456,7 @@ export default function Leads({ user }) {
               )}
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
               <FilterSelect value={filters.intake} onChange={v => setFilter('intake', v)} options={settings.intakes || []} placeholder="All Intakes" />
-              <FilterSelect value={filters.page_name} onChange={v => setFilter('page_name', v)} options={settings.pages || []} placeholder="All Pages" formatOption={p => p === 'EduExpress International Bangladesh' ? 'EduExpress Bangladesh' : p === 'EduExpress International China' ? 'EduExpress China' : p} />
+              <FilterSelect value={filters.page_name} onChange={v => setFilter('page_name', v)} options={settings.pages || []} placeholder="All Pages" formatOption={shortPageName} />
               <FilterSelect value={filters.ad_name} onChange={v => setFilter('ad_name', v)} options={settings.ads || []} placeholder="All Ads" />
               <FilterSelect value={filters.source} onChange={v => setFilter('source', v)} options={settings.leadSources || []} placeholder="All Sources" />
               <FilterSelect value={filters.follow_up} onChange={v => setFilter('follow_up', v)} options={['Today', 'Upcoming', 'Overdue']} placeholder="All Follow-ups" />
@@ -615,13 +625,9 @@ export default function Leads({ user }) {
                           {/* Page badge */}
                           {l.page_name ? (
                             <div className="flex flex-col gap-1">
-                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold text-xs truncate max-w-[180px] w-fit">
+                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold text-xs w-fit whitespace-nowrap" title={l.page_name}>
                                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
-                                <span className="truncate">
-                                  {l.page_name === 'EduExpress International Bangladesh' ? 'EduExpress Bangladesh' :
-                                   l.page_name === 'EduExpress International China' ? 'EduExpress China' :
-                                   l.page_name}
-                                </span>
+                                <span>{shortPageName(l.page_name)}</span>
                               </span>
                               {l.ad_name && (
                                 <span className="inline-flex items-center text-[10px] text-slate-500 bg-slate-50 border border-slate-200/60 px-1.5 py-0.5 rounded w-fit truncate max-w-[180px]" title={l.ad_name}>

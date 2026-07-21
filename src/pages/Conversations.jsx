@@ -1921,7 +1921,8 @@ function WaLinkPanel({ collapsed }) {
           </span>
           {!collapsed && (
             <span className="flex-1 text-left truncate">
-              {connected ? `Linked: +${st?.me?.id || ''}` : 'Link WhatsApp'}
+              {(st?.connected_count || 0) > 1 ? `WhatsApp: ${st.connected_count} linked`
+                : connected ? `Linked: +${st?.me?.id || ''}` : 'Link WhatsApp'}
             </span>
           )}
         </button>

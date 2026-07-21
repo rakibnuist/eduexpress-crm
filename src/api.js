@@ -86,10 +86,10 @@ export const api = {
   updateUniversityApp:  (id, d)     => req(`/university-applications/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   deleteUniversityApp:  (id)        => req(`/university-applications/${id}`, { method: 'DELETE' }),
 
-  // WhatsApp Linked Device (Baileys — scan QR, no Meta App)
-  waLinkedStatus:  () => req('/whatsapp-linked/status'),
-  waLinkedConnect: () => req('/whatsapp-linked/connect', { method: 'POST' }),
-  waLinkedLogout:  () => req('/whatsapp-linked/logout',  { method: 'POST' }),
+  // WhatsApp Linked Devices (Baileys — scan QR, no Meta App; multi-account)
+  waLinkedStatus:  ()          => req('/whatsapp-linked/status'),
+  waLinkedConnect: (body = {}) => req('/whatsapp-linked/connect', { method: 'POST', body: JSON.stringify(body) }),
+  waLinkedLogout:  (id)        => req('/whatsapp-linked/logout',  { method: 'POST', body: JSON.stringify({ id }) }),
 
   // Dashboard / settings
   dashboard: () => req('/dashboard'),
