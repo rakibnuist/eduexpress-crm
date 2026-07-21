@@ -1,0 +1,33 @@
+# EduExpress CRM — Hostinger VPS deploy (Docker + existing Traefik)
+# Traefik on this VPS runs in host-network mode with the "letsencrypt"
+# HTTP-01 cert resolver and Docker label discovery (exposedbydefault=false).
+# These labels register crm.eduexpressint.com and auto-provision SSL.
+#
+# Deploy:  docker compose up -d --build
+services:
+  crm:
+    build:
+      context: .
+    image: eduexpress-crm:latest
+    container_name: eduexpress-crm
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/data/crm.db          # persisted on the crm-data volume
+      - RESET_KEY=${RESET_KEY}        # set in .env — gates /api/auth/emergency-reset
+    volumes:
+      - crm-data:/data                # SQLite DB + WhatsApp linked-device session (wa_auth)
+      - crm-uploads:/app/uploads      # uploaded documents
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.crm.rule=Host(`crm.eduexpressint.com`)
+      - traefik.http.routers.crm.entrypoints=websecure
+      - traefik.http.routers.crm.tls=true
+      - traefik.http.routers.crm.tls.certresolver=letsencrypt
+      - traefik.http.services.crm.loadbalancer.server.port=3000
+      # www.crm → crm (optional redirect target already handled by DNS CNAME)
+
+volumes:
+  crm-data:
+  crm-uploads:

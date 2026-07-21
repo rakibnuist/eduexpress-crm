@@ -11,6 +11,9 @@ node_modules
 
 *.local
 
+# Environment secrets (RESET_KEY etc.) — never commit
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

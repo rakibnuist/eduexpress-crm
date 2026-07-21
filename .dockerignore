@@ -23,7 +23,5 @@ seed_data.json
 railway.toml
 README.md
 deploy.sh
-eslint.config.js
-vite.config.js
 .nvmrc
 .node-version

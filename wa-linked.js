@@ -201,13 +201,32 @@ async function handleHistorySet({ chats = [], contacts = [], messages = [] }) {
 }
 
 async function startSocket() {
-  const baileys = await import('baileys');
+  // Guarantee a valid auth directory even if init was skipped/misconfigured
+  if (!state.authDir || typeof state.authDir !== 'string') {
+    state.authDir = join(process.cwd(), 'wa_auth');
+    log('authDir was unset — defaulting to', state.authDir);
+  }
+
+  let baileys;
+  try {
+    baileys = await import('baileys');
+  } catch (e) {
+    state.status = 'disconnected';
+    state.lastError = 'WhatsApp library (baileys) is not installed on the server. Run npm install.';
+    throw new Error(state.lastError);
+  }
   const lib = baileys.default && baileys.default.makeWASocket ? baileys.default : baileys;
   makeWASocket = lib.makeWASocket || baileys.default;
   useMultiFileAuthState = lib.useMultiFileAuthState;
   DisconnectReason = lib.DisconnectReason;
   fetchLatestBaileysVersion = lib.fetchLatestBaileysVersion;
   jidNormalizedUser = lib.jidNormalizedUser;
+
+  if (typeof makeWASocket !== 'function' || typeof useMultiFileAuthState !== 'function') {
+    state.status = 'disconnected';
+    state.lastError = 'Incompatible baileys version (missing exports).';
+    throw new Error(state.lastError);
+  }
 
   mkdirSync(state.authDir, { recursive: true });
   const { state: authState, saveCreds } = await useMultiFileAuthState(state.authDir);
@@ -280,7 +299,8 @@ async function startSocket() {
 // ── Public API ────────────────────────────────────────────
 export function initWaLinked(deps) {
   state.deps = deps;
-  state.authDir = deps.authDir || join(deps.dataDir || '.', 'wa_auth');
+  const baseDir = deps.authDir || join(deps.dataDir || process.cwd(), 'wa_auth');
+  state.authDir = (typeof baseDir === 'string' && baseDir) ? baseDir : join(process.cwd(), 'wa_auth');
   // Auto-start only if a session already exists (server restart / redeploy)
   if (existsSync(join(state.authDir, 'creds.json'))) {
     log('Existing session found — reconnecting…');
