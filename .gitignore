@@ -36,6 +36,38 @@ crm.db-wal
 
 # Development scratch / debug scripts
 scratch/
+scratch_*
+patch*.cjs
+patch*.js
+test_*.js
+test_*.cjs
+test-*.js
+test-*.cjs
+retrofit.*
+recheck_*.*
+migrate_*.js
+migrate_*.cjs
+find_dbs.js
+get_page_counts.js
+check_schema.js
+init_db.js
+restore_endpoint.js
+scanChats.*
+
+# WhatsApp linked-device session (device-specific, do not commit)
+wa_auth/
+
+# DB backups / dumps / archives
+*_backup_*.db
+*.bak
+*.bak2
+live.db*
+restore.db*
+test_actual.db
+test_size.db
+full_schema.sql
+archive*.tar.gz
+cookie.txt
 
 # Temporary notes / analysis files
 NEXT_TASKS.md
