@@ -1228,6 +1228,9 @@ function MetaIntegrationSettings() {
 
   return (
     <div className="space-y-5">
+      {/* WhatsApp Linked Device (QR) — no Meta App needed */}
+      <WhatsAppQRCard />
+
       {/* Channels List Card */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
         <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-emerald-50 text-emerald-800 border-emerald-100">
@@ -1406,6 +1409,115 @@ function MetaIntegrationSettings() {
           verifyToken={config.verify_token}
         />
       )}
+    </div>
+  );
+}
+
+function WhatsAppQRCard() {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const poll = () => api.waLinkedStatus().then(setSt).catch(() => {});
+  useEffect(() => {
+    poll();
+    const t = setInterval(poll, showQR ? 3000 : 12000);
+    return () => clearInterval(t);
+  }, [showQR]);
+
+  const connect = async () => {
+    setBusy(true); setShowQR(true);
+    try { await api.waLinkedConnect(); poll(); }
+    catch (e) { toast.error(e.message || 'Failed to start WhatsApp'); }
+    finally { setBusy(false); }
+  };
+
+  const logout = async () => {
+    const ok = await confirm({
+      title: 'Unlink WhatsApp device?',
+      body: 'The CRM will stop receiving and sending messages through this number until you scan again. Existing chats stay in the inbox.',
+      tone: 'danger', confirmLabel: 'Unlink',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try { await api.waLinkedLogout(); setShowQR(false); poll(); toast.success('WhatsApp device unlinked'); }
+    catch (e) { toast.error(e.message || 'Failed'); }
+    finally { setBusy(false); }
+  };
+
+  const connected = st?.status === 'connected';
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b bg-[#25D366]/10 text-[#128C7E] border-[#25D366]/20">
+        <MessageCircle size={18} />
+        <span className="font-semibold text-sm flex-grow">WhatsApp — Scan &amp; Connect (No Meta App)</span>
+        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5
+          ${connected ? 'bg-emerald-100 text-emerald-700'
+            : st?.status === 'qr' || st?.status === 'connecting' ? 'bg-amber-100 text-amber-700'
+            : 'bg-slate-100 text-slate-500'}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : st?.status === 'qr' || st?.status === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'}`} />
+          {connected ? 'Connected' : st?.status === 'qr' ? 'Scan QR' : st?.status === 'connecting' ? 'Connecting' : 'Not linked'}
+        </span>
+      </div>
+
+      <div className="p-5">
+        <p className="text-xs text-slate-400 mb-4">
+          Links your WhatsApp Business number as a device (like WhatsApp Web) — no Meta App or Cloud API needed.
+          Once connected: all chats sync into the Inbox, Click-to-WhatsApp ad leads are auto-created with ad attribution,
+          and Conversion API events fire automatically. WhatsApp Business supports up to <strong>4 linked devices</strong>.
+        </p>
+
+        {connected ? (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-emerald-500 flex items-center justify-center text-white flex-shrink-0">
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Connected as +{st?.me?.id}</p>
+                <p className="text-[11px] text-slate-400">
+                  {st?.connected_since ? `Since ${new Date(st.connected_since).toLocaleString()}` : 'Active'}
+                  {st?.history && (st.history.chats > 0 || st.history.messages > 0) ? ` · imported ${st.history.chats} chats, ${st.history.messages} messages` : ''}
+                </p>
+              </div>
+            </div>
+            <button onClick={logout} disabled={busy}
+              className="text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+              Unlink device
+            </button>
+          </div>
+        ) : showQR && st?.status === 'qr' && st?.qr ? (
+          <div className="flex flex-col sm:flex-row items-center gap-5">
+            <img src={st.qr} alt="Scan with WhatsApp" className="w-[220px] h-[220px] rounded-xl border border-slate-200 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-slate-700 mb-2">Scan to link this device:</p>
+              <ol className="text-[13px] text-slate-500 space-y-1.5 list-decimal list-inside">
+                <li>Open <strong>WhatsApp Business</strong> on your phone</li>
+                <li>Tap <strong>⋮ (menu) → Linked devices</strong></li>
+                <li>Tap <strong>Link a device</strong></li>
+                <li>Point your phone at this QR code</li>
+              </ol>
+              <p className="text-[11px] text-slate-400 mt-3">QR refreshes automatically until scanned…</p>
+            </div>
+          </div>
+        ) : showQR && st?.status === 'connecting' ? (
+          <div className="flex items-center gap-3 py-6 text-slate-500">
+            <Loader2 size={22} className="animate-spin text-[#25D366]" />
+            <span className="text-sm">Connecting to WhatsApp…</span>
+          </div>
+        ) : (
+          <div>
+            {st?.last_error && <p className="text-[11px] text-red-500 mb-3">Last error: {st.last_error}</p>}
+            <button onClick={connect} disabled={busy}
+              className="flex items-center gap-2 bg-[#25D366] hover:bg-[#1fb855] text-white text-sm font-bold px-5 py-2.5 rounded-lg transition-colors disabled:opacity-50">
+              <MessageCircle size={16} /> {busy ? 'Starting…' : 'Generate QR Code'}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
