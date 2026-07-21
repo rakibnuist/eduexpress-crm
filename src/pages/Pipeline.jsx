@@ -8,8 +8,9 @@ import { api } from '../api';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';
 import { useToast } from '../components/Toast';
-import { Pencil, Phone, MapPin, User, Calendar, GripVertical, TrendingUp, Users, Bell, DollarSign, AlertCircle } from 'lucide-react';
+import { Pencil, Phone, MapPin, User, Calendar, GripVertical, TrendingUp, Users, Bell, DollarSign, AlertCircle, Clock } from 'lucide-react';
 import { bdtToday } from '../lib/format';
+import { fmtCreatedAt } from './Leads';
 
 const STAGES = [
   { status: 'New Lead',       hex: '#0ea5e9', col: 'bg-sky-500',     light: 'bg-sky-50',      ring: 'ring-sky-200' },
@@ -242,6 +243,11 @@ function LeadCard({ lead: l, onEdit, onOpen, onDragStart, onDragEnd, isDraggingS
             <User size={10} className="flex-shrink-0"/> {l.assigned_consultant}
           </div>
         )}
+        {(() => { const c = fmtCreatedAt(l); return c.date !== '—' && (
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400" title="Lead created">
+            <Clock size={10} className="text-slate-300 flex-shrink-0"/> {c.date}{c.time ? ` · ${c.time}` : ''}
+          </div>
+        ); })()}
       </div>
 
       {l.service_fee > 0 && (

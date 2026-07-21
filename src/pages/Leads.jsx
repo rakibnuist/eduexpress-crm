@@ -24,8 +24,19 @@ const STAGES = [
 
 import { canViewOwnLeadsOnly, isFullAdmin } from '../lib/roles';
 import { formatPhoneDisplay, getWAUrl } from '../lib/phone';
+import { toDate } from '../lib/format';
 
 const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
+
+// Lead creation date + time (stored as UTC → shown in Dhaka time)
+export const fmtCreatedAt = (l) => {
+  const d = toDate(l.created_at) || toDate(l.date_added);
+  if (!d) return { date: l.date_added || '—', time: '' };
+  return {
+    date: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Dhaka' }),
+    time: l.created_at ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Dhaka' }) : '',
+  };
+};
 
 export default function Leads({ user }) {
   const isAgentUser = user?.roles?.includes('agent');
@@ -494,7 +505,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Client', 'Phone', 'Status', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
+                  {['Lead ID', 'Created', 'Client', 'Phone', 'Status', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -526,6 +537,14 @@ export default function Leads({ user }) {
                         <Link to={`/leads/${l.id}`} className="text-blue-600 hover:text-blue-800 hover:underline font-bold">
                           {l.lead_id}
                         </Link>
+                      </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        {(() => { const c = fmtCreatedAt(l); return (
+                          <div className="flex flex-col">
+                            <span className="text-xs font-semibold text-slate-600">{c.date}</span>
+                            {c.time && <span className="text-[10px] text-slate-400">{c.time}</span>}
+                          </div>
+                        ); })()}
                       </td>
                       <td className="py-3 px-3.5">
                         <Link to={`/leads/${l.id}`} className="font-bold text-slate-800 hover:text-blue-600 transition-colors truncate max-w-[150px] block">
@@ -663,7 +682,7 @@ export default function Leads({ user }) {
                 })}
                 {data.leads.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="py-12">
+                    <td colSpan={16} className="py-12">
                       <div className="text-center">
                         <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2">
                           <Search size={20} />

@@ -1091,6 +1091,9 @@ export default function Conversations({ user }) {
             </div>
           )}
         </div>
+
+        {/* WhatsApp Linked Device (scan QR — like WhatsApp Web) */}
+        <WaLinkPanel collapsed={sidebarCollapsed} />
       </div>
 
       {/* ═══ MIDDLE: Contact List + Chat ═══ */}
@@ -1872,3 +1875,116 @@ export default function Conversations({ user }) {
   );
 }
 
+
+/* ── WhatsApp Linked Device panel (Baileys — works like WhatsApp Web) ── */
+function WaLinkPanel({ collapsed }) {
+  const [st, setSt] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  const poll = useCallback(() => {
+    api.waLinkedStatus().then(setSt).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    poll();
+    const t = setInterval(poll, open ? 3000 : 15000);
+    return () => clearInterval(t);
+  }, [poll, open]);
+
+  const connect = async () => {
+    setBusy(true);
+    try { await api.waLinkedConnect(); poll(); }
+    catch (e) { toast.error(e.message || 'Failed to start WhatsApp connection'); }
+    finally { setBusy(false); }
+  };
+
+  const logout = async () => {
+    setBusy(true);
+    try { await api.waLinkedLogout(); poll(); toast.success('WhatsApp device unlinked'); }
+    catch (e) { toast.error(e.message || 'Failed'); }
+    finally { setBusy(false); }
+  };
+
+  const connected = st?.status === 'connected';
+  const dotColor = connected ? 'bg-emerald-500' : st?.status === 'qr' || st?.status === 'connecting' ? 'bg-amber-400' : 'bg-slate-300';
+
+  return (
+    <>
+      <div className="px-1.5 pb-2 flex-shrink-0 border-t border-[#e4e6eb] pt-2">
+        <button onClick={() => setOpen(true)} title="WhatsApp Linked Device"
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[12px] font-medium text-[#1c1e21] hover:bg-[#f0f2f5] transition-all">
+          <span className="relative flex-shrink-0">
+            <Phone size={16} style={{ color: '#25d366' }} />
+            <span className={`absolute -right-1 -top-1 w-2 h-2 rounded-full ${dotColor}`} />
+          </span>
+          {!collapsed && (
+            <span className="flex-1 text-left truncate">
+              {connected ? `Linked: +${st?.me?.id || ''}` : 'Link WhatsApp'}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[380px] max-w-[92vw] p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-[16px] font-bold text-[#1c1e21]">WhatsApp Linked Device</h3>
+              <button onClick={() => setOpen(false)} className="p-1.5 hover:bg-[#f0f2f5] rounded-full text-[#606770]"><X size={16} /></button>
+            </div>
+            <p className="text-[12px] text-[#606770] mb-4">
+              Works like WhatsApp Web — your number stays on your phone. WhatsApp Business allows up to 4 linked devices.
+            </p>
+
+            {connected ? (
+              <div className="text-center py-4">
+                <div className="w-14 h-14 mx-auto rounded-full bg-emerald-50 flex items-center justify-center mb-3">
+                  <CheckCheck size={26} className="text-emerald-500" />
+                </div>
+                <p className="text-[14px] font-semibold text-[#1c1e21]">Connected as +{st?.me?.id}</p>
+                {st?.connected_since && <p className="text-[11px] text-[#8a8d91] mt-1">Since {new Date(st.connected_since).toLocaleString()}</p>}
+                {st?.history && (st.history.chats > 0 || st.history.messages > 0) && (
+                  <p className="text-[11px] text-[#606770] mt-2 bg-[#f0f2f5] rounded-lg px-3 py-2">
+                    📚 Imported {st.history.chats} chats · {st.history.messages} messages
+                  </p>
+                )}
+                <button onClick={logout} disabled={busy}
+                  className="mt-4 w-full py-2 rounded-lg border border-red-200 text-red-600 text-[13px] font-semibold hover:bg-red-50 transition-colors disabled:opacity-50">
+                  Unlink device
+                </button>
+              </div>
+            ) : st?.status === 'qr' && st?.qr ? (
+              <div className="text-center">
+                <img src={st.qr} alt="Scan with WhatsApp" className="w-[260px] h-[260px] mx-auto rounded-xl border border-[#e4e6eb]" />
+                <ol className="text-left text-[12px] text-[#606770] mt-3 space-y-1 list-decimal list-inside">
+                  <li>Open <strong>WhatsApp Business</strong> on your phone</li>
+                  <li>Tap <strong>⋮ → Linked devices → Link a device</strong></li>
+                  <li>Scan this QR code</li>
+                </ol>
+                <p className="text-[10px] text-[#8a8d91] mt-2">QR refreshes automatically…</p>
+              </div>
+            ) : st?.status === 'connecting' ? (
+              <div className="text-center py-8">
+                <Loader2 size={28} className="animate-spin mx-auto text-[#25d366] mb-3" />
+                <p className="text-[13px] text-[#606770]">Connecting to WhatsApp…</p>
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                {st?.last_error && <p className="text-[11px] text-red-500 mb-3">Last error: {st.last_error}</p>}
+                <button onClick={connect} disabled={busy}
+                  className="w-full py-2.5 rounded-lg bg-[#25d366] text-white text-[14px] font-bold hover:bg-[#1fb855] transition-colors disabled:opacity-50">
+                  {busy ? 'Starting…' : 'Generate QR Code'}
+                </button>
+                <p className="text-[11px] text-[#8a8d91] mt-3">
+                  Once linked: all chats sync into this inbox, Meta ad leads (CTWA) are auto-created with ad attribution, and CAPI events fire automatically.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

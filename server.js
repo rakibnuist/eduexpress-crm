@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { createRequire } from 'module';
 import { initDatabase, isDead } from './sqldb.js';
+import { initWaLinked, connectWaLinked, logoutWaLinked, getWaLinkedStatus, isWaLinkedConnected, sendWaLinkedMessage } from './wa-linked.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1699,6 +1700,24 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
+    // ── WhatsApp Linked Device (Baileys) — no Meta App needed ──
+    try {
+      initWaLinked({
+        db,
+        dataDir: DB_DIR,
+        upsertContact,
+        upsertConversation,
+        createLeadFromContact,
+        createLeadFromReferral,
+        saveInboundMessage,
+        broadcast,
+        getConfig,
+      });
+      console.log('[startup] WhatsApp linked-device module initialised (auth dir:', join(DB_DIR, 'wa_auth'), ')');
+    } catch (e) {
+      console.error('[startup] WA linked init failed:', e.message);
+    }
+
     /*
     // Trigger historical sync on startup in background for all active channels sequentially
     setTimeout(async () => {
@@ -2675,6 +2694,7 @@ function runMigrations() {
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
     `ALTER TABLE contacts ADD COLUMN tiktok_id TEXT`,
     `ALTER TABLE leads ADD COLUMN assigned_employee_id INTEGER`,
+    `ALTER TABLE leads ADD COLUMN ctwa_clid TEXT`,
     `ALTER TABLE income ADD COLUMN employee_id INTEGER`,
     `ALTER TABLE expenses ADD COLUMN employee_id INTEGER`,
     // ── Social Media Engine v2.0 migrations ──
@@ -3831,6 +3851,7 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
       });
 
       broadcast('new_lead', { lead });
+      sendCAPIEvent('Lead', lead).catch(() => {});
       console.log(`✅ Auto-created Lead from ${source}: ${lead_id} — ${client_name}`);
       return lead;
     }
@@ -3919,6 +3940,14 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
         lead,
         details: { client_name: contact.name, source: platformSourceMap[sourcePlatform] || 'Facebook Ad' }
       });
+      // Persist CTWA click id for Conversions API attribution
+      if (referralData.ctwa_clid) {
+        try {
+          db.prepare("UPDATE leads SET ctwa_clid=? WHERE id=?").run(referralData.ctwa_clid, lead.id);
+          lead.ctwa_clid = referralData.ctwa_clid;
+        } catch {}
+      }
+      sendCAPIEvent('Lead', lead).catch(() => {});
       return lead;
     }
   } catch (err) {
@@ -4403,8 +4432,10 @@ async function sendCAPIEvent(eventName, leadData) {
       event_name: eventName,
       event_time: Math.floor(Date.now() / 1000),
       event_id: `${leadData.lead_id || 'L'}-${eventName}-${Date.now()}`,
-      action_source: 'system_generated',
-      user_data: userData,
+      // CTWA leads (WhatsApp click-to-chat ads) must use business_messaging + ctwa_clid for attribution
+      action_source: leadData.ctwa_clid ? 'business_messaging' : 'system_generated',
+      messaging_channel: leadData.ctwa_clid ? 'whatsapp' : undefined,
+      user_data: leadData.ctwa_clid ? { ...userData, ctwa_clid: leadData.ctwa_clid } : userData,
       custom_data: {
         lead_id: leadData.lead_id,
         destination: leadData.destination,
@@ -7706,7 +7737,12 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       if (channel.type === 'whatsapp') {
         const to = conv.wa_id || conv.contact_phone;
         if (!to) throw new Error('No recipient phone number found');
-        apiResult = await sendWhatsApp(channel, to, content, type, media_url);
+        // Linked-device channel (Baileys) or no Cloud API token → send via linked device
+        if (channel.phone_number_id === 'linked_device' || (!channel.access_token && isWaLinkedConnected())) {
+          apiResult = await sendWaLinkedMessage(to, content, media_url, type);
+        } else {
+          apiResult = await sendWhatsApp(channel, to, content, type, media_url);
+        }
       } else if (channel.type === 'messenger') {
         apiResult = await sendMessenger(channel, conv.messenger_id, content, type, media_url);
       } else if (channel.type === 'instagram') {
@@ -8131,6 +8167,31 @@ app.get('/api/meta/stats', (req, res) => {
   const byCampaign = db.prepare("SELECT meta_campaign,COUNT(*) as c FROM leads WHERE meta_campaign IS NOT NULL GROUP BY meta_campaign ORDER BY c DESC").all();
   const recent = db.prepare("SELECT * FROM leads WHERE meta_lead_id IS NOT NULL ORDER BY id DESC LIMIT 10").all();
   res.json({ total, byStatus, byCampaign, recent });
+});
+
+// ─────────────────────────────────────────────────────────
+// WHATSAPP LINKED DEVICE (Baileys — scan QR, no Meta App)
+// ─────────────────────────────────────────────────────────
+app.get('/api/whatsapp-linked/status', (req, res) => {
+  res.json(getWaLinkedStatus());
+});
+
+app.post('/api/whatsapp-linked/connect', async (req, res) => {
+  try {
+    const s = await connectWaLinked();
+    res.json(s);
+  } catch (e) {
+    console.error('[wa-linked] connect error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/whatsapp-linked/logout', async (req, res) => {
+  try {
+    res.json(await logoutWaLinked());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────
