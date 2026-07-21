@@ -129,25 +129,49 @@ const uploadLimiter = rateLimit({
   message: { error: 'Upload quota exceeded, please try again later.' },
 });
 app.use(standardLimiter);
-app.get('/api/auth/emergency-reset', (req, res) => {
-  const newHash = hashPassword('eduexpress2026');
-  
-  // First, check if admin exists
-  const existingAdmin = db.prepare("SELECT id FROM users WHERE email = 'admin@eduexpressint.com'").get();
-  
-  if (!existingAdmin) {
-    const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, active) VALUES (?, ?, ?, ?, ?)`).run(
-      'admin@eduexpressint.com', 'Administrator', newHash, 'admin', 1
-    );
-    db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, ?)`).run(info.lastInsertRowid, 'founder_ceo');
-  } else {
-    db.prepare("UPDATE users SET password_hash = ?, active = 1 WHERE email = 'admin@eduexpressint.com'").run(newHash);
+// Emergency admin reset — gated behind a secret key (RESET_KEY env var).
+// Without a configured key the endpoint is fully disabled, so it can never be
+// abused by an anonymous visitor. Rate-limited to blunt brute-force attempts.
+app.get('/api/auth/emergency-reset', authLimiter, (req, res) => {
+  const expected = process.env.RESET_KEY || getConfig('reset_key') || '';
+  if (!expected) {
+    return res.status(404).json({ error: 'Not found' }); // disabled until RESET_KEY is set
+  }
+  const provided = String(req.query.key || '');
+  // Constant-time comparison to avoid leaking the key via timing
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok) {
+    return res.status(404).json({ error: 'Not found' }); // hide existence on wrong/missing key
   }
 
-  const allUsers = db.prepare("SELECT id, email, name, role, active FROM users").all();
+  // Optional custom password: ?password=... (min 8 chars); otherwise a strong random one is issued.
+  const newPassword = typeof req.query.password === 'string' && req.query.password.length >= 8
+    ? req.query.password
+    : crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+  const newHash = hashPassword(newPassword);
+
+  try {
+    const existingAdmin = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get('admin@eduexpressint.com');
+    if (existingAdmin) {
+      db.prepare("UPDATE users SET password_hash = ?, active = 1 WHERE id = ?").run(newHash, existingAdmin.id);
+    } else {
+      const info = db.prepare(`INSERT INTO users (email, name, password_hash, role, active) VALUES (?, ?, ?, ?, ?)`).run(
+        'admin@eduexpressint.com', 'Administrator', newHash, 'admin', 1
+      );
+      db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, ?)`).run(info.lastInsertRowid, 'founder_ceo');
+    }
+  } catch (e) {
+    console.error('[security] emergency-reset failed:', e.message);
+    return res.status(500).json({ error: 'Reset failed' });
+  }
+  console.log('[security] emergency-reset used for admin@eduexpressint.com from IP', req.ip);
+
   res.json({
-    message: 'Admin account has been recreated and password set to eduexpress2026.',
-    usersFound: allUsers
+    message: 'Admin password reset. Log in, then change it immediately in Settings.',
+    email: 'admin@eduexpressint.com',
+    password: newPassword,
   });
 });
 app.use('/api/auth/login', authLimiter);

@@ -26,7 +26,22 @@ N8N_PUBLISH_WEBHOOK=https://vibeacademy.cloud/webhook/eduexpress-publish
 
 # Internal key (keep secret, n8n uses this)
 INTERNAL_API_KEY=eduexpress-n8n-2024
+
+# Emergency admin-reset key (REQUIRED for /api/auth/emergency-reset to work).
+# Without it the reset endpoint is disabled (returns 404). Use a long random string.
+RESET_KEY=change-me-to-a-long-random-secret
 ```
+
+### Emergency admin password reset
+If you're locked out, visit (with your RESET_KEY):
+
+```
+https://crm.eduexpressint.com/api/auth/emergency-reset?key=YOUR_RESET_KEY
+```
+
+It returns a new random password for `admin@eduexpressint.com`. Log in, then
+change it in Settings. Optionally set your own: `&password=YourNewPass123`.
+If `RESET_KEY` is not configured, the endpoint stays disabled for security.
 
 ### Step 3: Add Custom Domain
 Railway Dashboard → Settings → Domains → Add `crm.eduexpressint.com`
