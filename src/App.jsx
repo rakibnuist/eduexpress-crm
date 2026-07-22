@@ -89,7 +89,7 @@ export default function App() {
                         <Route path="/leads" element={<Leads user={user} />} />
                         <Route path="/leads/:id" element={<LeadDetail user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_MY_DAY) && <Route path="/my-day" element={<MyDay user={user} />} />}
-                        <Route path="/pipeline" element={<Navigate to="/leads?view=kanban" replace />} />
+                        <Route path="/pipeline" element={<Navigate to="/leads?view=table" replace />} />
                         <Route path="/applications" element={<Applications user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_CHAT_INBOX) && <Route path="/conversations" element={<Conversations user={user} />} />}
                         {canManageMarketing(user) && <Route path="/marketing" element={<Marketing />} />}

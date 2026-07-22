@@ -209,11 +209,23 @@ export default function Conversations({ user }) {
       });
     }
 
-    // Channel tab filtering
+    // Channel tab filtering & status shortcuts
     if (channelTab !== 'all') {
       if (channelTab.startsWith('channel_')) {
         const cid = parseInt(channelTab.replace('channel_', ''));
         list = list.filter(c => c.channel_id === cid);
+      } else if (channelTab === 'unread') {
+        list = list.filter(c => Number(c.unread_count || 0) > 0);
+      } else if (channelTab === 'priority') {
+        list = list.filter(c => c.is_priority);
+      } else if (channelTab === 'assigned_me') {
+        list = list.filter(c => {
+          const myName = (user?.consultant_name || user?.name || '').trim().toLowerCase();
+          const assignedName = (c.assigned_to || '').trim().toLowerCase();
+          return myName && assignedName === myName;
+        });
+      } else if (channelTab === 'archived') {
+        list = list.filter(c => c.status === 'archived');
       } else {
         list = list.filter(c => c.channel_type === channelTab);
       }
@@ -1041,14 +1053,18 @@ export default function Conversations({ user }) {
           </button>
         </div>
 
-        {/* Channel nav items */}
+        {/* Channel & Status nav items */}
         <div className="flex-1 overflow-y-auto px-1.5 space-y-0.5">
           {[
             { key: 'all', label: 'All messages', icon: Inbox },
             { key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: '#25d366' },
             { key: 'messenger', label: 'Messenger', icon: MessageSquare, color: '#0084ff' },
             { key: 'instagram', label: 'Instagram', icon: Star, color: '#d62976' },
-            { key: 'tiktok', label: 'TikTok', icon: Music, color: '#000' },
+            { key: 'tiktok', label: 'TikTok', icon: Music, color: '#000000' },
+            { key: 'unread', label: 'Unread', icon: AlertCircle, color: '#f59e0b' },
+            { key: 'assigned_me', label: 'Assigned to me', icon: User, color: '#8b5cf6' },
+            { key: 'priority', label: 'Priority', icon: Zap, color: '#f43f5e' },
+            { key: 'archived', label: 'Archived', icon: Archive, color: '#64748b' },
           ].map(item => {
             const isActive = channelTab === item.key;
             const unread = item.key === 'all' ? unreadCounts.all : (unreadCounts[item.key] || 0);
