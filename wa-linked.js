@@ -93,6 +93,8 @@ function classify(message) {
   if (!message) return { type: 'text', content: null };
   if (message.ephemeralMessage?.message) return classify(message.ephemeralMessage.message);
   if (message.viewOnceMessage?.message) return classify(message.viewOnceMessage.message);
+  if (message.documentWithCaptionMessage?.message) return classify(message.documentWithCaptionMessage.message);
+  if (message.editedMessage?.message) return classify(message.editedMessage.message);
   if (message.conversation) return { type: 'text', content: message.conversation };
   if (message.extendedTextMessage) return { type: 'text', content: message.extendedTextMessage.text };
   if (message.imageMessage) return { type: 'image', content: '[Image]', caption: message.imageMessage.caption || null };
@@ -102,6 +104,9 @@ function classify(message) {
   if (message.stickerMessage) return { type: 'sticker', content: '[Sticker]' };
   if (message.locationMessage) return { type: 'location', content: `📍 Location: ${message.locationMessage.degreesLatitude},${message.locationMessage.degreesLongitude}` };
   if (message.contactMessage) return { type: 'contact', content: `[Contact: ${message.contactMessage.displayName || ''}]` };
+  if (message.buttonsResponseMessage) return { type: 'text', content: message.buttonsResponseMessage.selectedButtonId || message.buttonsResponseMessage.selectedDisplayText };
+  if (message.interactiveResponseMessage) return { type: 'text', content: message.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson || '[Interactive Response]' };
+  if (message.templateButtonReplyMessage) return { type: 'text', content: message.templateButtonReplyMessage.selectedId || '[Button Click]' };
   const key = Object.keys(message)[0];
   return { type: 'text', content: key ? `[${key.replace('Message', '')}]` : null };
 }
@@ -129,7 +134,11 @@ function extractAdReferral(message) {
 }
 
 const phoneFromJid = (jid) => String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
-const isPersonalChat = (jid) => typeof jid === 'string' && jid.endsWith('@s.whatsapp.net');
+const isPersonalChat = (jid) => {
+  if (typeof jid !== 'string' || !jid) return false;
+  if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.startsWith('status@')) return false;
+  return true;
+};
 
 async function handleIncoming(s, msg, { fromHistory = false } = {}) {
   const { db, upsertContact, upsertConversation, createLeadFromReferral, saveInboundMessage } = mgr.deps;
