@@ -12,7 +12,6 @@ import {
   GraduationCap, CheckCircle2, ExternalLink, AlertCircle, FileText,
   Building2, Send, Plane, MapPin, RefreshCw, Upload, AlertTriangle, QrCode, X, Share2, Download
 } from 'lucide-react';
-import { QRCodeCanvas } from 'qrcode.react';
 
 const UNI_STATUS_LABEL = {
   documents: 'Collecting documents', ready: 'Ready to submit',
@@ -456,14 +455,11 @@ export default function StudentPortal() {
             </div>
             <div className="p-8 flex flex-col items-center">
               <div className="bg-white p-4 rounded-2xl border-2 border-slate-100 shadow-sm mb-6">
-                <QRCodeCanvas 
+                <img 
                   id="student-qr-code"
-                  value={portalUrl} 
-                  size={200} 
-                  level="H"
-                  includeMargin={true}
-                  bgColor="#ffffff"
-                  fgColor="#0f172a" 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(portalUrl)}`} 
+                  alt="Student Portal QR Code"
+                  className="w-[200px] h-[200px] rounded-lg"
                 />
               </div>
               <h4 className="text-xl font-bold text-slate-900 text-center">{student.name}</h4>

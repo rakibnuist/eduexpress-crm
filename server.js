@@ -1736,10 +1736,9 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
         upsertConversation,
         createLeadFromContact,
         createLeadFromReferral,
-        // Adapter: module expects saveInboundMessage(convId, content, type, waId, mediaUrl, caption);
-        // codebase now uses saveMessage(convId, direction, content, ...).
-        saveInboundMessage: (convId, content, type, waId, mediaUrl, caption) =>
-          saveMessage(convId, 'in', content, type, waId, mediaUrl, caption),
+        saveInboundMessage: (convId, content, type = 'text', waMessageId = null, mediaUrl = null, caption = null) => {
+          return saveMessage(convId, 'in', content, type, waMessageId, mediaUrl, caption);
+        },
         broadcast,
         getConfig,
       });
@@ -3186,43 +3185,49 @@ function runMigrations() {
       console.error('[migration] Template seeding failed:', e.message);
     }
 
-  // Seed pre-built data from external module (keeps server.js small)
+  // Seed pre-built data from external module if available (keeps server.js small)
   try {
-    const seedData = require('./seed-data.cjs');
+    if (existsSync(join(__dirname, 'seed-data.cjs'))) {
+      const seedData = require('./seed-data.cjs');
 
-    // Seed templates
-    const checkTmpl = db.prepare("SELECT COUNT(*) as c FROM message_templates");
-    const insertTmpl = db.prepare(`INSERT OR IGNORE INTO message_templates (name, category, language, content, variables, approved, usage_count) VALUES (?, ?, ?, ?, ?, ?, 0)`);
-    if (checkTmpl.get().c === 0) {
-      for (const t of seedData.templates) {
-        insertTmpl.run(t.name, t.category, t.language, t.content, t.variables, t.approved);
+      // Seed templates
+      const checkTmpl = db.prepare("SELECT COUNT(*) as c FROM message_templates");
+      const insertTmpl = db.prepare(`INSERT OR IGNORE INTO message_templates (name, category, language, content, variables, approved, usage_count) VALUES (?, ?, ?, ?, ?, ?, 0)`);
+      if (checkTmpl.get().c === 0 && seedData.templates) {
+        for (const t of seedData.templates) {
+          insertTmpl.run(t.name, t.category, t.language, t.content, t.variables, t.approved);
+        }
+        console.log(`[migration] Seeded ${seedData.templates.length} message templates.`);
       }
-      console.log(`[migration] Seeded ${seedData.templates.length} message templates.`);
-    }
 
-    // Seed tags
-    const insertTag = db.prepare("INSERT OR IGNORE INTO contact_tags (name, color) VALUES (?, ?)");
-    for (const t of seedData.tags) {
-      insertTag.run(t.name, t.color);
-    }
-    console.log(`[migration] Seeded ${seedData.tags.length} contact tags.`);
-
-    // Seed automation rules
-    const checkRules = db.prepare("SELECT COUNT(*) as c FROM automation_rules");
-    if (checkRules.get().c === 0) {
-      const insertRule = db.prepare(`INSERT INTO automation_rules (name, trigger_type, trigger_config, action_type, action_config, priority, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))`);
-      for (const r of seedData.defaultRules) {
-        const tmpl = db.prepare("SELECT id FROM message_templates WHERE name=? LIMIT 1").get(r.action_template);
-        insertRule.run(
-          r.name,
-          r.trigger_type,
-          JSON.stringify(r.trigger_config),
-          r.action_type,
-          tmpl ? JSON.stringify({ template_id: tmpl.id }) : '{}',
-          r.priority
-        );
+      // Seed tags
+      if (seedData.tags) {
+        const insertTag = db.prepare("INSERT OR IGNORE INTO contact_tags (name, color) VALUES (?, ?)");
+        for (const t of seedData.tags) {
+          insertTag.run(t.name, t.color);
+        }
+        console.log(`[migration] Seeded ${seedData.tags.length} contact tags.`);
       }
-      console.log(`[migration] Seeded ${seedData.defaultRules.length} automation rules.`);
+
+      // Seed automation rules
+      if (seedData.defaultRules) {
+        const checkRules = db.prepare("SELECT COUNT(*) as c FROM automation_rules");
+        if (checkRules.get().c === 0) {
+          const insertRule = db.prepare(`INSERT INTO automation_rules (name, trigger_type, trigger_config, action_type, action_config, priority, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))`);
+          for (const r of seedData.defaultRules) {
+            const tmpl = db.prepare("SELECT id FROM message_templates WHERE name=? LIMIT 1").get(r.action_template);
+            insertRule.run(
+              r.name,
+              r.trigger_type,
+              JSON.stringify(r.trigger_config),
+              r.action_type,
+              tmpl ? JSON.stringify({ template_id: tmpl.id }) : '{}',
+              r.priority
+            );
+          }
+          console.log(`[migration] Seeded ${seedData.defaultRules.length} automation rules.`);
+        }
+      }
     }
 
     // Seed lead routing rules (replaces old hardcoded consultant routing)
@@ -3235,8 +3240,10 @@ function runMigrations() {
       console.log('[migration] Seeded 3 lead routing rules (china, b2b, bd_office).');
     }
   } catch (e) {
-    console.error('[migration] Seed data failed:', e.message);
-  }  // ── Professional SMM Pipeline v3.0: Recreate content_posts with new status pipeline ──
+    console.warn('[migration] Seed data notice:', e.message);
+  }
+
+  // ── Professional SMM Pipeline v3.0: Recreate content_posts with new status pipeline ──
   try {
     const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='content_posts'").get()?.sql || "";
     // If the table still has the old CHECK constraint (with 'drafted' but not 'ideation'), recreate it
@@ -10734,42 +10741,43 @@ function scanOldChatsForLeads() {
 }
 
 // Retroactively fix page names for old leads
-try {
-  const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL OR page_name = ''").all();
-  let fixedCount = 0;
-  for (const l of leadsToFix) {
-     const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
-     const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
-     
-     if (throughConv && throughConv.name) {
-       db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughConv.name, throughConv.id, l.id);
-       fixedCount++;
-     } else if (throughContact && throughContact.name) {
-       db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
-       fixedCount++;
-     } else {
-       // If channel is missing from DB, try to find another lead that used this conversation's channel_id and has a page_name
-       const orphanConv = db.prepare(`SELECT channel_id FROM conversations WHERE lead_id = ? LIMIT 1`).get(l.id);
-       if (orphanConv && orphanConv.channel_id) {
-         // Try to find an existing lead with this channel_id that HAS a page_name
-         const peerLead = db.prepare(`SELECT page_name FROM leads l JOIN conversations c ON l.id = c.lead_id WHERE c.channel_id = ? AND l.page_name IS NOT NULL AND l.page_name != '' LIMIT 1`).get(orphanConv.channel_id);
-         if (peerLead && peerLead.page_name) {
-           db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(peerLead.page_name, orphanConv.channel_id, l.id);
-           fixedCount++;
-         } else {
-           db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run("Unknown Page", orphanConv.channel_id, l.id);
-           fixedCount++;
-         }
+function fixPageNames() {
+  try {
+    const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL OR page_name = ''").all();
+    let fixedCount = 0;
+    for (const l of leadsToFix) {
+       const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
+       const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
+       
+       if (throughConv && throughConv.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughConv.name, throughConv.id, l.id);
+         fixedCount++;
+       } else if (throughContact && throughContact.name) {
+         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
+         fixedCount++;
        } else {
-           db.prepare("UPDATE leads SET page_name = ? WHERE id = ?").run("Unknown Page", l.id);
-           fixedCount++;
+         const orphanConv = db.prepare(`SELECT channel_id FROM conversations WHERE lead_id = ? LIMIT 1`).get(l.id);
+         if (orphanConv && orphanConv.channel_id) {
+           const peerLead = db.prepare(`SELECT page_name FROM leads l JOIN conversations c ON l.id = c.lead_id WHERE c.channel_id = ? AND l.page_name IS NOT NULL AND l.page_name != '' LIMIT 1`).get(orphanConv.channel_id);
+           if (peerLead && peerLead.page_name) {
+             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(peerLead.page_name, orphanConv.channel_id, l.id);
+             fixedCount++;
+           } else {
+             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run("Unknown Page", orphanConv.channel_id, l.id);
+             fixedCount++;
+           }
+         } else {
+             db.prepare("UPDATE leads SET page_name = ? WHERE id = ?").run("Unknown Page", l.id);
+             fixedCount++;
+         }
        }
-     }
+    }
+    if (fixedCount > 0) console.log(`[Startup] Fixed page_name for ${fixedCount} existing leads.`);
+  } catch(e) {
+    console.error('[Startup] Failed to fix page_name:', e.message);
   }
-  console.log(`[Startup] Fixed page_name for ${fixedCount} existing leads.`);
-} catch(e) {
-  console.error('[Startup] Failed to fix page_name:', e.message);
 }
+setTimeout(fixPageNames, 4000);
 
 // Retroactively fix page_name for Meta Lead Ads by looking up form_id from Facebook API
 async function backfillMetaLeadAds() {

@@ -47,30 +47,38 @@ function handleFatalError(error, context) {
 
 export function isDead() { return _dead; }
 
+let _isSaving = false;
+
 // Atomic save: export to a temp file, then rename. A crash mid-write can never
 // leave a half-written (corrupt) crm.db on disk.
 // If atomic save fails (e.g. rename is restricted or throws ENOENT on some hosts),
 // we fall back to a direct write to guarantee that data is saved.
 function doSave() {
-  const data = _db.export();
-  const dir = dirname(_dbPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  const tmp = _dbPath + '.tmp';
+  if (_dead || !_db || _isSaving) return;
+  _isSaving = true;
   try {
-    writeFileSync(tmp, Buffer.from(data));
-    renameSync(tmp, _dbPath);
-  } catch (err) {
-    console.warn(`[sqldb] Atomic save failed (${err.message}). Falling back to direct write.`);
-    writeFileSync(_dbPath, Buffer.from(data));
-    try {
-      if (existsSync(tmp)) {
-        unlinkSync(tmp);
-      }
-    } catch (unlinkErr) {
-      console.warn(`[sqldb] Failed to clean up temp file ${tmp}:`, unlinkErr.message);
+    const data = _db.export();
+    const dir = dirname(_dbPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
     }
+    const tmp = _dbPath + '.tmp';
+    try {
+      writeFileSync(tmp, Buffer.from(data));
+      renameSync(tmp, _dbPath);
+    } catch (err) {
+      console.warn(`[sqldb] Atomic save failed (${err.message}). Falling back to direct write.`);
+      writeFileSync(_dbPath, Buffer.from(data));
+      try {
+        if (existsSync(tmp)) {
+          unlinkSync(tmp);
+        }
+      } catch (unlinkErr) {
+        console.warn(`[sqldb] Failed to clean up temp file ${tmp}:`, unlinkErr.message);
+      }
+    }
+  } finally {
+    _isSaving = false;
   }
 }
 
