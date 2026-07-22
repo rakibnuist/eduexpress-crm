@@ -133,6 +133,40 @@ function extractAdReferral(message) {
   };
 }
 
+function extractRealPhone(msg, rawJid) {
+  // Check if participant or contextInfo contains the real phone number
+  const candidateJids = [
+    msg.key?.participant,
+    msg.message?.extendedTextMessage?.contextInfo?.participant,
+    msg.message?.imageMessage?.contextInfo?.participant,
+    msg.message?.videoMessage?.contextInfo?.participant,
+    msg.message?.documentMessage?.contextInfo?.participant,
+    rawJid,
+  ].filter(Boolean);
+
+  let phone = null;
+  for (const cj of candidateJids) {
+    const s = String(cj).split('@')[0].split(':')[0].replace(/\D/g, '');
+    // Real phone numbers are 10-13 digits (e.g. 8801816585926 or 01816585926).
+    // LIDs are 15-16 digit Meta IDs like 1460372787268.
+    if (s.length >= 10 && s.length <= 13) {
+      phone = s;
+      break;
+    }
+  }
+
+  // If no 10-13 digit phone found yet, take raw digits from rawJid
+  if (!phone) {
+    phone = String(rawJid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  }
+
+  // E.164 normalization for Bangladesh
+  if (phone.startsWith('01') && phone.length === 11) {
+    phone = '880' + phone.slice(1);
+  }
+  return phone;
+}
+
 const phoneFromJid = (jid) => String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 const isPersonalChat = (jid) => {
   if (typeof jid !== 'string' || !jid) return false;
@@ -146,7 +180,7 @@ async function handleIncoming(s, msg, { fromHistory = false } = {}) {
     const jid = baileysLib?.jidNormalizedUser ? baileysLib.jidNormalizedUser(msg.key.remoteJid) : msg.key.remoteJid;
     if (!isPersonalChat(jid)) return;                 // skip groups, broadcast, status
     if (msg.key.fromMe) return handleOutgoingEcho(s, msg, jid, fromHistory);
-    const phone = phoneFromJid(jid);
+    const phone = extractRealPhone(msg, jid);
     if (!phone) return;
 
     const { type, content, caption } = classify(msg.message);
@@ -164,8 +198,6 @@ async function handleIncoming(s, msg, { fromHistory = false } = {}) {
       const updated = db.prepare('SELECT lead_id FROM contacts WHERE id=?').get(contact.id);
       if (updated) contact.lead_id = updated.lead_id;
     }
-    // Organic messages: lead auto-created inside saveInboundMessage → saveMessage
-    // (every WhatsApp number becomes a lead, deduped by phone, fires CAPI 'Lead').
 
     const exists = msg.key.id ? db.prepare('SELECT id FROM messages WHERE wa_message_id=?').get(msg.key.id) : null;
     if (exists) return;
@@ -180,7 +212,7 @@ async function handleIncoming(s, msg, { fromHistory = false } = {}) {
 function handleOutgoingEcho(s, msg, jid, fromHistory) {
   const { db, upsertContact, upsertConversation, broadcast } = mgr.deps;
   try {
-    const phone = phoneFromJid(jid);
+    const phone = extractRealPhone(msg, jid);
     if (!phone) return;
     const { type, content, caption } = classify(msg.message);
     if (!content) return;
@@ -363,16 +395,21 @@ export async function connectWaLinked({ id, label, consultant } = {}) {
   return sessionInfo(s);
 }
 
-export async function logoutWaLinked(id) {
-  const s = id ? mgr.sessions.get(id) : mgr.sessions.get('default');
+export async function logoutWaLinked(id, { deleteChannel = false } = {}) {
+  const targetId = id || 'default';
+  const s = mgr.sessions.get(targetId);
   if (!s) return { ok: false, error: 'Session not found' };
   try { await s.sock?.logout?.(); } catch {}
   try { s.sock?.end?.(); } catch {}
   clearTimeout(s.reconnectTimer);
   s.sock = null; s.me = null;
   s.status = 'disconnected'; s.qrDataUrl = null;
-  try { clearAuthDir(s.id); } catch {}
-  if (s.id !== 'default') mgr.sessions.delete(s.id);
+  try { clearAuthDir(targetId); } catch {}
+  if (deleteChannel) {
+    const pnid = pnidFor(targetId);
+    try { mgr.deps.db.prepare("DELETE FROM channels WHERE type='whatsapp' AND phone_number_id=?").run(pnid); } catch {}
+  }
+  mgr.sessions.delete(targetId);
   return { ok: true };
 }
 

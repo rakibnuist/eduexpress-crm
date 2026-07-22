@@ -89,7 +89,7 @@ export const api = {
   // WhatsApp Linked Devices (Baileys — scan QR, no Meta App; multi-account)
   waLinkedStatus:  ()          => req('/whatsapp-linked/status'),
   waLinkedConnect: (body = {}) => req('/whatsapp-linked/connect', { method: 'POST', body: JSON.stringify(body) }),
-  waLinkedLogout:  (id)        => req('/whatsapp-linked/logout',  { method: 'POST', body: JSON.stringify({ id }) }),
+  waLinkedLogout:  (id, deleteChannel = false) => req('/whatsapp-linked/logout',  { method: 'POST', body: JSON.stringify({ id, deleteChannel }) }),
 
   // Dashboard / settings
   dashboard: () => req('/dashboard'),

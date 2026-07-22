@@ -1495,6 +1495,19 @@ function WhatsAppQRCard() {
     finally { setBusy(false); }
   };
 
+  const deleteSession = async (s) => {
+    const ok = await confirm({
+      title: `Delete WhatsApp Number "${s.label}"?`,
+      body: 'This unlinks the device, removes session authentication files, and deletes this WhatsApp channel from the CRM.',
+      tone: 'danger', confirmLabel: 'Delete Number',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try { await api.waLinkedLogout(s.id, true); if (qrFor === s.id) setQrFor(null); poll(); toast.success('WhatsApp number deleted'); }
+    catch (e) { toast.error(e.message || 'Failed to delete number'); }
+    finally { setBusy(false); }
+  };
+
   const dot = (status) => status === 'connected' ? 'bg-emerald-500'
     : status === 'qr' || status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300';
 
@@ -1550,7 +1563,7 @@ function WhatsAppQRCard() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {s.status === 'connected' ? (
                     <button onClick={() => logout(s)} disabled={busy}
-                      className="text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                      className="text-xs font-semibold border border-amber-200 text-amber-700 hover:bg-amber-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
                       Unlink
                     </button>
                   ) : s.status === 'qr' ? (
@@ -1559,19 +1572,15 @@ function WhatsAppQRCard() {
                       Show QR
                     </button>
                   ) : (
-                    <>
-                      <button onClick={() => connect(s.id)} disabled={busy}
-                        className="text-xs font-bold bg-[#25D366] hover:bg-[#1fb855] text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-                        Connect
-                      </button>
-                      {s.id !== 'default' && (
-                        <button onClick={() => logout(s)} disabled={busy}
-                          className="text-xs font-semibold text-slate-400 hover:text-red-500 px-2 py-1.5 rounded-lg transition-colors" title="Remove">
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </>
+                    <button onClick={() => connect(s.id)} disabled={busy}
+                      className="text-xs font-bold bg-[#25D366] hover:bg-[#1fb855] text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                      Connect
+                    </button>
                   )}
+                  <button onClick={() => deleteSession(s)} disabled={busy}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Number">
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
             ))}

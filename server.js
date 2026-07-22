@@ -8824,7 +8824,8 @@ app.post('/api/whatsapp-linked/connect', async (req, res) => {
 
 app.post('/api/whatsapp-linked/logout', async (req, res) => {
   try {
-    res.json(await logoutWaLinked(req.body?.id));
+    const { id, deleteChannel } = req.body || {};
+    res.json(await logoutWaLinked(id, { deleteChannel: Boolean(deleteChannel) }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
