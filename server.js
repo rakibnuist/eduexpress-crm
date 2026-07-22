@@ -5051,7 +5051,7 @@ async function sendCAPIEvent(eventName, leadData) {
   };
 
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${accessToken}`, {
+    const res = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${accessToken}&partner_agent=eduexpress_crm_v2`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clean(payload))
     });
     return res.json();
