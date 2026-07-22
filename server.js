@@ -4992,6 +4992,7 @@ async function sendCAPIEvent(eventName, leadData) {
   };
   if (leadData.fbp) userData.fbp = leadData.fbp;
   if (leadData.fbc) userData.fbc = leadData.fbc;
+  const testEventCode = getConfig('test_event_code');
   const payload = {
     data: [{
       event_name: eventName,
@@ -5005,8 +5006,10 @@ async function sendCAPIEvent(eventName, leadData) {
         lead_id: leadData.lead_id,
         destination: leadData.destination,
         event_source_url: leadData.event_source_url || undefined,
+        leadgen_id: leadData.meta_lead_id || undefined,
       },
     }],
+    ...(testEventCode ? { test_event_code: testEventCode } : {}),
   };
   const clean = o => {
     if (typeof o !== 'object' || !o) return o;
@@ -8725,6 +8728,20 @@ app.post('/api/meta/config', (req, res) => {
 app.post('/api/meta/test-capi', async (req, res) => {
   const result = await sendCAPIEvent(req.body.event_name||'Lead', { lead_id:'TEST-001', phone:'01700000000', email:'test@example.com', client_name:'Test User', destination:'China' });
   res.json(result);
+});
+app.post('/api/meta/sync-all-leads-capi', async (req, res) => {
+  try {
+    const leads = db.prepare("SELECT * FROM leads WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 200").all();
+    let sentCount = 0;
+    for (const lead of leads) {
+      const eventName = lead.lead_status === 'Enrolled' || lead.lead_status === 'File Opened' ? 'CompleteRegistration' : 'Lead';
+      const r = await sendCAPIEvent(eventName, lead);
+      if (r && r.events_received) sentCount++;
+    }
+    res.json({ ok: true, synced: sentCount, total: leads.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 app.get('/api/meta/stats', (req, res) => {
   const total = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
