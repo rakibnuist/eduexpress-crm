@@ -30,10 +30,12 @@ const fmt = (n) => `৳${Number(n || 0).toLocaleString()}`;
 
 // Long Meta page names → short labels for table display
 export const shortPageName = (name) => {
-  if (!name) return name;
+  if (!name || name === 'Unknown Page' || name === 'Unknown') return 'WhatsApp';
   const n = String(name).toLowerCase();
+  if (n === 'unknown page' || n === 'unknown') return 'WhatsApp';
   if (n.includes('china')) return 'EdX-China';
   if (n.includes('bangladesh') || /\bbd\b/.test(n)) return 'EdX-BD';
+  if (n.includes('whatsapp') || n.includes('wa')) return 'WhatsApp';
   if (n.includes('eduexpress')) return 'EdX';
   return name;
 };
@@ -621,13 +623,17 @@ export default function Leads({ user }) {
                       <td className="py-3 px-3.5 text-slate-500 text-xs font-medium whitespace-nowrap">{l.intake_term || '—'}</td>
 
                       <td className="py-3 px-3.5">
-                        <div className="flex flex-col gap-1.5">
-                          {/* Page badge */}
-                          {l.page_name ? (
+                        {(() => {
+                          const pName = l.page_name;
+                          const isWa = !pName || pName === 'Unknown Page' || pName === 'Unknown' || pName.toLowerCase().includes('whatsapp') || pName.toLowerCase().includes('wa');
+                          const label = isWa ? 'WhatsApp' : shortPageName(pName);
+                          return (
                             <div className="flex flex-col gap-1">
-                              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100/50 text-indigo-700 font-bold text-xs w-fit whitespace-nowrap" title={l.page_name}>
-                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0"></span>
-                                <span>{shortPageName(l.page_name)}</span>
+                              <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border font-bold text-xs w-fit whitespace-nowrap ${
+                                isWa ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-indigo-50 border-indigo-100/50 text-indigo-700'
+                              }`} title={pName || 'WhatsApp'}>
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isWa ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
+                                <span>{label}</span>
                               </span>
                               {l.ad_name && (
                                 <span className="inline-flex items-center text-[10px] text-slate-500 bg-slate-50 border border-slate-200/60 px-1.5 py-0.5 rounded w-fit truncate max-w-[180px]" title={l.ad_name}>
@@ -635,10 +641,8 @@ export default function Leads({ user }) {
                                 </span>
                               )}
                             </div>
-                          ) : (
-                            <span className="text-slate-300 italic text-xs">—</span>
-                          )}
-                        </div>
+                          );
+                        })()}
                       </td>
                       
 

@@ -1723,7 +1723,9 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     }
 
     db.resumeSave(); // Resume and perform a single batched save
-    // seedData(); // disabled — production environment, no dummy data
+    try {
+      db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
+    } catch {}
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
@@ -5543,6 +5545,8 @@ WHERE id=@id`;
 
 app.post('/api/leads', async (req, res) => {
   const d = req.body;
+  // Default page_name to 'WhatsApp' for manual leads
+  if (!d.page_name || d.page_name === 'Unknown Page' || d.page_name === 'Unknown') d.page_name = 'WhatsApp';
   // Backward compat for old source field
   if (d.source === 'China') d.lead_market = 'China';
   if (d.source === 'B2B' || d.source === 'Agent') d.lead_type = 'B2B';
