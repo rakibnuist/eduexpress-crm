@@ -14,6 +14,18 @@ import {
   Legend, LineChart, Line, CartesianGrid, PieChart, Pie, Cell,
 } from 'recharts';
 
+const cMonthLabel = (m) => {
+  if (!m) return '';
+  const [y, mo] = m.split('-');
+  return new Date(parseInt(y), parseInt(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+};
+const cAddMonth = (m, delta) => {
+  if (!m) return new Date().toISOString().slice(0, 7);
+  const [y, mo] = m.split('-').map(Number);
+  const d = new Date(y, mo - 1 + delta, 1);
+  return d.toISOString().slice(0, 7);
+};
+
 export default function Finance() {
   useEffect(() => { document.title = "Finance & Ledger Control | EduExpress Core"; }, []);
 
@@ -32,28 +44,29 @@ export default function Finance() {
 
   function load() {
     const p = month ? { month } : {};
-    api.income(p).then(setIncome);
-    api.expenses(p).then(setExpenses);
+    api.income(p).then(res => setIncome(res || { rows: [], total: 0, sum: 0 })).catch(() => {});
+    api.expenses(p).then(res => setExpenses(res || { rows: [], total: 0, sum: 0 })).catch(() => {});
     api.pnl().then(d => {
-      setPnl(d);
+      const dataArr = Array.isArray(d) ? d : [];
+      setPnl(dataArr);
       // Calculate previous month trends
       const currentMonth = month || new Date().toISOString().slice(0, 7);
       const prev = cAddMonth(currentMonth, -1);
-      const prevRow = d.find(r => r.month === prev);
-      const curRow = d.find(r => r.month === currentMonth);
+      const prevRow = dataArr.find(r => r.month === prev);
+      const curRow = dataArr.find(r => r.month === currentMonth);
       setPrevMonthData({
-        income: prevRow ? curRow?.income - prevRow.income : 0,
-        expenses: prevRow ? curRow?.expense - prevRow.expense : 0,
-        profit: prevRow ? curRow?.profit - prevRow.profit : 0,
+        income: prevRow ? (curRow?.income || 0) - prevRow.income : 0,
+        expenses: prevRow ? (curRow?.expense || 0) - prevRow.expense : 0,
+        profit: prevRow ? (curRow?.profit || 0) - prevRow.profit : 0,
         balance: prevRow ? (curRow?.profit || 0) - (prevRow.profit || 0) : 0,
       });
-    });
-    api.settings().then(setSettings);
+    }).catch(() => {});
+    api.settings().then(setSettings).catch(() => {});
 
     const activeMonth = month || new Date().toISOString().slice(0, 7);
     api.cashflow(activeMonth).then(d => {
       if (d && d.totals) setLiveBalance(d.totals.closing);
-    });
+    }).catch(() => {});
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,23 +78,27 @@ export default function Finance() {
     load();
   }
 
+  const incRows = Array.isArray(income?.rows) ? income.rows : [];
+  const expRows = Array.isArray(expenses?.rows) ? expenses.rows : [];
+  const pnlRows = Array.isArray(pnl) ? pnl : [];
+
   const incCatMap = {};
-  income.rows.forEach(r => { if (r.category) incCatMap[r.category] = (incCatMap[r.category] || 0) + r.amount; });
+  incRows.forEach(r => { if (r?.category) incCatMap[r.category] = (incCatMap[r.category] || 0) + (r.amount || 0); });
   const expCatMap = {};
-  expenses.rows.forEach(r => { if (r.category) expCatMap[r.category] = (expCatMap[r.category] || 0) + r.amount; });
+  expRows.forEach(r => { if (r?.category) expCatMap[r.category] = (expCatMap[r.category] || 0) + (r.amount || 0); });
 
   const topIncomeCats = Object.entries(incCatMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topExpenseCats = Object.entries(expCatMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
 
-  const pnlWithCumulative = pnl.map((r, i) => ({
+  const pnlWithCumulative = pnlRows.map((r, i) => ({
     ...r,
-    cumulative: pnl.slice(0, i + 1).reduce((s, x) => s + x.profit, 0),
+    cumulative: pnlRows.slice(0, i + 1).reduce((s, x) => s + (x.profit || 0), 0),
   }));
 
-  const sortedPnl = [...pnlWithCumulative].sort((a, b) => b.month.localeCompare(a.month));
+  const sortedPnl = [...pnlWithCumulative].sort((a, b) => (b.month || '').localeCompare(a.month || ''));
 
   const currentMonthLabel = month || new Date().toISOString().slice(0, 7);
-  const profitMargin = income.sum > 0 ? ((income.sum - expenses.sum) / income.sum * 100).toFixed(1) : '0.0';
+  const profitMargin = (income?.sum || 0) > 0 ? (((income?.sum || 0) - (expenses?.sum || 0)) / (income?.sum || 1) * 100).toFixed(1) : '0.0';
 
   // Income tab filters
   const [incomeSearch, setIncomeSearch] = useState('');
@@ -727,16 +744,6 @@ function FinanceForm({ type, record, settings, onSave }) {
 
 /* ───────────────────────────── CASHFLOW TAB ───────────────────────────── */
 const cFmt = (n) => `৳${Math.round(Number(n || 0)).toLocaleString()}`;
-const cMonthLabel = (m) => {
-  if (!m) return '';
-  const [y, mo] = m.split('-');
-  return new Date(parseInt(y), parseInt(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-};
-const cAddMonth = (m, delta) => {
-  const [y, mo] = m.split('-').map(Number);
-  const d = new Date(y, mo - 1 + delta, 1);
-  return d.toISOString().slice(0, 7);
-};
 
 function CashflowTab({ onChanged, settings }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
