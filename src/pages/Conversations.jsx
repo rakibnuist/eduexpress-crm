@@ -29,6 +29,12 @@ const getCountryEmoji = (dest) => {
 };
 
 
+const fmtMsgTime = (iso) => {
+  const d = toDate(iso);
+  if (!d) return '';
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dhaka' });
+};
+
 const getMediaUrl = (msg) => {
   if (!msg.media_url) return '';
   if (msg.media_url.startsWith('http') || msg.media_url.startsWith('/uploads')) return msg.media_url;
@@ -1426,7 +1432,7 @@ export default function Conversations({ user }) {
                                 {/* Meta: time + status */}
                                 <div className={`flex items-center gap-1 px-1 ${isOut ? 'justify-end' : ''}`}>
                                   <span className="text-[10px] text-[#8a8d91]">
-                                    {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    {fmtMsgTime(msg.created_at)}
                                   </span>
                                   {isOut && (
                                     msg.status === 'read' ? <CheckCheck size={11} className="text-[#1877f2]" />
