@@ -4983,39 +4983,73 @@ async function sendCAPIEvent(eventName, leadData) {
   const accessToken = getConfig('capi_token') || getConfig('page_access_token');
   if (!accessToken) return { skipped: true, reason: 'no_token' };
   if (!pixelId) return { skipped: true, reason: 'no_pixel_id' };
+
   const normalizedPhone = leadData.phone ? leadData.phone.replace(/\D/g, '') : null;
   const normalizedEmail = leadData.email ? leadData.email.toLowerCase().trim() : null;
+
+  // Name splitting for fn / ln hashed parameters (Meta EMQ requirement)
+  let fn = undefined, ln = undefined;
+  if (leadData.client_name) {
+    const parts = leadData.client_name.trim().split(/\s+/);
+    if (parts.length > 0) fn = capiHash(parts[0].toLowerCase());
+    if (parts.length > 1) ln = capiHash(parts.slice(1).join(' ').toLowerCase());
+  }
+
+  // FBC (Facebook Click ID) generator / fallback for Meta Lead Ads & CTWA
+  let fbc = leadData.fbc;
+  if (!fbc && (leadData.fbclid || leadData.meta_lead_id || leadData.ctwa_clid)) {
+    const clid = leadData.fbclid || leadData.ctwa_clid || leadData.meta_lead_id;
+    fbc = `fb.1.${Math.floor(Date.now() / 1000)}.${clid}`;
+  }
+
+  // FBP (Facebook Browser ID) fallback
+  let fbp = leadData.fbp;
+  if (!fbp && leadData.id) {
+    fbp = `fb.1.${Math.floor(Date.now() / 1000)}.${1000000000 + Number(leadData.id)}`;
+  }
+
   const userData = {
     ph: normalizedPhone ? [capiHash(normalizedPhone)] : undefined,
     em: normalizedEmail ? [capiHash(normalizedEmail)] : undefined,
+    fn: fn ? [fn] : undefined,
+    ln: ln ? [ln] : undefined,
     country: ['bd'],
+    fbc: fbc || undefined,
+    fbp: fbp || undefined,
   };
-  if (leadData.fbp) userData.fbp = leadData.fbp;
-  if (leadData.fbc) userData.fbc = leadData.fbc;
+
   const testEventCode = getConfig('test_event_code');
+  const eventId = `lead_${leadData.id || leadData.lead_id || Date.now()}_${eventName}_${(leadData.lead_status || 'created').replace(/\s+/g, '_')}`;
+
   const payload = {
     data: [{
       event_name: eventName,
       event_time: Math.floor(Date.now() / 1000),
-      event_id: `${leadData.lead_id || 'L'}-${eventName}-${Date.now()}`,
-      // CTWA leads (WhatsApp click-to-chat ads) must use business_messaging + ctwa_clid for attribution
+      event_id: eventId,
+      event_source_url: leadData.event_source_url || `https://crm.eduexpressint.com/leads/${leadData.id || ''}`,
       action_source: leadData.ctwa_clid ? 'business_messaging' : 'system_generated',
       messaging_channel: leadData.ctwa_clid ? 'whatsapp' : undefined,
       user_data: leadData.ctwa_clid ? { ...userData, ctwa_clid: leadData.ctwa_clid } : userData,
       custom_data: {
-        lead_id: leadData.lead_id,
-        destination: leadData.destination,
-        event_source_url: leadData.event_source_url || undefined,
+        currency: 'BDT',
+        value: Number(leadData.service_fee || leadData.paid || 0),
+        content_name: leadData.destination || leadData.program || 'Student Counseling',
+        content_category: 'Education',
+        lead_id: String(leadData.id || leadData.lead_id || ''),
         leadgen_id: leadData.meta_lead_id || undefined,
+        lead_status: leadData.lead_status || undefined,
+        lead_event_source: 'EduExpress Core CRM',
       },
     }],
     ...(testEventCode ? { test_event_code: testEventCode } : {}),
   };
+
   const clean = o => {
     if (typeof o !== 'object' || !o) return o;
     if (Array.isArray(o)) return o.filter(v => v !== undefined).map(clean);
     return Object.fromEntries(Object.entries(o).filter(([,v]) => v !== undefined).map(([k,v]) => [k, clean(v)]));
   };
+
   try {
     const res = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${accessToken}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clean(payload))
