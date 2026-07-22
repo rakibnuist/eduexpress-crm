@@ -4984,7 +4984,16 @@ async function sendCAPIEvent(eventName, leadData) {
   if (!accessToken) return { skipped: true, reason: 'no_token' };
   if (!pixelId) return { skipped: true, reason: 'no_pixel_id' };
 
-  const normalizedPhone = leadData.phone ? leadData.phone.replace(/\D/g, '') : null;
+  // Normalize phone to E.164 without '+' (Meta CAPI requirement: 8801711223344)
+  let normalizedPhone = null;
+  if (leadData.phone) {
+    let p = String(leadData.phone).replace(/\D/g, '');
+    if (p.startsWith('01') && p.length === 11) p = '880' + p.slice(1);
+    else if (p.startsWith('8801') && p.length === 13) p = p;
+    else if (p.length === 10 && p.startsWith('1')) p = '880' + p;
+    normalizedPhone = p;
+  }
+
   const normalizedEmail = leadData.email ? leadData.email.toLowerCase().trim() : null;
 
   // Name splitting for fn / ln hashed parameters (Meta EMQ requirement)
@@ -5008,12 +5017,18 @@ async function sendCAPIEvent(eventName, leadData) {
     fbp = `fb.1.${Math.floor(Date.now() / 1000)}.${1000000000 + Number(leadData.id)}`;
   }
 
+  const cityHash = capiHash('dhaka');
+  const stateHash = capiHash('dhaka');
+  const countryHash = capiHash('bd');
+
   const userData = {
     ph: normalizedPhone ? [capiHash(normalizedPhone)] : undefined,
     em: normalizedEmail ? [capiHash(normalizedEmail)] : undefined,
     fn: fn ? [fn] : undefined,
     ln: ln ? [ln] : undefined,
-    country: ['bd'],
+    ct: [cityHash],
+    st: [stateHash],
+    country: [countryHash],
     fbc: fbc || undefined,
     fbp: fbp || undefined,
   };
