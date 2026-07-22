@@ -277,8 +277,8 @@ async function startSocket(s) {
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify' && type !== 'append') return;
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    if (!Array.isArray(messages)) return;
     for (const m of messages) await handleIncoming(s, m);
   });
 
