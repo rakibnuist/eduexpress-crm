@@ -282,7 +282,28 @@ export default function Applications({ user }) {
     return { total, docs, submitted, admitted, visa, enrolled };
   }, [filtered]);
 
-  const universities = useMemo(() => unique(rows.map(r => r.university).concat(rows.map(r => r.uni_list?.split(', ')[0])).filter(Boolean)), [rows]);
+  const universities = useMemo(() => {
+    const fromRows = rows.map(r => r.university).concat(rows.flatMap(r => (r.uni_list || '').split(', '))).filter(Boolean);
+    const defaults = [
+      'Sichuan University', 'Zhejiang University', 'Tsinghua University', 'Peking University',
+      'Nanjing University', 'Wuhan University', 'Harbin Institute of Technology', 'Xi\'an Jiaotong University',
+      'Tongji University', 'Fudan University', 'Jiangsu University', 'Guangdong University of Technology',
+      'Universiti Malaya', 'Universiti Putra Malaysia', 'University of Malta', 'Chulalongkorn University'
+    ];
+    return unique([...fromRows, ...defaults]);
+  }, [rows]);
+
+  const majors = useMemo(() => {
+    const fromRows = rows.map(r => r.major).concat(rows.map(r => r.program)).filter(Boolean);
+    const defaults = [
+      'Computer Science & Engineering', 'Software Engineering', 'MBBS (General Medicine)',
+      'Business Administration (BBA)', 'Master of Business Administration (MBA)',
+      'Civil Engineering', 'Mechanical Engineering', 'Electrical & Electronic Engineering (EEE)',
+      'International Business & Trade', 'Information Technology', 'Cyber Security',
+      'Data Science & AI', 'Pharmacy', 'Hospitality & Tourism Management'
+    ];
+    return unique([...fromRows, ...defaults]);
+  }, [rows]);
 
   const consultants = useMemo(() => {
     // Use settings.consultants (same source as Leads & Settings) for consistent filter list
@@ -659,14 +680,20 @@ export default function Applications({ user }) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Major</label>
-                  <input type="text" value={newApp.major} onChange={e => setNewApp({ ...newApp, major: e.target.value })} placeholder="e.g. Computer Science"
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Major / Program</label>
+                  <input type="text" list="app-major-list" value={newApp.major} onChange={e => setNewApp({ ...newApp, major: e.target.value })} placeholder="e.g. Computer Science & Engineering"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                  <datalist id="app-major-list">
+                    {majors.map(m => <option key={m} value={m} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Primary University</label>
-                  <input type="text" value={newApp.university} onChange={e => setNewApp({ ...newApp, university: e.target.value })} placeholder="e.g. Sichuan University"
+                  <input type="text" list="app-uni-list" value={newApp.university} onChange={e => setNewApp({ ...newApp, university: e.target.value })} placeholder="e.g. Sichuan University"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+                  <datalist id="app-uni-list">
+                    {universities.map(u => <option key={u} value={u} />)}
+                  </datalist>
                 </div>
               </div>
             </div>
@@ -1142,8 +1169,8 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
             <Field label="Destination" type="select" value={form.destination} onChange={v => updateField('destination', v)} options={['', ...(settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia'])]} disabled={!editMode} />
             <Field label="Intake" value={form.intake_term} onChange={v => updateField('intake_term', v)} placeholder="September 2026" disabled={!editMode} />
             <Field label="Degree" type="select" value={form.degree} onChange={v => updateField('degree', v)} options={['', ...DEGREES]} disabled={!editMode} />
-            <Field label="Major / Program" value={form.major} onChange={v => updateField('major', v)} placeholder="International Economy" disabled={!editMode} />
-            <Field label="Primary university" value={form.university} onChange={v => updateField('university', v)} placeholder="e.g. NJTech" disabled={!editMode} />
+            <Field label="Major / Program" value={form.major} onChange={v => updateField('major', v)} placeholder="International Economy" disabled={!editMode} list="app-major-list" />
+            <Field label="Primary university" value={form.university} onChange={v => updateField('university', v)} placeholder="e.g. Sichuan University" disabled={!editMode} list="app-uni-list" />
             <Field label="English score" value={form.english_score} onChange={v => updateField('english_score', v)} placeholder="IELTS 6.5 / MOI" disabled={!editMode} />
             <Field label="Last education" value={form.last_education} onChange={v => updateField('last_education', v)} placeholder="HSC · Science" disabled={!editMode} />
           </div>

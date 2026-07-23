@@ -140,11 +140,17 @@ export default function LeadForm({ user, lead, settings, onSave }) {
         </Row>
         <Row>
           <SelectField label="Degree" value={form.degree} onChange={v => set('degree', v)} options={DEGREES} placeholder="— pick —" />
-          <Field label="Major / Program" value={form.major || form.program} onChange={v => set('major', v)} placeholder="International Economy" />
+          <Field label="Major / Program" value={form.major || form.program} onChange={v => set('major', v)} placeholder="e.g. Computer Science & Engineering" list="leadform-major-list" />
         </Row>
         <Row>
-          <Field label="Primary university (preference)" value={form.university} onChange={v => set('university', v)} placeholder="e.g. NJTech" />
+          <Field label="Primary university (preference)" value={form.university} onChange={v => set('university', v)} placeholder="e.g. Sichuan University" list="leadform-uni-list" />
         </Row>
+        <datalist id="leadform-major-list">
+          {['Computer Science & Engineering', 'Software Engineering', 'MBBS (General Medicine)', 'Business Administration (BBA)', 'Master of Business Administration (MBA)', 'Civil Engineering', 'Mechanical Engineering', 'Electrical & Electronic Engineering (EEE)', 'International Business & Trade', 'Information Technology', 'Cyber Security', 'Data Science & AI', 'Pharmacy', 'Hospitality & Tourism Management'].map(m => <option key={m} value={m} />)}
+        </datalist>
+        <datalist id="leadform-uni-list">
+          {['Sichuan University', 'Zhejiang University', 'Tsinghua University', 'Peking University', 'Nanjing University', 'Wuhan University', 'Harbin Institute of Technology', 'Xi\'an Jiaotong University', 'Tongji University', 'Fudan University', 'Jiangsu University', 'Guangdong University of Technology', 'Universiti Malaya', 'Universiti Putra Malaysia', 'University of Malta', 'Chulalongkorn University'].map(u => <option key={u} value={u} />)}
+        </datalist>
       </Section>
 
       {/* ── Academic Profile ── */}
