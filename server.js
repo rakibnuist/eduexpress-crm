@@ -7501,6 +7501,7 @@ async function resolvePageAccessToken(pageId, configuredToken) {
     const data = await res.json();
     if (data.access_token) {
       console.log(`[facebook] Dynamically resolved Page Access Token for Page ID: ${pageId}`);
+      try { db.prepare("UPDATE channels SET access_token=? WHERE page_id=?").run(data.access_token, pageId); } catch {}
       return data.access_token;
     } else if (data.error) {
       console.warn(`[facebook] Token resolution API returned error for Page ID ${pageId}: ${data.error.message}`);
