@@ -8,6 +8,8 @@ const colors = {
   'Not Interested': 'bg-red-100 text-red-600',
   'Documents Withdraw': 'bg-rose-100 text-rose-800 border border-rose-200',
   'documents_withdraw': 'bg-rose-100 text-rose-800 border border-rose-200',
+  'Application Withdraw': 'bg-red-100 text-red-800 border border-red-200',
+  'application_withdraw': 'bg-red-100 text-red-800 border border-red-200',
   'Follow-up': 'bg-amber-100 text-amber-700',
   'Pending': 'bg-amber-100 text-amber-700',
   'Partial': 'bg-orange-100 text-orange-700',

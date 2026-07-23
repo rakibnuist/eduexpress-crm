@@ -665,9 +665,9 @@ export default function Applications({ user }) {
             const active = filterStage === s.key;
             const color = STAGE_COLORS[s.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
             return (
-              <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)} disabled={n === 0}
-                className={`flex-shrink-0 flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl border transition-all
-                  ${active ? `${color.bg} border-blue-500 shadow-md scale-[1.02] text-slate-900` : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 disabled:opacity-40 disabled:cursor-not-allowed'}`}>
+              <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)}
+                className={`flex-shrink-0 flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl border transition-all cursor-pointer hover:shadow-sm
+                  ${active ? `${color.bg} border-blue-500 shadow-md scale-[1.02] text-slate-900` : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300'}`}>
                 <span className={`w-2 h-2 rounded-full ${color.pill.split(' ')[0]}`} />
                 {s.label}
                 <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${active ? 'bg-white shadow-sm' : 'bg-slate-100'}`}>{n}</span>
