@@ -46,9 +46,7 @@ if (!DB_PATH) {
   const restoreDbPath = join(__dirname, 'restore.db');
   if (existsSync(restoreDbPath)) {
     try {
-      copyFileSync(restoreDbPath, DB_PATH);
-      console.log(`[database] Restored database from ${restoreDbPath} to ${DB_PATH}`);
-      unlinkSync(restoreDbPath);
+      try { unlinkSync(restoreDbPath); } catch {}
     } catch (err) {
       console.error(`[database] Restore failed:`, err.message);
     }
