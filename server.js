@@ -5964,11 +5964,10 @@ app.post('/api/admin/delete-by-page', (req, res) => {
     const matchingLeads = db.prepare(`
       SELECT id, lead_id, client_name, page_name, phone 
       FROM leads 
-      WHERE LOWER(page_name) LIKE '%study%' OR LOWER(page_name) LIKE '%work%' OR LOWER(page_name) LIKE '%abroad%'
-         OR LOWER(source) LIKE '%study%' OR LOWER(source) LIKE '%work%' OR LOWER(source) LIKE '%abroad%'
-         OR LOWER(lead_source) LIKE '%study%' OR LOWER(lead_source) LIKE '%work%' OR LOWER(lead_source) LIKE '%abroad%'
-         OR LOWER(page_name) LIKE '%' || @term || '%'
-    `).all({ term: pageTerm });
+      WHERE LOWER(page_name) LIKE '%study%work%' OR LOWER(page_name) LIKE '%study%abroad%' OR LOWER(page_name) LIKE '%work%abroad%'
+         OR LOWER(source) LIKE '%study%work%' OR LOWER(source) LIKE '%study%abroad%'
+         OR LOWER(lead_source) LIKE '%study%work%' OR LOWER(lead_source) LIKE '%study%abroad%'
+    `).all();
 
     let deletedLeads = 0, deletedConvs = 0, deletedMsgs = 0, deletedContacts = 0;
 
