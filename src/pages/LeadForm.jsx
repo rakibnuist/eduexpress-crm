@@ -360,50 +360,51 @@ function initial(lead, user) {
 /* ─── small UI primitives ─── */
 function Section({ icon, title, color, children }) {
   const palette = {
-    blue:    'bg-blue-50 text-blue-600',
-    violet:  'bg-violet-50 text-violet-600',
-    indigo:  'bg-indigo-50 text-indigo-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    amber:   'bg-amber-50 text-amber-600',
-    rose:    'bg-rose-50 text-rose-600',
+    blue:    'bg-blue-50 text-blue-600 border-blue-200',
+    violet:  'bg-violet-50 text-violet-600 border-violet-200',
+    indigo:  'bg-indigo-50 text-indigo-600 border-indigo-200',
+    emerald: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+    amber:   'bg-amber-50 text-amber-600 border-amber-200',
+    rose:    'bg-rose-50 text-rose-600 border-rose-200',
+    orange:  'bg-amber-50 text-amber-700 border-amber-200',
   };
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-2.5 border-b border-slate-100 bg-slate-50/40">
-        <div className={`p-1.5 rounded-lg ${palette[color] || palette.blue}`}>{icon}</div>
-        <span className="font-semibold text-slate-700 text-sm">{title}</span>
+    <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+        <div className={`p-1.5 rounded-xl border ${palette[color] || palette.blue}`}>{icon}</div>
+        <span className="font-extrabold text-slate-800 text-sm tracking-tight">{title}</span>
       </div>
-      <div className="p-5 space-y-3">{children}</div>
+      <div className="p-5 space-y-4">{children}</div>
     </div>
   );
 }
 
 function Row({ cols = 2, children }) {
   const cls = { 1: 'grid-cols-1', 2: 'grid-cols-1 sm:grid-cols-2', 3: 'grid-cols-1 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' }[cols];
-  return <div className={`grid ${cls} gap-3`}>{children}</div>;
+  return <div className={`grid ${cls} gap-4`}>{children}</div>;
 }
 
 function Field({ label, value = '', onChange, type = 'text', placeholder, required, list, mono, step }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-600 mb-1">
+      <label className="block text-xs font-extrabold text-slate-700 mb-1.5 uppercase tracking-wider">
         {label}{required && <span className="text-rose-500"> *</span>}
       </label>
       <input type={type} required={required} value={value ?? ''} onChange={e => onChange(e.target.value)}
         placeholder={placeholder} list={list} step={step}
-        className={`w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${mono ? 'font-mono' : ''}`} />
+        className={`w-full h-10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl px-3.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all ${mono ? 'font-mono' : ''}`} />
     </div>
   );
 }
 
-function SelectField({ label, value = '', onChange, options = [], placeholder = '— select —', required }) {
+function SelectField({ label, value = '', onChange, options = [], placeholder = '— Select Option —', required }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-600 mb-1">
+      <label className="block text-xs font-extrabold text-slate-700 mb-1.5 uppercase tracking-wider">
         {label}{required && <span className="text-rose-500"> *</span>}
       </label>
       <select value={value ?? ''} onChange={e => onChange(e.target.value)} required={required}
-        className="w-full h-10 border border-slate-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer">
+        className="w-full h-10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer">
         <option value="">{placeholder}</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -414,9 +415,9 @@ function SelectField({ label, value = '', onChange, options = [], placeholder = 
 function TextareaField({ label, value = '', onChange, placeholder, rows = 3 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-600 mb-1">{label}</label>
+      <label className="block text-xs font-extrabold text-slate-700 mb-1.5 uppercase tracking-wider">{label}</label>
       <textarea rows={rows} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" />
+        className="w-full bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all resize-none" />
     </div>
   );
 }

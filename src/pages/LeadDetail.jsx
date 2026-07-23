@@ -176,45 +176,92 @@ export default function LeadDetail({ user }) {
   return (
     <div className="max-w-[1600px] mx-auto pb-12 px-4 sm:px-6 lg:px-8 xl:px-0 space-y-6">
       
-      {/* ── Professional Header ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate(-1)} className="p-2.5 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-xl transition-all">
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{lead.client_name}</h1>
-              <span className="font-mono text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{lead.lead_id}</span>
-              <StatusBadge status={lead.lead_status} />
-            </div>
-            <div className="flex items-center gap-4 text-sm text-slate-500 font-medium mt-1">
-              {lead.phone && <span className="flex items-center gap-1.5"><Phone size={14}/> {lead.phone}</span>}
-              {lead.email && <span className="flex items-center gap-1.5"><Mail size={14}/> {lead.email}</span>}
-              <span className="flex items-center gap-1.5"><Calendar size={14}/> Added {lead.date_added}</span>
+      {/* ── Professional Header Card ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-5">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <button onClick={() => navigate(-1)} className="p-2.5 border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-xl transition-all shadow-2xs">
+              <ArrowLeft size={18} />
+            </button>
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-base flex items-center justify-center shadow-md ring-4 ring-blue-50 flex-shrink-0">
+                {lead.client_name?.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase() || '?'}
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-2xl font-black text-slate-900 tracking-tight">{lead.client_name}</h1>
+                  <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">{lead.lead_id}</span>
+                  <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${lead.lead_market === 'China' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
+                    {lead.lead_market === 'China' ? '🇨🇳 China' : '🇧🇩 Bangladesh'} · {lead.lead_type || 'B2C'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-slate-500 font-semibold mt-1">
+                  {lead.phone && (
+                    <a href={`tel:${lead.phone}`} className="flex items-center gap-1 text-slate-700 hover:text-blue-600 transition-colors">
+                      <Phone size={13} className="text-slate-400" /> {lead.phone}
+                    </a>
+                  )}
+                  {lead.email && (
+                    <a href={`mailto:${lead.email}`} className="flex items-center gap-1 text-slate-700 hover:text-blue-600 transition-colors">
+                      <Mail size={13} className="text-slate-400" /> {lead.email}
+                    </a>
+                  )}
+                  <span className="flex items-center gap-1 text-slate-400"><Calendar size={13}/> Added {lead.date_added}</span>
+                </div>
+              </div>
             </div>
           </div>
+          
+          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+            {lead.phone && (
+              <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all shadow-2xs">
+                <svg className="w-4 h-4 fill-emerald-600" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+                WhatsApp
+              </a>
+            )}
+            {lead.phone && (
+              <button disabled={startingChat} onClick={handleStartCRMChat}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-xl transition-all shadow-sm">
+                {startingChat ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
+                CRM Chat
+              </button>
+            )}
+            {lead.drive_link && (
+              <a href={ensureAbsoluteUrl(lead.drive_link)} target="_blank" rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs transition-all">
+                <FolderOpen size={14} className="text-amber-500" /> Drive
+              </a>
+            )}
+            {isFullAdmin(user) && (
+              <button onClick={() => setDeleteOpen(true)} className="flex items-center p-2 text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-all">
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
         </div>
-        
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          {lead.phone && (
-            <button disabled={startingChat} onClick={handleStartCRMChat}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 rounded-lg transition-all shadow-sm">
-              {startingChat ? <Loader2 size={16} className="animate-spin" /> : <MessageSquare size={16} />}
-              CRM Chat
-            </button>
-          )}
-          {lead.drive_link && (
-            <a href={ensureAbsoluteUrl(lead.drive_link)} target="_blank" rel="noreferrer"
-              className="flex items-center gap-2 text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 shadow-sm transition-all">
-              <ExternalLink size={16} /> Drive
-            </a>
-          )}
-          {isFullAdmin(user) && (
-            <button onClick={() => setDeleteOpen(true)} className="flex items-center p-2.5 text-rose-600 bg-white hover:bg-rose-50 rounded-lg border border-slate-200 shadow-sm transition-all">
-              <Trash2 size={16} />
-            </button>
-          )}
+
+        {/* ── Interactive Lead Status Pipeline Bar ── */}
+        <div className="pt-4 border-t border-slate-100">
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2.5">Sales Status Progress</div>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {['New Lead', 'No Response', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested'].map((status) => {
+              const active = lead.lead_status === status;
+              return (
+                <button
+                  key={status}
+                  onClick={() => handleFieldSave('lead_status', status)}
+                  className={`flex-1 min-w-[110px] text-xs font-extrabold py-2 px-3 rounded-xl border transition-all cursor-pointer text-center whitespace-nowrap ${
+                    active
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-400/30'
+                      : 'bg-slate-50/70 text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                  }`}
+                >
+                  {active ? `✓ ${status}` : status}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -486,15 +533,21 @@ function EditableField({ label, field, value, type = 'text', options = [], list,
   
   return (
     <div 
-      className="flex flex-col gap-1 group cursor-text -m-1.5 p-1.5 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200"
+      className="flex flex-col gap-1 group cursor-pointer -m-1.5 p-2 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200/80 shadow-2xs hover:shadow-xs"
       onClick={() => setIsEditing(true)}
     >
       <div className="flex items-center justify-between">
-        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</label>
+        <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">{label}</label>
         <Pencil size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
-      <div className={`text-sm text-slate-800 ${mono ? 'font-mono tracking-tight text-slate-600' : 'font-semibold'}`}>
-        {displayValue ? displayValue : <span className="text-slate-300 italic font-medium">Click to edit...</span>}
+      <div className={`text-sm text-slate-800 ${mono ? 'font-mono tracking-tight text-slate-700 font-bold bg-slate-50 px-2 py-0.5 rounded border border-slate-200/60 w-max' : 'font-extrabold'}`}>
+        {displayValue ? (
+          displayValue
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 bg-slate-100/70 border border-dashed border-slate-200 px-2 py-0.5 rounded-lg group-hover:border-blue-400 group-hover:text-blue-600 group-hover:bg-blue-50 transition-all">
+            + Add {label}
+          </span>
+        )}
       </div>
     </div>
   );
