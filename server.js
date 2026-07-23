@@ -340,11 +340,8 @@ app.get('/diagnose-db', (req, res) => {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
     const userCount = db.prepare("SELECT COUNT(*) as c FROM users").get().c;
     const leadsCount = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
-    let sampleLeads = [];
-    if (req.query.q) {
-      sampleLeads = db.prepare("SELECT id, lead_id, client_name, lead_status, application_stage, destination, lead_market, lead_type, source, date_added, created_at FROM leads WHERE client_name LIKE ? OR lead_id LIKE ?").all(`%${req.query.q}%`, `%${req.query.q}%`);
-    }
-    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, userCount, leadsCount, sampleLeads, tables });
+    const recentLeads = db.prepare("SELECT id, lead_id, client_name, lead_status, application_stage, destination, lead_market, lead_type, source, date_added, created_at FROM leads ORDER BY id DESC LIMIT 15").all();
+    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, userCount, leadsCount, recentLeads, tables });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
