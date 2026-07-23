@@ -301,12 +301,13 @@ export default function Applications({ user }) {
 
   const stats = useMemo(() => {
     const total = filtered.length;
-    const docs = filtered.filter(r => ['documents', 'ready'].includes(r.application_stage) || r.docs_received > 0).length;
+    const docs = filtered.filter(r => ['documents', 'ready'].includes(r.application_stage)).length;
     const submitted = filtered.filter(r => ['submitted', 'interview', 'pre_admission', 'deposit'].includes(r.application_stage)).length;
-    const admitted = filtered.filter(r => ['admitted', 'jw202'].includes(r.application_stage) || r.uni_admitted > 0).length;
-    const visa = filtered.filter(r => ['visa_applied', 'visa_approved', 'passport_collection'].includes(r.application_stage)).length;
+    const admitted = filtered.filter(r => r.application_stage === 'admitted').length;
+    const visaSubmitted = filtered.filter(r => r.application_stage === 'visa_applied').length;
+    const visaApproved = filtered.filter(r => r.application_stage === 'visa_approved').length;
     const flight = filtered.filter(r => ['partial_payment', 'air_ticket', 'complete_payment', 'pre_departure', 'fly', 'enrolled'].includes(r.application_stage)).length;
-    return { total, docs, submitted, admitted, visa, flight };
+    return { total, docs, submitted, admitted, visaSubmitted, visaApproved, flight };
   }, [filtered]);
 
   const universities = useMemo(() => {
@@ -585,16 +586,16 @@ export default function Applications({ user }) {
       {/* KPI Stats Cards (Counterboard) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: 'Total Apps', value: stats.total, icon: BarChart3, border: 'border-blue-200', bg: 'from-blue-50/80 to-white', color: 'text-blue-600', iconBg: 'bg-blue-500/10' },
-          { label: 'Document Collection', value: stats.docs, icon: FileText, border: 'border-slate-200', bg: 'from-slate-50/80 to-white', color: 'text-slate-700', iconBg: 'bg-slate-500/10' },
-          { label: 'Application Submitted', value: stats.submitted, icon: ArrowRight, border: 'border-violet-200', bg: 'from-violet-50/80 to-white', color: 'text-violet-600', iconBg: 'bg-violet-500/10' },
-          { label: 'Admission Notice & JW202', value: stats.admitted, icon: CheckCircle, border: 'border-emerald-200', bg: 'from-emerald-50/80 to-white', color: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
-          { label: 'VISA Approval', value: stats.visa, icon: CheckCircle2, border: 'border-teal-200', bg: 'from-teal-50/80 to-white', color: 'text-teal-600', iconBg: 'bg-teal-500/10' },
-          { label: 'Pre-Departure & Flight', value: stats.flight, icon: GraduationCap, border: 'border-indigo-200', bg: 'from-indigo-50/80 to-white', color: 'text-indigo-600', iconBg: 'bg-indigo-500/10' },
+          { label: 'Total Apps', stageKey: 'all', value: stats.total, icon: BarChart3, border: 'border-blue-200', bg: 'from-blue-50/80 to-white', color: 'text-blue-600', iconBg: 'bg-blue-500/10' },
+          { label: 'Document Collection', stageKey: 'documents', value: stats.docs, icon: FileText, border: 'border-slate-200', bg: 'from-slate-50/80 to-white', color: 'text-slate-700', iconBg: 'bg-slate-500/10' },
+          { label: 'Application Submitted', stageKey: 'submitted', value: stats.submitted, icon: ArrowRight, border: 'border-violet-200', bg: 'from-violet-50/80 to-white', color: 'text-violet-600', iconBg: 'bg-violet-500/10' },
+          { label: 'Admission Notice & JW202', stageKey: 'admitted', value: stats.admitted, icon: CheckCircle, border: 'border-emerald-200', bg: 'from-emerald-50/80 to-white', color: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
+          { label: 'Visa Application Submitted', stageKey: 'visa_applied', value: stats.visaSubmitted, icon: CheckCircle2, border: 'border-teal-200', bg: 'from-teal-50/80 to-white', color: 'text-teal-600', iconBg: 'bg-teal-500/10' },
+          { label: 'Pre-Departure & Flight', stageKey: 'pre_departure', value: stats.flight, icon: GraduationCap, border: 'border-indigo-200', bg: 'from-indigo-50/80 to-white', color: 'text-indigo-600', iconBg: 'bg-indigo-500/10' },
         ].map(s => (
-          <div key={s.label} className={`bg-gradient-to-br ${s.bg} rounded-2xl border ${s.border} p-3.5 shadow-sm hover:shadow-md transition-all flex items-center justify-between`}>
+          <div key={s.label} onClick={() => setFilterStage(s.stageKey)} className={`cursor-pointer bg-gradient-to-br ${s.bg} rounded-2xl border ${s.border} p-3.5 shadow-sm hover:shadow-md transition-all flex items-center justify-between group ${filterStage === s.stageKey ? 'ring-2 ring-blue-500 shadow-md scale-[1.02]' : ''}`}>
             <div>
-              <p className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{s.value}</p>
+              <p className="text-2xl font-black text-slate-900 tracking-tight leading-tight group-hover:scale-105 transition-transform">{s.value}</p>
               <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">{s.label}</p>
             </div>
             <div className={`w-10 h-10 rounded-xl ${s.iconBg} ${s.color} flex items-center justify-center flex-shrink-0`}>
