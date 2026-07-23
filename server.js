@@ -541,7 +541,7 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset'];
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset', '/api/import/file-updates-2026'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
