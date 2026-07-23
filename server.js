@@ -823,19 +823,21 @@ app.post('/api/office-config', (req, res) => requireAdmin(req, res, () => {
 function getApplicationStages() {
   return [
     { key: 'documents', label: 'Document Collection', order: 0 },
-    { key: 'ready', label: 'Document Verification', order: 1 },
+    { key: 'ready', label: 'Document Ready', order: 1 },
     { key: 'submitted', label: 'Application Submitted', order: 2 },
     { key: 'interview', label: 'University Interview', order: 3 },
-    { key: 'pre_admission', label: 'Conditional Offer', order: 4 },
-    { key: 'university_initial_deposit', label: 'Tuition Deposit', order: 5 },
-    { key: 'admitted', label: 'Unconditional Offer & JW202', order: 6 },
-    { key: 'visa_applied', label: 'Visa Application', order: 7 },
-    { key: 'passport_collection', label: 'Visa Approval', order: 8 },
-    { key: 'payment', label: 'Final Settlement', order: 9 },
-    { key: 'air_ticket', label: 'Pre-Departure & Flight', order: 10 },
-    { key: 'fly', label: 'Arrival & Enrollment', order: 11 },
-    { key: 'documents_withdraw', label: 'Documents Withdraw', order: 12 },
-    { key: 'application_withdraw', label: 'Application Withdraw', order: 13 }
+    { key: 'pre_admission', label: 'Pre-Admission Notice', order: 4 },
+    { key: 'deposit', label: 'Deposit', order: 5 },
+    { key: 'admitted', label: 'Admission Notice & JW202', order: 6 },
+    { key: 'visa_applied', label: 'Visa Application Submitted', order: 7 },
+    { key: 'visa_approved', label: 'Visa Approval', order: 8 },
+    { key: 'partial_payment', label: 'Partial Payment', order: 9 },
+    { key: 'air_ticket', label: 'Air Ticket Book', order: 10 },
+    { key: 'complete_payment', label: 'Complete Payment', order: 11 },
+    { key: 'pre_departure', label: 'Pre-Departure & Flight', order: 12 },
+    { key: 'fly', label: 'Arrival & Enrollment', order: 13 },
+    { key: 'documents_withdraw', label: 'Documents Withdraw', order: 14 },
+    { key: 'application_withdraw', label: 'Application Withdraw', order: 15 }
   ];
 }
 

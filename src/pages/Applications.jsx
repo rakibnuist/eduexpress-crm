@@ -167,7 +167,7 @@ export default function Applications({ user }) {
     if (saved === 'china' && !canViewChinaData(user)) return 'all';
     return saved || 'all';
   });
-  const [bdChannel, setBdChannel] = useState(() => localStorage.getItem('app_bd_channel') || 'office');
+  const [bdChannel, setBdChannel] = useState(() => localStorage.getItem('app_bd_channel') || 'all');
 
   // ── Destination (where students GO TO — syncable across app) ──
   const [destinationFilter, setDestinationFilter] = useState(() => {
@@ -301,12 +301,12 @@ export default function Applications({ user }) {
 
   const stats = useMemo(() => {
     const total = filtered.length;
-    const docs = filtered.filter(r => r.docs_received > 0).length;
-    const submitted = filtered.filter(r => ['submitted','interview','in_review','pre_admission','admitted','jw202','visa_applied','visa_approved','enrolled'].includes(r.application_stage)).length;
-    const admitted = filtered.filter(r => ['admitted','jw202','visa_applied','visa_approved','enrolled'].includes(r.application_stage)).length;
-    const visa = filtered.filter(r => ['visa_approved','enrolled'].includes(r.application_stage)).length;
-    const enrolled = filtered.filter(r => r.application_stage === 'enrolled').length;
-    return { total, docs, submitted, admitted, visa, enrolled };
+    const docs = filtered.filter(r => ['documents', 'ready'].includes(r.application_stage) || r.docs_received > 0).length;
+    const submitted = filtered.filter(r => ['submitted', 'interview', 'pre_admission', 'deposit'].includes(r.application_stage)).length;
+    const admitted = filtered.filter(r => ['admitted', 'jw202'].includes(r.application_stage) || r.uni_admitted > 0).length;
+    const visa = filtered.filter(r => ['visa_applied', 'visa_approved', 'passport_collection'].includes(r.application_stage)).length;
+    const flight = filtered.filter(r => ['partial_payment', 'air_ticket', 'complete_payment', 'pre_departure', 'fly', 'enrolled'].includes(r.application_stage)).length;
+    return { total, docs, submitted, admitted, visa, flight };
   }, [filtered]);
 
   const universities = useMemo(() => {
@@ -582,15 +582,15 @@ export default function Applications({ user }) {
         </div>
       )}
 
-      {/* KPI Stats Cards */}
+      {/* KPI Stats Cards (Counterboard) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: 'Total Apps', value: stats.total, icon: BarChart3, border: 'border-blue-200', bg: 'from-blue-50/80 to-white', color: 'text-blue-600', iconBg: 'bg-blue-500/10' },
-          { label: 'Docs Ready', value: stats.docs, icon: FileText, border: 'border-slate-200', bg: 'from-slate-50/80 to-white', color: 'text-slate-700', iconBg: 'bg-slate-500/10' },
-          { label: 'Submitted', value: stats.submitted, icon: ArrowRight, border: 'border-violet-200', bg: 'from-violet-50/80 to-white', color: 'text-violet-600', iconBg: 'bg-violet-500/10' },
-          { label: 'Admitted', value: stats.admitted, icon: CheckCircle, border: 'border-emerald-200', bg: 'from-emerald-50/80 to-white', color: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
-          { label: 'Visa Approved', value: stats.visa, icon: CheckCircle2, border: 'border-green-200', bg: 'from-green-50/80 to-white', color: 'text-green-600', iconBg: 'bg-green-500/10' },
-          { label: 'Enrolled', value: stats.enrolled, icon: GraduationCap, border: 'border-indigo-200', bg: 'from-indigo-50/80 to-white', color: 'text-indigo-600', iconBg: 'bg-indigo-500/10' },
+          { label: 'Document Collection', value: stats.docs, icon: FileText, border: 'border-slate-200', bg: 'from-slate-50/80 to-white', color: 'text-slate-700', iconBg: 'bg-slate-500/10' },
+          { label: 'Application Submitted', value: stats.submitted, icon: ArrowRight, border: 'border-violet-200', bg: 'from-violet-50/80 to-white', color: 'text-violet-600', iconBg: 'bg-violet-500/10' },
+          { label: 'Admission Notice & JW202', value: stats.admitted, icon: CheckCircle, border: 'border-emerald-200', bg: 'from-emerald-50/80 to-white', color: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
+          { label: 'VISA Approval', value: stats.visa, icon: CheckCircle2, border: 'border-teal-200', bg: 'from-teal-50/80 to-white', color: 'text-teal-600', iconBg: 'bg-teal-500/10' },
+          { label: 'Pre-Departure & Flight', value: stats.flight, icon: GraduationCap, border: 'border-indigo-200', bg: 'from-indigo-50/80 to-white', color: 'text-indigo-600', iconBg: 'bg-indigo-500/10' },
         ].map(s => (
           <div key={s.label} className={`bg-gradient-to-br ${s.bg} rounded-2xl border ${s.border} p-3.5 shadow-sm hover:shadow-md transition-all flex items-center justify-between`}>
             <div>
