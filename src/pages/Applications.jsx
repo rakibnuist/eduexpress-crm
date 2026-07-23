@@ -183,7 +183,7 @@ export default function Applications({ user }) {
   const [hideEmptyColumns, setHideEmptyColumns] = useState(() => localStorage.getItem('hide_empty_cols') === 'true');
 
   const [newApp, setNewApp] = useState({
-    client_name: '', phone: '', destination: '', degree: 'Bachelor', major: '',
+    client_name: '', phone: '', nationality: 'Bangladesh', destination: '', degree: 'Bachelor', major: '',
     university: '', source: '', referrer: '', assigned_employee_id: '',
   });
 
@@ -334,7 +334,7 @@ export default function Applications({ user }) {
       if (searchQuery) setSearchQuery('');
 
       setNewApp({
-        client_name: '', phone: '', destination: settings?.destinations?.[0] || '', degree: 'Bachelor', major: '',
+        client_name: '', phone: '', nationality: 'Bangladesh', destination: settings?.destinations?.[0] || '', degree: 'Bachelor', major: '',
         university: '', source: meta.sources?.[0]?.key || '', lead_market: 'Bangladesh', lead_type: 'B2C', referrer: '', assigned_employee_id: '',
       });
       load();

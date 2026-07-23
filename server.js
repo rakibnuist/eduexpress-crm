@@ -1735,6 +1735,7 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     db.resumeSave(); // Resume and perform a single batched save
     try {
       db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
+      db.prepare("UPDATE leads SET nationality='Bangladesh' WHERE (nationality IS NULL OR nationality='' OR nationality='—') AND (phone LIKE '+880%' OR lead_market='Bangladesh' OR lead_market IS NULL)").run();
       try { db.prepare("ALTER TABLE expenses ADD COLUMN student_name TEXT").run(); } catch {}
       try { db.prepare("ALTER TABLE expenses ADD COLUMN lead_id TEXT").run(); } catch {}
     } catch {}
@@ -5491,7 +5492,17 @@ function leadParams(d, lead_id, balance) {
     meta_ad_id: txt(d.meta_ad_id), meta_campaign: txt(d.meta_campaign),
     // Excel-aligned
     source: txt(d.source), referrer: txt(d.referrer),
-    nationality: txt(d.nationality), passport: txt(d.passport),
+    nationality: (function() {
+      let nat = txt(d.nationality);
+      if (!nat || nat === '—') {
+        if (d.phone && String(d.phone).startsWith('+880')) return 'Bangladesh';
+        if (d.phone && String(d.phone).startsWith('+86')) return 'China';
+        if (d.lead_market === 'China') return 'China';
+        return 'Bangladesh';
+      }
+      return nat;
+    })(),
+    passport: txt(d.passport),
     degree: txt(d.degree), major: txt(d.major),
     intake_term: txt(d.intake_term), university: txt(d.university),
     drive_link: txt(d.drive_link), deposit: num(d.deposit),
