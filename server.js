@@ -334,6 +334,7 @@ app.get('/health', (_req, res) => {
 
 app.get('/diagnose-db', (req, res) => {
   try {
+    if (!db) return res.status(503).json({ error: 'Database loading...' });
     const fs = require('fs');
     const size = existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
     const integrity = db.prepare("PRAGMA integrity_check").get();
