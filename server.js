@@ -2911,6 +2911,7 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
       CREATE TABLE IF NOT EXISTS webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
     `);
+    db.exec("UPDATE leads SET lead_type = 'B2B' WHERE source IN ('B2B', 'Agent') AND (lead_type IS NULL OR lead_type = 'B2C' OR lead_type = '')");
 
     // Migrate legacy single-role users to user_roles junction table
     const legacyUsers = db.prepare(`SELECT id, role FROM users WHERE id NOT IN (SELECT user_id FROM user_roles)`).all();
