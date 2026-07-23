@@ -915,10 +915,15 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
                   </Td>
                   <Td>
                     <div className="flex flex-col gap-1">
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border w-max
-                        ${r.lead_market === 'China' ? 'bg-amber-50 text-amber-800 border-amber-200 shadow-2xs' : (r.lead_type === 'B2B') ? 'bg-violet-50 text-violet-800 border-violet-200 shadow-2xs' : 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-2xs'}`}>
-                        {r.lead_market === 'China' ? '🇨🇳 China' : '🇧🇩 BD'} · {r.lead_type || 'B2C'}
-                      </span>
+                      {(() => {
+                        const effType = (r.source === 'B2B' || r.source === 'Agent' || r.lead_type === 'B2B') ? 'B2B' : (r.lead_type || 'B2C');
+                        return (
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border w-max
+                            ${r.lead_market === 'China' ? 'bg-amber-50 text-amber-800 border-amber-200 shadow-2xs' : effType === 'B2B' ? 'bg-violet-50 text-violet-800 border-violet-200 shadow-2xs' : 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-2xs'}`}>
+                            {r.lead_market === 'China' ? '🇨🇳 China' : '🇧🇩 BD'} · {effType}
+                          </span>
+                        );
+                      })()}
                       {r.source && <span className="text-[10px] text-slate-400 font-medium truncate max-w-[120px]">{r.source}</span>}
                     </div>
                   </Td>
@@ -1205,16 +1210,32 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
             )}
           </div>
           <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
-            {(stages || []).map((s, i) => (
-              <div key={s.key} className="flex items-center gap-1.5">
-                <button onClick={() => changeStage(s.key)} disabled={saving}
-                  className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50
-                    ${i === currentIdx ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : i < currentIdx ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}>
-                  {i < currentIdx ? <CheckCircle2 size={11} className="inline mr-1" /> : ''}{s.label}
-                </button>
-                {i < stages.length - 1 && <ChevronRight size={12} className="text-slate-300" />}
-              </div>
-            ))}
+            {(stages || []).map((s, i) => {
+              const isWithdrawn = s.key === 'documents_withdraw' || s.key === 'application_withdraw';
+              const active = i === currentIdx;
+              const passed = i < currentIdx && !isWithdrawn;
+              let cls = 'bg-white text-slate-600 border-slate-200 hover:border-blue-300';
+              if (active) {
+                if (s.key === 'documents_withdraw') cls = 'bg-rose-600 text-white border-rose-600 shadow-sm font-bold ring-2 ring-rose-200';
+                else if (s.key === 'application_withdraw') cls = 'bg-red-700 text-white border-red-700 shadow-sm font-bold ring-2 ring-red-200';
+                else cls = 'bg-blue-600 text-white border-blue-600 shadow-sm font-bold';
+              } else if (passed) {
+                cls = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold';
+              } else if (s.key === 'documents_withdraw') {
+                cls = 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 font-semibold';
+              } else if (s.key === 'application_withdraw') {
+                cls = 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100 font-semibold';
+              }
+              return (
+                <div key={s.key} className="flex items-center gap-1.5">
+                  <button onClick={() => changeStage(s.key)} disabled={saving}
+                    className={`text-xs whitespace-nowrap px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer disabled:opacity-50 ${cls}`}>
+                    {passed ? <CheckCircle2 size={11} className="inline mr-1" /> : ''}{s.label}
+                  </button>
+                  {i < stages.length - 1 && <ChevronRight size={12} className="text-slate-300" />}
+                </div>
+              );
+            })}
           </div>
         </div>
 

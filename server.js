@@ -826,7 +826,8 @@ function getApplicationStages() {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
-  const list = getList('settings_fileStages', [
+  let list = getList('settings_fileStages', []);
+  const defaultStages = [
     'Document Collection',
     'Document Verification',
     'Application Submitted',
@@ -841,7 +842,14 @@ function getApplicationStages() {
     'Arrival & Enrollment',
     'Documents Withdraw',
     'Application Withdraw'
-  ]);
+  ];
+  if (!Array.isArray(list) || list.length === 0) {
+    list = defaultStages;
+  }
+  if (!list.includes('Documents Withdraw')) list.push('Documents Withdraw');
+  if (!list.includes('Application Withdraw')) list.push('Application Withdraw');
+  try { setConfig('settings_fileStages', JSON.stringify(list)); } catch {}
+
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     if (key === 'documents_collecting' || key === 'document_collection') key = 'documents';
@@ -1164,6 +1172,10 @@ app.put('/api/leads/:id/stage', (req, res) => {
     return res.status(400).json({ error: 'Unknown stage' });
   }
   const oldStage = lead.application_stage;
+  let leadTypeParam = req.body.lead_type ?? null;
+  if (source === 'B2B' || source === 'Agent') leadTypeParam = 'B2B';
+  else if (source === 'In-House' || source === 'China') leadTypeParam = 'B2C';
+
   db.prepare(`UPDATE leads SET
     application_stage = COALESCE(?, application_stage),
     visa_deadline     = COALESCE(?, visa_deadline),
@@ -1204,7 +1216,7 @@ app.put('/api/leads/:id/stage', (req, res) => {
     WHERE id=?`).run(
       stage ?? null, visa_deadline ?? null, departure_date ?? null,
       university ?? null, intake_term ?? null, application_notes ?? null,
-      source ?? null, req.body.lead_market ?? null, req.body.lead_type ?? null, req.body.lead_source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
+      source ?? null, req.body.lead_market ?? null, leadTypeParam, req.body.lead_source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
       degree ?? null, majorVal, drive_link ?? null,
       (deposit === '' || deposit == null) ? null : Number(deposit),
       blood_group ?? null, date_of_birth ?? null, medical_notes ?? null, emergency_contact ?? null,
