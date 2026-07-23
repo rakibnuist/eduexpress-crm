@@ -769,8 +769,8 @@ export default function Applications({ user }) {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer</label>
-                  <input type="text" value={newApp.referrer} onChange={e => setNewApp({ ...newApp, referrer: e.target.value })} placeholder="e.g. BheUni, Mahmud"
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Referrer / Reference</label>
+                  <input type="text" list="app-referrer-list" value={newApp.referrer} onChange={e => setNewApp({ ...newApp, referrer: e.target.value })} placeholder="e.g. BheUni, Mahmud, AZ Int"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all" />
                 </div>
               </div>
