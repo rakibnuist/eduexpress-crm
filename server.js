@@ -821,53 +821,22 @@ app.post('/api/office-config', (req, res) => requireAdmin(req, res, () => {
 // 8 stages from File Open → Arrived. Per-university tracker captures
 // returned/rejected at each individual university.
 function getApplicationStages() {
-  const getList = (key, defaults) => {
-    const val = getConfig(key);
-    try { if (val) return JSON.parse(val); } catch {}
-    return defaults;
-  };
-  let list = getList('settings_fileStages', []);
-  const defaultStages = [
-    'Document Collection',
-    'Document Verification',
-    'Application Submitted',
-    'University Interview',
-    'Conditional Offer',
-    'Tuition Deposit',
-    'Unconditional Offer & JW202',
-    'Visa Application',
-    'Visa Approval',
-    'Final Settlement',
-    'Pre-Departure & Flight',
-    'Arrival & Enrollment',
-    'Documents Withdraw',
-    'Application Withdraw'
+  return [
+    { key: 'documents', label: 'Document Collection', order: 0 },
+    { key: 'ready', label: 'Document Verification', order: 1 },
+    { key: 'submitted', label: 'Application Submitted', order: 2 },
+    { key: 'interview', label: 'University Interview', order: 3 },
+    { key: 'pre_admission', label: 'Conditional Offer', order: 4 },
+    { key: 'university_initial_deposit', label: 'Tuition Deposit', order: 5 },
+    { key: 'admitted', label: 'Unconditional Offer & JW202', order: 6 },
+    { key: 'visa_applied', label: 'Visa Application', order: 7 },
+    { key: 'passport_collection', label: 'Visa Approval', order: 8 },
+    { key: 'payment', label: 'Final Settlement', order: 9 },
+    { key: 'air_ticket', label: 'Pre-Departure & Flight', order: 10 },
+    { key: 'fly', label: 'Arrival & Enrollment', order: 11 },
+    { key: 'documents_withdraw', label: 'Documents Withdraw', order: 12 },
+    { key: 'application_withdraw', label: 'Application Withdraw', order: 13 }
   ];
-  if (!Array.isArray(list) || list.length === 0) {
-    list = defaultStages;
-  }
-  if (!list.includes('Documents Withdraw')) list.push('Documents Withdraw');
-  if (!list.includes('Application Withdraw')) list.push('Application Withdraw');
-  try { setConfig('settings_fileStages', JSON.stringify(list)); } catch {}
-
-  return list.map((label, order) => {
-    let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    if (key === 'documents_collecting' || key === 'document_collection') key = 'documents';
-    if (key === 'documents_ready' || key === 'document_verification') key = 'ready';
-    if (key === 'applied_to_university' || key === 'application_submitted') key = 'submitted';
-    if (key === 'university_interview' || key === 'interview') key = 'interview';
-    if (key === 'conditional_offer' || key === 'pre_admission') key = 'pre_admission';
-    if (key === 'tuition_deposit' || key === 'university_initial_deposit') key = 'university_initial_deposit';
-    if (key === 'unconditional_offer_jw202' || key === 'admission_jw_received' || key === 'admission_notice_received') key = 'admitted';
-    if (key === 'visa_application' || key === 'visa_applied') key = 'visa_applied';
-    if (key === 'visa_approval' || key === 'passport_collection') key = 'passport_collection';
-    if (key === 'final_settlement' || key === 'payment') key = 'payment';
-    if (key === 'pre_departure_flight' || key === 'air_ticket') key = 'air_ticket';
-    if (key === 'arrival_enrollment' || key === 'fly') key = 'fly';
-    if (key === 'documents_withdraw' || key === 'document_withdraw' || key === 'documents_withdrawn') key = 'documents_withdraw';
-    if (key === 'application_withdraw' || key === 'application_withdrawn' || key === 'app_withdraw' || key === 'withdraw') key = 'application_withdraw';
-    return { key, label, order };
-  });
 }
 
 // Per-university application status values.
