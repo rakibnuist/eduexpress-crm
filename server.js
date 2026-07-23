@@ -993,12 +993,20 @@ app.get('/api/application/meta', (req, res) => {
     suggestions: {
       majors: Array.from(new Set([...distinctCol('major'), ...distinctCol('program'), 'Computer Science & Technology', 'Digital Media Technology', 'International Economy & Trade', 'Civil Engineering', 'Business Administration', 'Software Engineering', 'Medicine / MBBS'])),
       universities: Array.from(new Set([...distinctCol('university'), 'Sichuan University', 'Zhejiang University', 'Nanjing University of Science and Technology', 'Xian ShinYu University', 'Wuhan University', 'Tsinghua University'])),
-      referrers: distinctCol('referrer'),
+      referrers: Array.from(new Set([...distinctCol('referrer'), 'BheUni', 'Mahmud', 'Mukta Rahaman', 'Office (M)'])),
       degrees: Array.from(new Set([...distinctCol('degree'), 'Bachelor', 'Master', 'PhD / Doctorate', 'Diploma', 'Associate'])),
       intakes: Array.from(new Set([...distinctCol('intake_term'), 'September 2026', 'March 2026', 'September 2027', 'March 2027'])),
       lastEducations: Array.from(new Set([...distinctCol('last_education'), 'HSC · Science', 'HSC · Business Studies', 'HSC · Humanities', 'A-Levels', 'Bachelor Degree', 'Diploma in Engineering'])),
       englishScores: Array.from(new Set([...distinctCol('english_score'), 'IELTS 6.5', 'IELTS 6.0', 'MOI (Medium of Instruction)', 'Duolingo 110', 'No IELTS'])),
-      nationalities: Array.from(new Set([...distinctCol('nationality'), 'Bangladesh', 'China', 'India', 'Pakistan', 'Nepal']))
+      nationalities: Array.from(new Set([...distinctCol('nationality'), 'Bangladesh', 'China', 'India', 'Pakistan', 'Nepal'])),
+      leadSources: Array.from(new Set([...distinctCol('lead_source'), ...allSources])),
+      sources: Array.from(new Set([...distinctCol('source'), 'In-House', 'B2B', 'China', 'Agent'])),
+      pages: Array.from(new Set([...distinctCol('page_name'), 'WhatsApp', 'EduExpress', 'Facebook Page'])),
+      consultants: Array.from(new Set([...distinctCol('assigned_consultant')])),
+      bloodGroups: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+      lastEducationMajors: distinctCol('last_education_major'),
+      englishTestTypes: Array.from(new Set([...distinctCol('english_test_type'), 'IELTS', 'TOEFL', 'Duolingo', 'MOI'])),
+      hardcopyStatuses: Array.from(new Set([...distinctCol('hardcopy_status'), 'Pending', 'Received', 'Not Required']))
     }
   });
 });
@@ -5931,12 +5939,16 @@ app.post('/api/leads/bulk-delete', (req, res) => requireManagerOrAdmin(req, res,
     let deleted = 0;
     db.transaction(() => {
       for (const id of ids) {
-        db.prepare("UPDATE contacts SET lead_id=NULL WHERE lead_id=?").run(id);
-        db.prepare("UPDATE conversations SET lead_id=NULL WHERE lead_id=?").run(id);
-        try { db.prepare("DELETE FROM lead_documents WHERE lead_id=?").run(id); } catch {}
-        try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=?").run(id); } catch {}
-        const info = db.prepare("DELETE FROM leads WHERE id=?").run(id);
-        deleted += info.changes;
+        // Resolve lead by numeric primary key `id` or human string `lead_id`
+        const lead = db.prepare("SELECT id, lead_id FROM leads WHERE id=? OR lead_id=?").get(id, String(id));
+        if (lead) {
+          db.prepare("UPDATE contacts SET lead_id=NULL WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
+          db.prepare("UPDATE conversations SET lead_id=NULL WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
+          try { db.prepare("DELETE FROM lead_documents WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
+          try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
+          const info = db.prepare("DELETE FROM leads WHERE id=?").run(lead.id);
+          deleted += info.changes;
+        }
       }
     })();
     logActivity({ type: 'bulk_delete_leads', actor: req.user, details: { count: deleted, ids } });
