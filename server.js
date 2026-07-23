@@ -1017,7 +1017,7 @@ app.get('/api/application/meta', (req, res) => {
 // and destination (any configured destination). China data is isolated.
 app.get('/api/applications', (req, res) => {
   const where = [
-    "(l.application_stage IS NOT NULL AND l.application_stage != '' OR l.lead_status IN ('Enrolled','File Opened','Submitted','Processing','Admitted','Visa Approved') OR l.destination IS NOT NULL AND l.destination != '')",
+    "( (l.application_stage IS NOT NULL AND l.application_stage != '' AND l.application_stage != 'none') OR l.lead_status IN ('Enrolled','File Opened','Submitted','Processing','Admitted','Visa Approved','Visa Applied') )",
   ];
   const params = {};
   if (canViewOwnLeadsOnly(req.user)) { // full admins + managers see all
