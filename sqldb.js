@@ -318,3 +318,15 @@ export async function initDatabase(dbPath) {
     export() { return _db.export(); }
   };
 }
+
+process.on('SIGTERM', () => {
+  console.log('[sqldb] SIGTERM received. Flushing database to disk...');
+  immediatelySave();
+});
+process.on('SIGINT', () => {
+  console.log('[sqldb] SIGINT received. Flushing database to disk...');
+  immediatelySave();
+});
+process.on('beforeExit', () => {
+  immediatelySave();
+});

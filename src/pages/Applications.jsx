@@ -268,6 +268,20 @@ export default function Applications({ user }) {
       await api.createLead(payload);
       toast.success(`Application for ${newApp.client_name} created`);
       setShowAddModal(false);
+
+      // Auto-align active filters so the newly created application is GUARANTEED to show!
+      if (destinationFilter !== 'all' && destinationFilter !== payload.destination) {
+        setDestinationFilter('all');
+      }
+      if (sourceMarket !== 'all') {
+        const pMarket = (payload.lead_market || '').toLowerCase();
+        if (pMarket && pMarket !== sourceMarket.toLowerCase()) {
+          setSourceMarket('all');
+        }
+      }
+      if (filterStage !== 'all') setFilterStage('all');
+      if (searchQuery) setSearchQuery('');
+
       setNewApp({
         client_name: '', phone: '', destination: settings?.destinations?.[0] || '', degree: 'Bachelor', major: '',
         university: '', source: meta.sources?.[0]?.key || '', lead_market: 'Bangladesh', lead_type: 'B2C', referrer: '', assigned_employee_id: '',
