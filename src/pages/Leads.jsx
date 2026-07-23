@@ -112,6 +112,9 @@ export default function Leads({ user }) {
       page_name: '',
       ad_name: '',
       follow_up: '',
+      date_preset: '',
+      from_date: '',
+      to_date: '',
       page: 1,
     };
   });
@@ -137,8 +140,6 @@ export default function Leads({ user }) {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const isAdmin = isFullAdmin(user);
 
-
-
   useEffect(() => {
     localStorage.setItem('leads_view', view);
     // Sync URL search param
@@ -160,6 +161,13 @@ export default function Leads({ user }) {
       if (filters.page_name) p.page_name = filters.page_name;
       if (filters.source) p.source = filters.source;
       if (filters.follow_up) p.follow_up = filters.follow_up;
+      if (filters.date_preset) {
+        p.date_preset = filters.date_preset;
+        if (filters.date_preset === 'custom') {
+          if (filters.from_date) p.from_date = filters.from_date;
+          if (filters.to_date) p.to_date = filters.to_date;
+        }
+      }
       p.page = filters.page;
       api.leads(p).then(setData).catch(() => {});
     } else {
@@ -173,6 +181,13 @@ export default function Leads({ user }) {
       if (filters.page_name) p.page_name = filters.page_name;
       if (filters.source) p.source = filters.source;
       if (filters.follow_up) p.follow_up = filters.follow_up;
+      if (filters.date_preset) {
+        p.date_preset = filters.date_preset;
+        if (filters.date_preset === 'custom') {
+          if (filters.from_date) p.from_date = filters.from_date;
+          if (filters.to_date) p.to_date = filters.to_date;
+        }
+      }
       api.leads(p).then(d => {
         const grouped = {};
         STAGES.forEach(({ status }) => { grouped[status] = []; });
@@ -453,9 +468,29 @@ export default function Leads({ user }) {
           {/* Inline filter dropdowns */}
           {settings && (
             <div className="flex flex-wrap gap-2">
-              {view === 'table' && (
-                <FilterSelect value={filters.status} onChange={v => setFilter('status', v)} options={settings.leadStatuses} placeholder="All Statuses" />
+              {/* Date Filter (Creation Date / Custom Range) */}
+              <select value={filters.date_preset || ''} onChange={e => setFilters(f => ({ ...f, date_preset: e.target.value, page: 1 }))}
+                className="h-10 px-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all cursor-pointer shadow-2xs">
+                <option value="">📅 Creation Date (All Time)</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="last_7_days">Last 7 Days</option>
+                <option value="last_30_days">Last 30 Days</option>
+                <option value="this_month">This Month</option>
+                <option value="custom">Custom Date Range…</option>
+              </select>
+
+              {filters.date_preset === 'custom' && (
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 h-10 shadow-2xs">
+                  <span className="text-[11px] font-bold text-slate-400">From:</span>
+                  <input type="date" value={filters.from_date || ''} onChange={e => setFilters(f => ({ ...f, from_date: e.target.value, page: 1 }))}
+                    className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none" />
+                  <span className="text-[11px] font-bold text-slate-400">To:</span>
+                  <input type="date" value={filters.to_date || ''} onChange={e => setFilters(f => ({ ...f, to_date: e.target.value, page: 1 }))}
+                    className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none" />
+                </div>
               )}
+
               <FilterSelect value={filters.destination} onChange={v => setFilter('destination', v)} options={settings.destinations} placeholder="All Destinations" />
               <FilterSelect value={filters.intake} onChange={v => setFilter('intake', v)} options={settings.intakes || []} placeholder="All Intakes" />
               <FilterSelect value={filters.page_name} onChange={v => setFilter('page_name', v)} options={settings.pages || []} placeholder="All Pages" formatOption={shortPageName} />
@@ -465,7 +500,7 @@ export default function Leads({ user }) {
               {!canViewOwnLeadsOnly(user) && (
                 <FilterSelect value={filters.consultant} onChange={v => setFilter('consultant', v)} options={settings.consultants} placeholder="All Consultants" />
               )}
-              <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', ad_name: '', source: '', follow_up: '', lead_market: '', lead_type: '', page: 1 })}
+              <button onClick={() => setFilters({ search: '', status: '', consultant: '', destination: '', intake: '', page_name: '', ad_name: '', source: '', follow_up: '', date_preset: '', from_date: '', to_date: '', lead_market: '', lead_type: '', page: 1 })}
                 className="flex items-center gap-1.5 h-10 px-4 text-sm font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-600 hover:text-white rounded-xl transition-all select-none cursor-pointer shadow-sm">
                 <X size={15} strokeWidth={2.5} /> Reset Filters
               </button>
@@ -474,10 +509,15 @@ export default function Leads({ user }) {
         </div>
 
         {/* Active-filter chips */}
-        {(filters.status || filters.consultant || filters.destination || filters.intake || filters.page_name || filters.ad_name || filters.source || filters.follow_up || filters.search) && (
+        {(filters.status || filters.consultant || filters.destination || filters.intake || filters.page_name || filters.ad_name || filters.source || filters.follow_up || filters.date_preset || filters.search) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.search && <Chip onClear={() => setFilter('search', '')}>Search: <strong>{filters.search}</strong></Chip>}
             {filters.status && <Chip onClear={() => setFilter('status', '')}>Status: <strong>{filters.status}</strong></Chip>}
+            {filters.date_preset && (
+              <Chip onClear={() => setFilters(f => ({ ...f, date_preset: '', from_date: '', to_date: '' }))}>
+                Created: <strong>{filters.date_preset === 'custom' ? `${filters.from_date || 'Start'} to ${filters.to_date || 'End'}` : filters.date_preset.replace(/_/g, ' ')}</strong>
+              </Chip>
+            )}
             {filters.destination && <Chip onClear={() => setFilter('destination', '')}>Destination: <strong>{filters.destination}</strong></Chip>}
             {filters.intake && <Chip onClear={() => setFilter('intake', '')}>Intake: <strong>{filters.intake}</strong></Chip>}
             {filters.page_name && <Chip onClear={() => setFilter('page_name', '')}>Page: <strong>{filters.page_name}</strong></Chip>}

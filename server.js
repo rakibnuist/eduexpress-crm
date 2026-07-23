@@ -5395,7 +5395,7 @@ app.get('/api/leads/source-stats', (req, res) => {
 });
 
 app.get('/api/leads', (req, res) => {
-  const { search, status, consultant, destination, source, lead_market, lead_type, intake, page_name, follow_up, page = 1, limit = 50 } = req.query;
+  const { search, status, consultant, destination, source, lead_market, lead_type, intake, page_name, follow_up, date_preset, from_date, to_date, page = 1, limit = 50 } = req.query;
   const where = []; const params = {};
   if (lead_market) { where.push("l.lead_market=@lead_market"); params.lead_market = lead_market; }
   if (lead_type) { where.push("l.lead_type=@lead_type"); params.lead_type = lead_type; }
@@ -5426,6 +5426,49 @@ app.get('/api/leads', (req, res) => {
     } else if (follow_up === 'Upcoming') {
       where.push("l.next_followup > @today AND l.next_followup IS NOT NULL AND l.next_followup != ''");
       params.today = todayStr;
+    }
+  }
+
+  // ── Date Filtering (Creation Date / Custom Range) ──
+  if (date_preset && date_preset !== 'all') {
+    const tzDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"}));
+    const todayStr = `${tzDate.getFullYear()}-${String(tzDate.getMonth()+1).padStart(2,'0')}-${String(tzDate.getDate()).padStart(2,'0')}`;
+
+    if (date_preset === 'today') {
+      where.push("(substr(l.created_at,1,10) = @todayDate OR l.date_added = @todayDate)");
+      params.todayDate = todayStr;
+    } else if (date_preset === 'yesterday') {
+      const y = new Date(tzDate); y.setDate(y.getDate() - 1);
+      const yesterdayStr = `${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`;
+      where.push("(substr(l.created_at,1,10) = @yesterdayDate OR l.date_added = @yesterdayDate)");
+      params.yesterdayDate = yesterdayStr;
+    } else if (date_preset === 'last_7_days') {
+      const d7 = new Date(tzDate); d7.setDate(d7.getDate() - 6);
+      const d7Str = `${d7.getFullYear()}-${String(d7.getMonth()+1).padStart(2,'0')}-${String(d7.getDate()).padStart(2,'0')}`;
+      where.push("(substr(l.created_at,1,10) >= @d7Str OR l.date_added >= @d7Str)");
+      params.d7Str = d7Str;
+    } else if (date_preset === 'last_30_days') {
+      const d30 = new Date(tzDate); d30.setDate(d30.getDate() - 29);
+      const d30Str = `${d30.getFullYear()}-${String(d30.getMonth()+1).padStart(2,'0')}-${String(d30.getDate()).padStart(2,'0')}`;
+      where.push("(substr(l.created_at,1,10) >= @d30Str OR l.date_added >= @d30Str)");
+      params.d30Str = d30Str;
+    } else if (date_preset === 'this_month') {
+      const monthStr = todayStr.slice(0, 7);
+      where.push("(substr(l.created_at,1,7) = @monthStr OR l.date_added LIKE @monthPattern)");
+      params.monthStr = monthStr;
+      params.monthPattern = `${monthStr}%`;
+    } else if (date_preset === 'custom') {
+      if (from_date && to_date) {
+        where.push("(substr(l.created_at,1,10) BETWEEN @fromDate AND @toDate OR l.date_added BETWEEN @fromDate AND @toDate)");
+        params.fromDate = from_date;
+        params.toDate = to_date;
+      } else if (from_date) {
+        where.push("(substr(l.created_at,1,10) >= @fromDate OR l.date_added >= @fromDate)");
+        params.fromDate = from_date;
+      } else if (to_date) {
+        where.push("(substr(l.created_at,1,10) <= @toDate OR l.date_added <= @toDate)");
+        params.toDate = to_date;
+      }
     }
   }
 
