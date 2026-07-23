@@ -262,12 +262,13 @@ export default function Leads({ user }) {
   }, [filters, view]);
 
   async function handleBulkDelete() {
+    if (!selectedIds.length) return;
     try {
-      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
+      const res = await api.bulkDeleteLeads(selectedIds);
       setSelectedIds([]);
       setBulkDeleting(false);
       load();
-      toast.success(`${selectedIds.length} leads deleted successfully`);
+      toast.success(`${res.deleted || selectedIds.length} leads deleted successfully`);
     } catch (e) {
       toast.error(e.message || 'Could not delete some leads');
     }

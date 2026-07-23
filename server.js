@@ -5865,6 +5865,26 @@ app.post('/api/leads/bulk-status', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+app.post('/api/leads/bulk-delete', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'Missing ids' });
+  try {
+    let deleted = 0;
+    db.transaction(() => {
+      for (const id of ids) {
+        db.prepare("UPDATE contacts SET lead_id=NULL WHERE lead_id=?").run(id);
+        db.prepare("UPDATE conversations SET lead_id=NULL WHERE lead_id=?").run(id);
+        try { db.prepare("DELETE FROM lead_documents WHERE lead_id=?").run(id); } catch {}
+        try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=?").run(id); } catch {}
+        const info = db.prepare("DELETE FROM leads WHERE id=?").run(id);
+        deleted += info.changes;
+      }
+    })();
+    logActivity({ type: 'bulk_delete_leads', actor: req.user, details: { count: deleted, ids } });
+    res.json({ ok: true, deleted });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}));
+
 app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res, () => {
   try {
     const staleLeads = db.prepare("SELECT * FROM leads WHERE lead_status='New Lead' AND date_added <= date('now', '-3 days')").all();

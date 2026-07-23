@@ -322,11 +322,12 @@ export default function Applications({ user }) {
   const isFilterActive = filterStage !== 'all' || filterUniversity !== 'all' || filterConsultant !== 'all' || filterSource !== 'all' || searchQuery || destinationFilter !== 'all';
 
   const handleBulkDelete = async () => {
+    if (!selectedIds.length) return;
     try {
-      await Promise.all(selectedIds.map(id => api.deleteLead(id)));
+      const res = await api.bulkDeleteLeads(selectedIds);
       setSelectedIds([]); setBulkDeleting(false); load();
-      toast.success(`${selectedIds.length} applications deleted`);
-    } catch (err) { toast.error(err.message || 'Could not delete'); }
+      toast.success(`${res.deleted || selectedIds.length} applications deleted`);
+    } catch (err) { toast.error(err.message || 'Could not delete applications'); }
   };
 
   const handleCreateApplication = async (e) => {

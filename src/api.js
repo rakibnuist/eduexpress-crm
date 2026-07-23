@@ -104,6 +104,7 @@ export const api = {
   deleteLead:   (id)     => req(`/leads/${id}`, { method: 'DELETE' }),
   bulkAssignLeads: (ids, consultant) => req('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, consultant }) }),
   bulkUpdateStatus: (ids, status) => req('/leads/bulk-status', { method: 'POST', body: JSON.stringify({ ids, status }) }),
+  bulkDeleteLeads: (ids) => req('/leads/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   findDuplicates: () => req('/leads/duplicates'),
   mergeLeads: (primary_id, secondary_ids) => req('/leads/merge', { method: 'POST', body: JSON.stringify({ primary_id, secondary_ids }) }),
   autoCleanupLeads: () => req('/leads/auto-cleanup', { method: 'POST' }),
