@@ -20,6 +20,7 @@ const STAGES = [
   { status: 'File Opened',    hex: '#3b82f6', col: 'bg-blue-500',    border: 'border-blue-500',    light: 'bg-blue-50',     ring: 'ring-blue-200/50' },
   { status: 'Enrolled',       hex: '#16a34a', col: 'bg-green-600',   border: 'border-green-600',   light: 'bg-green-50',    ring: 'ring-green-200/50' },
   { status: 'Not Interested', hex: '#f87171', col: 'bg-red-400',     border: 'border-red-400',     light: 'bg-red-50',      ring: 'ring-red-200/50' },
+  { status: 'Documents Withdraw', hex: '#e11d48', col: 'bg-rose-600', border: 'border-rose-600', light: 'bg-rose-50', ring: 'ring-rose-200/50' },
 ];
 
 import { canViewOwnLeadsOnly, isFullAdmin } from '../lib/roles';

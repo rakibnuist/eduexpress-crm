@@ -49,7 +49,8 @@ const STAGE_COLORS = {
   visa_rejected:      { bg: 'bg-red-50 text-red-800',      border: 'border-red-200',     pill: 'bg-red-200 text-red-800' },
   enrolled:           { bg: 'bg-emerald-100 text-emerald-800', border: 'border-emerald-300', pill: 'bg-emerald-600 text-white font-bold' },
   cancelled:          { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300',   pill: 'bg-slate-500 text-white' },
-  withdraw:           { bg: 'bg-orange-100 text-orange-800', border: 'border-orange-300', pill: 'bg-orange-600 text-white font-bold' },
+  withdraw:           { bg: 'bg-rose-100 text-rose-800', border: 'border-rose-300', pill: 'bg-rose-600 text-white font-bold' },
+  documents_withdraw: { bg: 'bg-rose-100 text-rose-800', border: 'border-rose-300', pill: 'bg-rose-600 text-white font-bold' },
 };
 
 const STAGE_COLORS_LIST = [

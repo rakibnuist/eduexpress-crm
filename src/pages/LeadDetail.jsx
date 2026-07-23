@@ -245,7 +245,7 @@ export default function LeadDetail({ user }) {
         <div className="pt-4 border-t border-slate-100">
           <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2.5">Sales Status Progress</div>
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {['New Lead', 'No Response', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested'].map((status) => {
+            {['New Lead', 'No Response', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested', 'Documents Withdraw'].map((status) => {
               const active = lead.lead_status === status;
               return (
                 <button

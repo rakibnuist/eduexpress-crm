@@ -1381,7 +1381,7 @@ function RoutingRuleModal({ modal, employees, onClose, onSaved }) {
 
 /* ─────────────────── Tab: Drip Sequences ─────────────────── */
 
-const LEAD_STATUSES = ['New Lead', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested'];
+const LEAD_STATUSES = ['New Lead', 'Follow-up', 'Positive', 'Office Visited', 'File Opened', 'Enrolled', 'Not Interested', 'Documents Withdraw'];
 
 function DripsTab() {
   const [sequences, setSequences] = useState([]);

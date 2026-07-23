@@ -6,6 +6,8 @@ const colors = {
   'File Opened': 'bg-blue-100 text-blue-700',
   'Enrolled': 'bg-green-100 text-green-800',
   'Not Interested': 'bg-red-100 text-red-600',
+  'Documents Withdraw': 'bg-rose-100 text-rose-800 border border-rose-200',
+  'documents_withdraw': 'bg-rose-100 text-rose-800 border border-rose-200',
   'Follow-up': 'bg-amber-100 text-amber-700',
   'Pending': 'bg-amber-100 text-amber-700',
   'Partial': 'bg-orange-100 text-orange-700',

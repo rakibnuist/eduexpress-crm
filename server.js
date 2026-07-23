@@ -838,7 +838,8 @@ function getApplicationStages() {
     'Visa Approval',
     'Final Settlement',
     'Pre-Departure & Flight',
-    'Arrival & Enrollment'
+    'Arrival & Enrollment',
+    'Documents Withdraw'
   ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -854,6 +855,7 @@ function getApplicationStages() {
     if (key === 'final_settlement' || key === 'payment') key = 'payment';
     if (key === 'pre_departure_flight' || key === 'air_ticket') key = 'air_ticket';
     if (key === 'arrival_enrollment' || key === 'fly') key = 'fly';
+    if (key === 'documents_withdraw' || key === 'document_withdraw' || key === 'documents_withdrawn' || key === 'withdraw') key = 'documents_withdraw';
     return { key, label, order };
   });
 }
@@ -9802,20 +9804,21 @@ app.get('/api/settings', (req, res) => {
       try { return db.prepare("SELECT DISTINCT ad_name FROM leads WHERE ad_name IS NOT NULL AND ad_name != '' ORDER BY ad_name").all().map(r => r.ad_name); } catch(e){}
       return [];
     })(),
-    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested']),
+    leadStatuses: getList('settings_leadStatuses', ['New Lead','No Response','Follow-up','Positive','Office Visited','File Opened','Enrolled','Not Interested','Documents Withdraw']),
     fileStages: getList('settings_fileStages', [
-      'Documents Collecting',
-      'Documents Ready',
-      'Applied to University',
-      'Interview',
-      'Pre-Admission',
-      'University Initial Deposit',
-      'Admission/JW Received',
-      'Visa Applied',
-      'Passport Collection',
-      'Payment',
-      'Air Ticket',
-      'Fly'
+      'Document Collection',
+      'Document Verification',
+      'Application Submitted',
+      'University Interview',
+      'Conditional Offer',
+      'Tuition Deposit',
+      'Unconditional Offer & JW202',
+      'Visa Application',
+      'Visa Approval',
+      'Final Settlement',
+      'Pre-Departure & Flight',
+      'Arrival & Enrollment',
+      'Documents Withdraw'
     ]),
     paymentStatuses: getList('settings_paymentStatuses', ['Pending','Partial','Paid','Refunded']),
     incomeCategories: getList('settings_incomeCategories', ['Service Charge','Application Deposit','App Fee','File Opening','Marketing Refund','Invest','Previous Cash','Other Income']),
