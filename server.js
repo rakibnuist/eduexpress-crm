@@ -63,23 +63,53 @@ if (!DB_PATH) {
 }
 const DB_DIR = dirname(DB_PATH);
 
-// Auto-recover from an OOM-induced corruption backup if the current DB is freshly created (small)
+// ── Automated Pre-Upgrade Snapshot & Auto-Recovery Protection ──
 try {
   const fs = require('fs');
+  const backupDir = join(DB_DIR, 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
   const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-  if (dbSize < 2000000) {
-    const corruptFiles = fs.readdirSync(DB_DIR).filter(f => f.startsWith('crm.db.corrupt-'));
-    if (corruptFiles.length > 0) {
-      const latestCorrupt = corruptFiles.sort().pop();
-      const corruptPath = join(DB_DIR, latestCorrupt);
-      if (fs.statSync(corruptPath).size > 100000) {
-        fs.copyFileSync(corruptPath, DB_PATH);
-        console.log(`[database] Auto-recovered corrupt database from ${latestCorrupt}`);
+
+  if (dbSize > 100000) {
+    // DB has valid data: take an automated snapshot before initializing
+    const timeStr = new Date().toISOString().replace(/[:.]/g, '-');
+    const snapshotPath = join(backupDir, `crm_upgrade_snapshot_${timeStr}.db`);
+    fs.copyFileSync(DB_PATH, snapshotPath);
+    console.log(`[database] 🛡️ Pre-upgrade snapshot created: ${snapshotPath}`);
+
+    // Retain 30 most recent snapshots
+    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort();
+    if (files.length > 30) {
+      files.slice(0, files.length - 30).forEach(f => {
+        try { fs.unlinkSync(join(backupDir, f)); } catch {}
+      });
+    }
+  } else {
+    // If DB is missing or fresh/empty (<100KB), auto-restore from latest snapshot!
+    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort();
+    if (files.length > 0) {
+      const latest = files.pop();
+      const latestPath = join(backupDir, latest);
+      if (fs.existsSync(latestPath) && fs.statSync(latestPath).size > 100000) {
+        fs.copyFileSync(latestPath, DB_PATH);
+        console.log(`[database] 🛡️ Auto-restored database from latest snapshot: ${latest}`);
+      }
+    } else {
+      // Fallback: check for corrupt- backup files
+      const corruptFiles = fs.readdirSync(DB_DIR).filter(f => f.startsWith('crm.db.corrupt-')).sort();
+      if (corruptFiles.length > 0) {
+        const latestCorrupt = corruptFiles.pop();
+        const corruptPath = join(DB_DIR, latestCorrupt);
+        if (fs.statSync(corruptPath).size > 100000) {
+          fs.copyFileSync(corruptPath, DB_PATH);
+          console.log(`[database] Auto-recovered database from corrupt backup: ${latestCorrupt}`);
+        }
       }
     }
   }
 } catch (err) {
-  console.error('[database] Auto-recovery failed:', err.message);
+  console.error('[database] Snapshot safeguard error:', err.message);
 }
 
 // Override console logging to log to a persistent file for diagnostics
