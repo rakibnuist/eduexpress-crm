@@ -38,11 +38,19 @@ export default function Pipeline() {
   const today = todayISO();
 
   const load = useCallback(() => {
-    STAGES.forEach(({ status }) => {
-      api.leads({ status, limit: 200 })
-        .then(d => setByStatus(prev => ({ ...prev, [status]: d.leads })))
-        .catch(() => {});
-    });
+    api.leads({ limit: 1000 }).then(d => {
+      const grouped = {};
+      STAGES.forEach(({ status }) => { grouped[status] = []; });
+      (d.leads || []).forEach(l => {
+        if (grouped[l.lead_status]) {
+          grouped[l.lead_status].push(l);
+        } else {
+          grouped['New Lead'] = grouped['New Lead'] || [];
+          grouped['New Lead'].push(l);
+        }
+      });
+      setByStatus(grouped);
+    }).catch(() => {});
   }, []);
   useEffect(() => { load(); api.settings().then(setSettings).catch(() => {}); }, [load]);
 
