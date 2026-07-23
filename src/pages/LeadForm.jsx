@@ -269,10 +269,31 @@ export default function LeadForm({ user, lead, settings, onSave }) {
           <Field label="Google Drive folder" value={form.drive_link} onChange={v => set('drive_link', v)}
             placeholder="https://drive.google.com/…" mono />
         </Row>
-        <Row cols={1}>
-          <TextareaField label="Notes" value={form.notes} onChange={v => set('notes', v)}
-            placeholder="Anything the next person should know about this student…" rows={3} />
-        </Row>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider">Call Notes & Summary</label>
+            <div className="flex items-center gap-1 text-[10px]">
+              <span className="text-slate-400 font-bold">Quick Presets:</span>
+              {[
+                { label: '📱 No Response', text: 'Called student — No response / line busy.' },
+                { label: '🔄 Follow-Up', text: 'Discussed study options. Scheduled follow-up.' },
+                { label: '👍 Positive', text: 'Interested in China/Malta. Requested doc checklist.' },
+                { label: '🏢 Office Visited', text: 'Visited office today with parents. Documents checked.' }
+              ].map(preset => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => set('notes', form.notes ? `${form.notes} · ${preset.text}` : preset.text)}
+                  className="px-2 py-0.5 bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 rounded-md border border-slate-200 text-[10px] font-bold transition-all cursor-pointer"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <TextareaField value={form.notes} onChange={v => set('notes', v)}
+            placeholder="Call result, notes, or action required for this student…" rows={3} />
+        </div>
       </Section>
 
       {/* ── Medical & Emergency (collapsible) ── */}

@@ -558,7 +558,7 @@ export default function Leads({ user }) {
                     />
                   </th>
                   <th className="py-3.5 px-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider w-10">#</th>
-                  {['Lead ID', 'Created', 'Client', 'Phone', 'Status', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
+                  {['Lead ID', 'Created', 'Client', 'Phone', 'Status', 'Call Notes', 'Destination', 'Degree', 'Major', 'University', 'Intake', 'Page', 'Follow-up', 'Consultant', ''].map(h => (
                     <th key={h} className="text-left py-3.5 px-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -620,7 +620,6 @@ export default function Leads({ user }) {
                             />
                           </div>
                         )}
-                        {l.notes && <div className="text-xs text-slate-400 truncate max-w-[150px] font-medium mt-0.5" title={l.notes}>{l.notes}</div>}
                       </td>
                       <td className="py-3 px-3.5 text-slate-500 whitespace-nowrap text-xs font-medium">
                         {l.phone ? (
@@ -655,6 +654,22 @@ export default function Leads({ user }) {
                             }
                           }}
                         />
+                      </td>
+
+                      {/* Dedicated Call Notes Column */}
+                      <td className="py-3 px-3.5 max-w-[200px]" onClick={e => e.stopPropagation()}>
+                        {l.notes ? (
+                          <div className="text-xs font-semibold text-slate-700 bg-amber-50/90 border border-amber-200/90 rounded-xl px-2.5 py-1 truncate shadow-2xs" title={l.notes}>
+                            💬 {l.notes}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setModal(l)}
+                            className="text-[11px] font-semibold text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50/70 border border-dashed border-slate-200 hover:border-blue-300 rounded-xl px-2.5 py-1 transition-all"
+                          >
+                            + Call Note
+                          </button>
+                        )}
                       </td>
 
                       <td className="py-3 px-3.5 text-slate-600 text-xs font-semibold">{l.destination || '—'}</td>

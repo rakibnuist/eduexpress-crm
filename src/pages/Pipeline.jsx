@@ -265,6 +265,21 @@ function LeadCard({ lead: l, onEdit, onOpen, onDragStart, onDragEnd, isDraggingS
         </div>
       )}
 
+      {/* Call Notes / Status Notes Display */}
+      {l.notes ? (
+        <div className="mt-2 text-[11px] font-semibold text-slate-700 bg-amber-50/80 border border-amber-200/80 rounded-lg p-2 leading-relaxed" title={l.notes}>
+          <span className="font-extrabold text-amber-800 mr-1">💬 Call Note:</span>
+          {l.notes}
+        </div>
+      ) : (
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(e); }}
+          className="mt-2 w-full text-left text-[10px] font-semibold text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50/60 border border-dashed border-slate-200 hover:border-blue-300 rounded-lg px-2 py-1 transition-all"
+        >
+          + Add call / status note...
+        </button>
+      )}
+
       {l.next_followup && (
         <div className={`mt-1.5 flex items-center gap-1 text-[10px] font-semibold rounded-md px-2 py-0.5
           ${isDueToday ? 'bg-amber-100 text-amber-700' : isPastDue ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
