@@ -541,7 +541,7 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset', '/api/import/file-updates-2026', '/api/admin/delete-by-page'];
+const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset', '/api/import/file-updates-2026', '/api/admin/delete-by-page', '/api/admin/db-breakdown'];
 const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
 // Internal API key for trusted services (n8n, automation scripts)
 const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
@@ -5956,24 +5956,94 @@ app.post('/api/leads/bulk-delete', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+app.get('/api/admin/db-breakdown', (req, res) => {
+  try {
+    const totalLeads = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
+    const pageBreakdown = db.prepare("SELECT page_name, COUNT(*) as count FROM leads GROUP BY page_name").all();
+    const statusBreakdown = db.prepare("SELECT lead_status, COUNT(*) as count FROM leads GROUP BY lead_status").all();
+    const stageBreakdown = db.prepare("SELECT application_stage, COUNT(*) as count FROM leads GROUP BY application_stage").all();
+    const studyLeadsCount = db.prepare(`
+      SELECT COUNT(*) as c FROM leads 
+      WHERE LOWER(COALESCE(page_name,'')) LIKE '%study%' 
+         OR LOWER(COALESCE(page_name,'')) LIKE '%work%' 
+         OR LOWER(COALESCE(page_name,'')) LIKE '%abroad%'
+         OR LOWER(COALESCE(source,'')) LIKE '%study%'
+         OR LOWER(COALESCE(source,'')) LIKE '%work%'
+         OR LOWER(COALESCE(source,'')) LIKE '%abroad%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%study%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%work%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%abroad%'
+    `).get().c;
+
+    const excelLeadsCount = db.prepare(`
+      SELECT COUNT(*) as c FROM leads 
+      WHERE lead_id LIKE 'LEAD-%' OR passport IS NOT NULL AND passport != ''
+    `).get().c;
+
+    let purgedCount = 0;
+    if (req.query.purge === 'true') {
+      const studyLeads = db.prepare(`
+        SELECT id, lead_id FROM leads 
+        WHERE LOWER(COALESCE(page_name,'')) LIKE '%study%' 
+           OR LOWER(COALESCE(page_name,'')) LIKE '%work%' 
+           OR LOWER(COALESCE(page_name,'')) LIKE '%abroad%'
+           OR LOWER(COALESCE(source,'')) LIKE '%study%'
+           OR LOWER(COALESCE(source,'')) LIKE '%work%'
+           OR LOWER(COALESCE(source,'')) LIKE '%abroad%'
+           OR LOWER(COALESCE(lead_source,'')) LIKE '%study%'
+           OR LOWER(COALESCE(lead_source,'')) LIKE '%work%'
+           OR LOWER(COALESCE(lead_source,'')) LIKE '%abroad%'
+      `).all();
+
+      const runPurgeTxn = db.transaction(() => {
+        for (const l of studyLeads) {
+          db.prepare("DELETE FROM conversations WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id);
+          db.prepare("DELETE FROM contacts WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id);
+          try { db.prepare("DELETE FROM lead_documents WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
+          try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
+          try { db.prepare("DELETE FROM activity_log WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
+          const info = db.prepare("DELETE FROM leads WHERE id=?").run(l.id);
+          purgedCount += info.changes;
+        }
+      });
+      runPurgeTxn();
+    }
+
+    res.json({
+      success: true,
+      totalLeads,
+      excelLeadsCount,
+      studyLeadsCount,
+      purgedCount,
+      pageBreakdown,
+      statusBreakdown,
+      stageBreakdown
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/admin/delete-by-page', (req, res) => {
   try {
-    const pageTerm = req.body?.page_name ? String(req.body.page_name).toLowerCase().trim() : 'study';
-    
-    // Find all matching leads
     const matchingLeads = db.prepare(`
       SELECT id, lead_id, client_name, page_name, phone 
       FROM leads 
-      WHERE LOWER(page_name) LIKE '%study%work%' OR LOWER(page_name) LIKE '%study%abroad%' OR LOWER(page_name) LIKE '%work%abroad%'
-         OR LOWER(source) LIKE '%study%work%' OR LOWER(source) LIKE '%study%abroad%'
-         OR LOWER(lead_source) LIKE '%study%work%' OR LOWER(lead_source) LIKE '%study%abroad%'
+      WHERE LOWER(COALESCE(page_name,'')) LIKE '%study%' 
+         OR LOWER(COALESCE(page_name,'')) LIKE '%work%' 
+         OR LOWER(COALESCE(page_name,'')) LIKE '%abroad%'
+         OR LOWER(COALESCE(source,'')) LIKE '%study%'
+         OR LOWER(COALESCE(source,'')) LIKE '%work%'
+         OR LOWER(COALESCE(source,'')) LIKE '%abroad%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%study%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%work%'
+         OR LOWER(COALESCE(lead_source,'')) LIKE '%abroad%'
     `).all();
 
     let deletedLeads = 0, deletedConvs = 0, deletedMsgs = 0, deletedContacts = 0;
 
     const runDeleteTxn = db.transaction(() => {
       for (const lead of matchingLeads) {
-        // 1. Delete associated conversations & messages
         const convs = db.prepare("SELECT id FROM conversations WHERE lead_id=? OR lead_id=?").all(lead.id, lead.lead_id);
         for (const c of convs) {
           const msgRes = db.prepare("DELETE FROM messages WHERE conversation_id=?").run(c.id);
@@ -5984,16 +6054,13 @@ app.post('/api/admin/delete-by-page', (req, res) => {
         const convRes = db.prepare("DELETE FROM conversations WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
         deletedConvs += convRes.changes;
 
-        // 2. Delete contacts
         const contactRes = db.prepare("DELETE FROM contacts WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
         deletedContacts += contactRes.changes;
 
-        // 3. Delete lead documents, applications, activity logs
         try { db.prepare("DELETE FROM lead_documents WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
         try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
         try { db.prepare("DELETE FROM activity_log WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
 
-        // 4. Delete main lead record
         const leadRes = db.prepare("DELETE FROM leads WHERE id=?").run(lead.id);
         deletedLeads += leadRes.changes;
       }
@@ -6003,7 +6070,7 @@ app.post('/api/admin/delete-by-page', (req, res) => {
 
     res.json({
       success: true,
-      message: `Permanently deleted all leads and associated data for page "${pageTerm}"`,
+      message: `Permanently deleted all leads and associated data for Study & Work Abroad`,
       count: matchingLeads.length,
       deletedLeads,
       deletedConvs,
