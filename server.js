@@ -5956,6 +5956,67 @@ app.post('/api/leads/bulk-delete', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+app.post('/api/admin/delete-by-page', (req, res) => {
+  try {
+    const pageTerm = req.body?.page_name ? String(req.body.page_name).toLowerCase().trim() : 'study';
+    
+    // Find all matching leads
+    const matchingLeads = db.prepare(`
+      SELECT id, lead_id, client_name, page_name, phone 
+      FROM leads 
+      WHERE LOWER(page_name) LIKE '%study%' OR LOWER(page_name) LIKE '%work%' OR LOWER(page_name) LIKE '%abroad%'
+         OR LOWER(source) LIKE '%study%' OR LOWER(source) LIKE '%work%' OR LOWER(source) LIKE '%abroad%'
+         OR LOWER(lead_source) LIKE '%study%' OR LOWER(lead_source) LIKE '%work%' OR LOWER(lead_source) LIKE '%abroad%'
+         OR LOWER(page_name) LIKE '%' || @term || '%'
+    `).all({ term: pageTerm });
+
+    let deletedLeads = 0, deletedConvs = 0, deletedMsgs = 0, deletedContacts = 0;
+
+    const runDeleteTxn = db.transaction(() => {
+      for (const lead of matchingLeads) {
+        // 1. Delete associated conversations & messages
+        const convs = db.prepare("SELECT id FROM conversations WHERE lead_id=? OR lead_id=?").all(lead.id, lead.lead_id);
+        for (const c of convs) {
+          const msgRes = db.prepare("DELETE FROM messages WHERE conversation_id=?").run(c.id);
+          deletedMsgs += msgRes.changes;
+          try { db.prepare("DELETE FROM conversation_notes WHERE conversation_id=?").run(c.id); } catch {}
+          try { db.prepare("DELETE FROM conversation_tags WHERE conversation_id=?").run(c.id); } catch {}
+        }
+        const convRes = db.prepare("DELETE FROM conversations WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
+        deletedConvs += convRes.changes;
+
+        // 2. Delete contacts
+        const contactRes = db.prepare("DELETE FROM contacts WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id);
+        deletedContacts += contactRes.changes;
+
+        // 3. Delete lead documents, applications, activity logs
+        try { db.prepare("DELETE FROM lead_documents WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
+        try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
+        try { db.prepare("DELETE FROM activity_log WHERE lead_id=? OR lead_id=?").run(lead.id, lead.lead_id); } catch {}
+
+        // 4. Delete main lead record
+        const leadRes = db.prepare("DELETE FROM leads WHERE id=?").run(lead.id);
+        deletedLeads += leadRes.changes;
+      }
+    });
+
+    runDeleteTxn();
+
+    res.json({
+      success: true,
+      message: `Permanently deleted all leads and associated data for page "${pageTerm}"`,
+      count: matchingLeads.length,
+      deletedLeads,
+      deletedConvs,
+      deletedMsgs,
+      deletedContacts,
+      leads: matchingLeads
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res, () => {
   try {
     const staleLeads = db.prepare("SELECT * FROM leads WHERE lead_status='New Lead' AND date_added <= date('now', '-3 days')").all();
