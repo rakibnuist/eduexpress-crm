@@ -6243,6 +6243,112 @@ app.post('/api/import/applications', (req, res) => requireAdmin(req, res, () => 
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
+app.post('/api/import/file-updates-2026', (req, res) => {
+  try {
+    const xlsx = require('xlsx');
+    const fs = require('fs');
+    const path = require('path');
+
+    const candidates = [
+      path.join(__dirname, 'File Updates 2026.xlsx'),
+      path.join(process.cwd(), 'File Updates 2026.xlsx'),
+      '/app/File Updates 2026.xlsx',
+      '/home/u898266115/crm-data/File Updates 2026.xlsx'
+    ];
+    let filePath = candidates.find(p => fs.existsSync(p));
+    if (!filePath) {
+      return res.status(404).json({ error: 'File Updates 2026.xlsx not found on server' });
+    }
+
+    const wb = xlsx.readFile(filePath);
+    const sheetName = wb.SheetNames.includes('Bangladesh') ? 'Bangladesh' : wb.SheetNames[0];
+    const rawRows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+
+    const STATUS_MAP = {
+      "admitted": "Admitted",
+      "withdraw": "Not Interested",
+      "visa proceesing": "File Opened",
+      "visa submitted": "File Opened",
+      "submitted": "File Opened",
+      "documents": "File Opened"
+    };
+
+    const STAGE_MAP = {
+      "admitted": "admitted",
+      "withdraw": "documents",
+      "visa proceesing": "visa_applied",
+      "visa submitted": "visa_applied",
+      "submitted": "submitted",
+      "documents": "documents"
+    };
+
+    let inserted = 0, updated = 0;
+    const importedList = [];
+
+    const last = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE 'LEAD-%' ORDER BY id DESC LIMIT 1").get();
+    let nextSeq = last ? (parseInt(last.lead_id.split('-')[1]) || 400) + 1 : 400;
+
+    const ins = db.prepare(`INSERT INTO leads
+      (lead_id, date_added, client_name, phone, email, destination, last_education, gpa, english_score,
+       program, lead_source, lead_status, assigned_consultant, service_fee, paid, balance,
+       source, referrer, nationality, passport, degree, major, intake_term, university,
+       drive_link, deposit, application_stage, lead_market, lead_type)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+
+    const upd = db.prepare(`UPDATE leads SET
+       source=COALESCE(?, source), referrer=COALESCE(?, referrer),
+       nationality=COALESCE(?, nationality), passport=COALESCE(?, passport),
+       degree=COALESCE(?, degree), major=COALESCE(?, major), program=COALESCE(?, program),
+       intake_term=COALESCE(?, intake_term), university=COALESCE(?, university),
+       drive_link=COALESCE(?, drive_link), destination=COALESCE(?, destination),
+       lead_status=COALESCE(?, lead_status), application_stage=COALESCE(?, application_stage)
+     WHERE id=?`);
+
+    const findLead = db.prepare(`SELECT id, lead_id, client_name FROM leads WHERE (passport IS NOT NULL AND passport != '' AND UPPER(passport) = ?) OR LOWER(TRIM(client_name)) = ? LIMIT 1`);
+    const dateAdded = new Date().toISOString().slice(0, 10);
+
+    db.transaction(() => {
+      for (let i = 1; i < rawRows.length; i++) {
+        const r = rawRows[i];
+        if (!r || (!r[2] && !r[4])) continue;
+        const name = String(r[2] || "").trim();
+        if (!name || name.startsWith("interview") || name.startsWith("bank") || name.startsWith("solvency") || name.startsWith("passport")) continue;
+
+        const passport = r[4] ? String(r[4]).trim() : null;
+        const stRaw = String(r[8] || "").toLowerCase().trim();
+        const leadStatus = STATUS_MAP[stRaw] || "File Opened";
+        const appStage = STAGE_MAP[stRaw] || "documents";
+        const intakeRaw = String(r[5] || "").trim();
+        const intakeTerm = intakeRaw ? (intakeRaw.includes("202") ? intakeRaw : `${intakeRaw} 2026`) : "September 2026";
+        const degree = r[6] ? String(r[6]).trim() : null;
+        const major = r[7] ? String(r[7]).trim() : null;
+        const source = r[1] ? String(r[1]).trim() : "EduExpress";
+        const referrer = r[11] ? String(r[11]).trim() : null;
+        const driveLink = r[12] ? String(r[12]).trim() : null;
+        const nationality = r[3] ? String(r[3]).trim() : "Bangladesh";
+
+        const passportKey = passport ? passport.toUpperCase() : "___";
+        const existing = findLead.get(passportKey, name.toLowerCase());
+
+        if (existing) {
+          upd.run(source, referrer, nationality, passport, degree, major, major, intakeTerm, null, driveLink, "China", leadStatus, appStage, existing.id);
+          updated++;
+          importedList.push({ action: 'updated', id: existing.id, lead_id: existing.lead_id, name, passport, leadStatus, appStage });
+        } else {
+          const leadId = `LEAD-${String(nextSeq++).padStart(4, "0")}`;
+          const res = ins.run(leadId, dateAdded, name, null, null, "China", null, null, null, major, source, leadStatus, null, 0, 0, 0, source, referrer, nationality, passport, degree, major, intakeTerm, null, driveLink, 0, appStage, "Bangladesh", "B2C");
+          inserted++;
+          importedList.push({ action: 'inserted', id: res.lastInsertRowid, lead_id: leadId, name, passport, leadStatus, appStage });
+        }
+      }
+    })();
+
+    res.json({ success: true, count: importedList.length, inserted, updated, importedList });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/debug/db', (req, res) => requireAdmin(req, res, () => {
   try {
     const channels = db.prepare("SELECT id, type, name, page_id, active, status FROM channels").all();
