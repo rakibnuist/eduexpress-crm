@@ -182,7 +182,7 @@ function makeStatement(rawSql) {
         }
         changes = _db.getRowsModified();
         lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
-        if (write) scheduleSave();
+        if (write) immediatelySave();
         return { changes, lastInsertRowid };
       } catch (e) {
         if (handleFatalError(e, `run ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
@@ -328,5 +328,8 @@ process.on('SIGINT', () => {
   immediatelySave();
 });
 process.on('beforeExit', () => {
+  immediatelySave();
+});
+process.on('exit', () => {
   immediatelySave();
 });

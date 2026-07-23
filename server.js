@@ -19,24 +19,29 @@ const PERSISTENT_HOME = '/home/u898266115';
 const LOCAL_DB_PATH = join(__dirname, 'crm.db');
 let DB_PATH = process.env.DB_PATH;
 
-if (!DB_PATH || (process.platform === 'linux' && existsSync(PERSISTENT_HOME))) {
-  const persistentDir = join(PERSISTENT_HOME, 'crm-data');
-  let persistentOk = false;
-  try {
-    if (!existsSync(persistentDir)) {
-      mkdirSync(persistentDir, { recursive: true });
+if (!DB_PATH) {
+  if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
+    const persistentDir = join(PERSISTENT_HOME, 'crm-data');
+    let persistentOk = false;
+    try {
+      if (!existsSync(persistentDir)) {
+        mkdirSync(persistentDir, { recursive: true });
+      }
+      persistentOk = true;
+    } catch (err) {
+      console.error(`[database] Cannot create ${persistentDir}, falling back to app dir:`, err.message);
     }
-    persistentOk = true;
-  } catch (err) {
-    console.error(`[database] Cannot create ${persistentDir}, falling back to app dir:`, err.message);
-  }
 
-  if (persistentOk) {
-    DB_PATH = join(persistentDir, 'crm.db');
+    if (persistentOk) {
+      DB_PATH = join(persistentDir, 'crm.db');
+    } else {
+      // Hostinger denied write access to /home/u898266115 root — use app directory
+      DB_PATH = LOCAL_DB_PATH;
+    }
   } else {
-    // Hostinger denied write access to /home/u898266115 root — use app directory
     DB_PATH = LOCAL_DB_PATH;
   }
+}
 
   const restoreDbPath = join(__dirname, 'restore.db');
   if (existsSync(restoreDbPath)) {
