@@ -991,7 +991,7 @@ app.get('/api/application/meta', (req, res) => {
 // and destination (any configured destination). China data is isolated.
 app.get('/api/applications', (req, res) => {
   const where = [
-    "(l.application_stage IS NOT NULL OR l.lead_status IN ('Enrolled','File Opened'))",
+    "(l.application_stage IS NOT NULL AND l.application_stage != '' OR l.lead_status IN ('Enrolled','File Opened','Submitted','Processing','Admitted','Visa Approved') OR l.destination IS NOT NULL AND l.destination != '')",
   ];
   const params = {};
   if (canViewOwnLeadsOnly(req.user)) { // full admins + managers see all
@@ -1021,9 +1021,9 @@ app.get('/api/applications', (req, res) => {
   // Bangladesh channel filter (only meaningful when source_market is bangladesh or all)
   const bdChannel = req.query.bd_channel || 'all';
   if (bdChannel === 'office') {
-    where.push("(l.lead_type = 'B2C' OR l.lead_type IS NULL OR l.lead_type = '')");
+    where.push("(l.lead_type = 'B2C' OR l.lead_type IS NULL OR l.lead_type = '' OR l.source = 'In-House' OR l.source IS NULL)");
   } else if (bdChannel === 'b2b') {
-    where.push("(l.lead_type = 'B2B')");
+    where.push("(l.lead_type = 'B2B' OR l.source = 'B2B' OR l.source = 'Agent')");
   }
   
   // ── Destination filter (where the student GOES TO: Malaysia, Thailand, China, etc.) ──

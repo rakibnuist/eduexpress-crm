@@ -464,7 +464,7 @@ export default function Applications({ user }) {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             {/* Market Tabs */}
             <div className="bg-slate-100/90 p-1 rounded-2xl border border-slate-200/80 inline-flex flex-wrap gap-1">
-              <button onClick={() => { setSourceMarket('all'); setBdChannel('office'); }}
+              <button onClick={() => { setSourceMarket('all'); setBdChannel('all'); }}
                 className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${sourceMarket === 'all' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}>
                 🌐 All Markets
               </button>
@@ -476,7 +476,7 @@ export default function Applications({ user }) {
                 </button>
               )}
 
-              <button onClick={() => { setSourceMarket('bangladesh'); setBdChannel('office'); }}
+              <button onClick={() => { setSourceMarket('bangladesh'); setBdChannel('all'); }}
                 className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${sourceMarket === 'bangladesh' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}>
                 🇧🇩 Bangladesh Market <span className="text-[10px] opacity-80">(Source)</span>
               </button>
@@ -484,7 +484,11 @@ export default function Applications({ user }) {
 
             {/* Bangladesh Channel Sub-tabs */}
             {sourceMarket === 'bangladesh' && (
-              <div className="bg-slate-50 p-1 rounded-xl border border-slate-200/70 inline-flex gap-1">
+              <div className="bg-slate-50 p-1 rounded-xl border border-slate-200/70 inline-flex gap-1 flex-wrap">
+                <button onClick={() => setBdChannel('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/60'}`}>
+                  🌐 All Channels
+                </button>
                 <button onClick={() => setBdChannel('office')}
                   className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'office' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/60'}`}>
                   🏢 Office (In-House)
