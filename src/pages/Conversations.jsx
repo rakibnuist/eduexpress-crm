@@ -288,6 +288,11 @@ export default function Conversations({ user }) {
     setLoading(true);
     try {
       const p = { status: 'all', limit: 200, search: search.trim() || undefined };
+      if (channelTab.startsWith('channel_')) {
+        p.channel_id = channelTab.replace('channel_', '');
+      } else if (['whatsapp', 'messenger', 'instagram', 'tiktok'].includes(channelTab)) {
+        p.channel_type = channelTab;
+      }
       const res = await api.conversations(p);
       setConversations(res.conversations || []);
       
@@ -300,11 +305,16 @@ export default function Conversations({ user }) {
     } finally {
       setLoading(false);
     }
-  }, [search, toast, loadMessages]);
+  }, [channelTab, search, toast, loadMessages]);
 
   const refreshConversationsBackground = useCallback(async () => {
     try {
       const p = { status: 'all', limit: 200, search: search.trim() || undefined };
+      if (channelTab.startsWith('channel_')) {
+        p.channel_id = channelTab.replace('channel_', '');
+      } else if (['whatsapp', 'messenger', 'instagram', 'tiktok'].includes(channelTab)) {
+        p.channel_type = channelTab;
+      }
       const res = await api.conversations(p);
       if (res?.conversations) {
         setConversations(prev => {
@@ -325,7 +335,7 @@ export default function Conversations({ user }) {
     } catch (err) {
       console.warn('Background refresh error:', err);
     }
-  }, [search]);
+  }, [channelTab, search]);
 
   const refreshBgRef = useRef(refreshConversationsBackground);
   useEffect(() => {
@@ -339,9 +349,13 @@ export default function Conversations({ user }) {
       api.syncChannel(curr.channel_id).catch(err => {
         console.warn('Sync failed:', err.message);
       });
+    } else if (channelTab.startsWith('channel_')) {
+      const cid = channelTab.replace('channel_', '');
+      toast.info('Syncing channel with Meta…');
+      api.syncChannel(cid).catch(() => {});
     }
     await loadConversations();
-  }, [loadConversations, toast]);
+  }, [channelTab, loadConversations, toast]);
 
   const silentRefresh = useCallback(async () => {
     try {
