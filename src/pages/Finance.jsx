@@ -35,7 +35,7 @@ export default function Finance() {
   const [pnl, setPnl] = useState([]);
   const [settings, setSettings] = useState(null);
   const [modal, setModal] = useState(null);
-  const [month, setMonth] = useState('');
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [liveBalance, setLiveBalance] = useState(0);
   const [prevMonthData, setPrevMonthData] = useState({ income: 0, expenses: 0, profit: 0, balance: 0 });
 
@@ -605,7 +605,7 @@ export default function Finance() {
       {modal && modal.type !== 'initCash' && (
         <Modal title={`${modal.record ? 'Edit' : 'Add'} ${modal.type === 'income' ? 'Income' : 'Expense'}`} onClose={() => setModal(null)}>
           <FinanceForm type={modal.type} record={modal.record} settings={settings}
-            onSave={() => { setModal(null); load(); }} />
+            onSave={(newMonth) => { setModal(null); if (newMonth) setMonth(newMonth); load(); }} />
         </Modal>
       )}
     </div>
@@ -675,7 +675,7 @@ function FinanceForm({ type, record, settings, onSave }) {
         if (type === 'income') await api.createIncome(form);
         else await api.createExpense(form);
       }
-      onSave();
+      onSave(form.date ? form.date.slice(0, 7) : null);
     } finally { setSaving(false); }
   }
 
@@ -1000,8 +1000,10 @@ function BreakdownPanel({ title, rows, color }) {
 
 function CashflowEntryModal({ side, row, month, categories, employees, onClose, onSaved }) {
   const editing = !!row;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const defaultDate = row?.date || (month ? `${month}-${String(new Date().getDate()).padStart(2, '0')}` : todayStr);
   const [form, setForm] = useState({
-    date: row?.date || `${month}-${String(new Date().getDate()).padStart(2, '0')}`,
+    date: defaultDate,
     category: row?.category || '',
     client_name: row?.client_name || '',
     reference: row?.reference || '',
@@ -1033,7 +1035,7 @@ function CashflowEntryModal({ side, row, month, categories, employees, onClose, 
         if (editing) await api.updateExpense(row.id, payload);
         else await api.createExpense(payload);
       }
-      onSaved();
+      onSaved(form.date ? form.date.slice(0, 7) : null);
       toast.success(editing ? 'Entry updated' : `${side === 'in' ? 'Income' : 'Spend'} added`);
     } catch (err) { toast.error(err.message || 'Could not save'); }
     setSaving(false);
@@ -1475,7 +1477,7 @@ function InvestmentForm({ onSave, onCancel }) {
         payment_method: 'Bank Transfer',
       });
       toast.success(`Investment of ৳${Number(form.amount).toLocaleString()} recorded for ${form.client_name}`);
-      onSave();
+      onSave(form.date ? form.date.slice(0, 7) : null);
     } catch(e) {
       setErr(e.message);
       toast.error('Failed to record investment: ' + e.message);
