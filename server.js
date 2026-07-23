@@ -11146,7 +11146,8 @@ app.post('/api/admin/upload-db', express.raw({ type: '*/*', limit: '50mb' }), (r
 // Catch-all: serve React app for any non-API route (production)
 // Express v5 requires '/{*path}' instead of '*'
 if (process.env.NODE_ENV === 'production') {
-  app.get('/{*path}', (req, res) => {
+  app.get('/{*path}', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.sendFile(join(__dirname, 'dist', 'index.html'));
   });
