@@ -3783,8 +3783,13 @@ function upsertContact({ name, phone, wa_id, messenger_id, instagram_id, tiktok_
     : phone ? db.prepare("SELECT * FROM contacts WHERE phone=?").get(phone) : null;
 
   if (existing) {
-    if (name && (!existing.name || existing.name === 'Unknown' || existing.name.endsWith(' User'))) {
+    if (name && (!existing.name || existing.name === 'Unknown' || existing.name.endsWith(' User') || existing.name === 'no name')) {
       db.prepare("UPDATE contacts SET name=? WHERE id=?").run(name, existing.id);
+      if (existing.lead_id) {
+        try {
+          db.prepare("UPDATE leads SET client_name=? WHERE id=? AND (client_name IS NULL OR client_name='Unknown' OR client_name='Messenger User' OR client_name='WhatsApp User' OR client_name='Chat Lead' OR client_name='no name')").run(name, existing.lead_id);
+        } catch {}
+      }
       existing.name = name;
     }
     if (avatar_url && !existing.avatar_url) {
@@ -8658,7 +8663,13 @@ app.post('/webhook/meta', async (req, res) => {
             const pageToken = await resolvePageAccessToken(pageId, channel.access_token);
             const nr = await fetch(`https://graph.facebook.com/v19.0/${customerId}?fields=name,profile_pic&access_token=${pageToken}`);
             const nd = await nr.json();
-            if (nd.name) db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
+            if (nd.name) {
+              contact.name = nd.name;
+              db.prepare("UPDATE contacts SET name=? WHERE id=?").run(nd.name, contact.id);
+              if (contact.lead_id) {
+                db.prepare("UPDATE leads SET client_name=? WHERE id=? AND (client_name IS NULL OR client_name='Messenger User' OR client_name='Chat Lead' OR client_name='no name')").run(nd.name, contact.lead_id);
+              }
+            }
             if (nd.profile_pic) db.prepare("UPDATE contacts SET avatar_url=COALESCE(avatar_url,?) WHERE id=?").run(nd.profile_pic, contact.id);
           } catch {}
 
