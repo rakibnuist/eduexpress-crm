@@ -6307,7 +6307,7 @@ app.post('/api/import/file-updates-2026', (req, res) => {
     const findLead = db.prepare(`SELECT id, lead_id, client_name FROM leads WHERE (passport IS NOT NULL AND passport != '' AND UPPER(passport) = ?) OR LOWER(TRIM(client_name)) = ? LIMIT 1`);
     const dateAdded = new Date().toISOString().slice(0, 10);
 
-    db.transaction(() => {
+    const runImportTxn = db.transaction(() => {
       for (let i = 1; i < rawRows.length; i++) {
         const r = rawRows[i];
         if (!r || (!r[2] && !r[4])) continue;
@@ -6341,7 +6341,8 @@ app.post('/api/import/file-updates-2026', (req, res) => {
           importedList.push({ action: 'inserted', id: res.lastInsertRowid, lead_id: leadId, name, passport, leadStatus, appStage });
         }
       }
-    })();
+    });
+    runImportTxn();
 
     res.json({ success: true, count: importedList.length, inserted, updated, importedList });
   } catch (err) {
