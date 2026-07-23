@@ -1768,7 +1768,7 @@ export default function Conversations({ user }) {
                       <label className="text-[12px] font-semibold text-[#606770] mb-1 block">Destination</label>
                       <select value={newLeadDestination} onChange={e => setNewLeadDestination(e.target.value)}
                         className="w-full bg-[#f0f2f5] border-0 rounded-xl px-3 py-2.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#1877f2]/20">
-                        {['Bangladesh','China','Malta','Hungary','Greece','Estonia','Georgia','Malaysia','Thailand','Cyprus','UK','USA','Canada','Australia','Germany','France','India','Pakistan','Nepal','Italy'].map(d => (
+                        {(settings?.destinations?.length ? settings.destinations : ['Bangladesh','China','Malta','Thailand','Hungary','Greece','Estonia','Georgia','Malaysia','Cyprus','UK','USA','Canada','Australia','Germany','France']).map(d => (
                           <option key={d}>{d}</option>
                         ))}
                       </select>

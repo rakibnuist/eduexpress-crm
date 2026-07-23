@@ -1,4 +1,22 @@
 {
+  "malta": {
+    "name": "Malta",
+    "requirements": "- Minimum HSC / A-Levels with 55% marks\n- IELTS 5.5 or MOI / English Proficiency interview",
+    "programs": "- Information Technology\n- Business Administration\n- Hospitality & Tourism Management\n- Cyber Security",
+    "fees": "- Tuition: €4,000 - €7,000 per year\n- Living costs: €400 - €600 per month",
+    "embassy_documents": "- National D-Visa (Schengen Area)\n- Proof of accommodation & bank statement",
+    "application_processing": "- VFS Global appointment\n- Processing time: 3-5 weeks",
+    "other_details": "English Speaking Schengen Country in Europe. Full Schengen access with excellent part-time job opportunities."
+  },
+  "thailand": {
+    "name": "Thailand",
+    "requirements": "- High school completion / HSC\n- Basic English proficiency or MOI accepted",
+    "programs": "- International Business\n- Tourism & Hospitality\n- Engineering & Computer Science\n- International Relations",
+    "fees": "- Tuition: $2,500 - $5,500 per year\n- Very low living costs ($250 - $400 per month)",
+    "embassy_documents": "- Non-Immigrant ED Visa\n- University Admission Letter",
+    "application_processing": "- Thai Embassy in Dhaka\n- Fast processing (1-2 weeks)",
+    "other_details": "Popular Asian Study Destination with modern universities, affordable tuition, and rich cultural environment."
+  },
   "malaysia": {
     "name": "Malaysia",
     "requirements": "- HSC with minimum 2.5/3.0 GPA\n- IELTS 5.0-5.5 (or intensive English program upon arrival)",

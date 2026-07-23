@@ -104,6 +104,8 @@ export default function Settings() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+              <EditableCard icon={<Globe size={16} />} title="Global Destinations" color="blue"
+                listKey="settings_destinations" items={settings.destinations || []} onSaved={reloadSettings} />
               <EditableCard icon={<Funnel size={16} />} title="Lead Sources" color="orange"
                 listKey="settings_leadSources" items={settings.leadSources || []} onSaved={reloadSettings} />
               <EditableCard icon={<Tag size={16} />} title="Lead Statuses" color="sky"

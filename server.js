@@ -908,6 +908,22 @@ function isChinaBlockedForUser(lead, user) {
   return !leadIsVisibleTo(lead, user);
 }
 
+function getGlobalDestinations() {
+  const getList = (key, defaults) => {
+    const val = getConfig(key);
+    try { if (val) return JSON.parse(val); } catch {}
+    return defaults;
+  };
+  const defaults = ['China', 'Malta', 'Thailand', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'United Kingdom', 'Croatia', 'Cyprus', 'Finland', 'South Korea'];
+  const customConfig = getList('settings_destinations', []);
+  let dbDestinations = [];
+  try {
+    const rows = db.prepare("SELECT name FROM destinations").all();
+    dbDestinations = rows.map(r => r.name);
+  } catch {}
+  return Array.from(new Set([...customConfig, ...dbDestinations, ...defaults])).filter(Boolean);
+}
+
 // Reference: list of stages + doc templates (for the UI).
 app.get('/api/application/meta', (req, res) => {
   const getList = (key, defaults) => {
@@ -915,13 +931,7 @@ app.get('/api/application/meta', (req, res) => {
     try { if (val) return JSON.parse(val); } catch {}
     return defaults;
   };
-  const destinations = (function(){
-    try {
-      const rows = db.prepare("SELECT name FROM destinations").all();
-      if(rows.length > 0) return rows.map(r => r.name);
-    } catch(e){}
-    return ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand'];
-  })();
+  const destinations = getGlobalDestinations();
   const allSources = getList('settings_leadSources', ['In-House', 'B2B', 'China', 'Agent', 'Meta Lead Ad', 'WhatsApp', 'Messenger', 'Referral']);
   // Source markets align with business model (China = collect FROM China; Bangladesh = collect FROM Bangladesh)
   const sourceMarkets = [
@@ -9365,13 +9375,7 @@ app.get('/api/settings', (req, res) => {
     consultants: combinedConsultants,
     employees: activeEmployees,
     leadSources: getList('settings_leadSources', ['China Web Form','Web Lead (New)','Client Sheet','WhatsApp','Messenger','Facebook Ad','Instagram Ad','Referral','Walk-in','YouTube','Google Ad','Meta Lead Ad']),
-    destinations: (function(){
-      try {
-        const rows = db.prepare("SELECT name FROM destinations").all();
-        if(rows.length > 0) return rows.map(r => r.name);
-      } catch(e){}
-      return ['China', 'Malta', 'Hungary', 'Greece', 'Estonia', 'Georgia', 'Malaysia', 'Thailand'];
-    })(),
+    destinations: getGlobalDestinations(),
     intakes: (function(){
       try { return db.prepare("SELECT DISTINCT intake_term FROM leads WHERE intake_term IS NOT NULL AND intake_term != '' ORDER BY intake_term").all().map(r => r.intake_term); } catch(e){}
       return [];
