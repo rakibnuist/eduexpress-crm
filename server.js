@@ -58,9 +58,6 @@ if (!DB_PATH) {
       console.log(`[database] Copied bundled database to ${DB_PATH}`);
     } catch (err) {}
   }
-} else if (!DB_PATH) {
-  DB_PATH = LOCAL_DB_PATH;
-}
 const DB_DIR = dirname(DB_PATH);
 
 // ── Automated Pre-Upgrade Snapshot & Auto-Recovery Protection ──
