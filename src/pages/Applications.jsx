@@ -67,6 +67,57 @@ const STAGE_COLORS_LIST = [
   { bg: 'bg-sky-50',     border: 'border-sky-200',     pill: 'bg-sky-200 text-sky-800' },
 ];
 
+const COUNTRY_EMOJIS = {
+  china: '🇨🇳',
+  malta: '🇲🇹',
+  thailand: '🇹🇭',
+  hungary: '🇭🇺',
+  greece: '🇬🇷',
+  estonia: '🇪🇪',
+  georgia: '🇬🇪',
+  malaysia: '🇲🇾',
+  uk: '🇬🇧',
+  'united kingdom': '🇬🇧',
+  croatia: '🇭🇷',
+  cyprus: '🇨🇾',
+  finland: '🇫🇮',
+  'south korea': '🇰🇷',
+  korea: '🇰🇷',
+  bangladesh: '🇧🇩',
+  usa: '🇺🇸',
+  canada: '🇨🇦',
+  australia: '🇦🇺',
+  germany: '🇩🇪',
+  france: '🇫🇷'
+};
+
+const getCountryEmoji = (dest) => {
+  if (!dest) return '🎓';
+  const key = dest.toLowerCase().trim();
+  return COUNTRY_EMOJIS[key] || '📍';
+};
+
+const getAvatarGradient = (name) => {
+  if (!name) return 'from-blue-600 to-indigo-700';
+  const char = name.charCodeAt(0) || 0;
+  const gradients = [
+    'from-blue-600 to-indigo-700',
+    'from-emerald-600 to-teal-700',
+    'from-violet-600 to-purple-700',
+    'from-amber-500 to-orange-600',
+    'from-rose-500 to-pink-600',
+    'from-sky-600 to-cyan-700'
+  ];
+  return gradients[char % gradients.length];
+};
+
+const getInitials = (name) => {
+  if (!name) return 'ST';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 const DOC_STATUSES = [
   { key: 'pending',      label: 'Pending',      cls: 'bg-slate-100 text-slate-600 border-slate-200' },
   { key: 'received',     label: 'Received',     cls: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -324,178 +375,201 @@ export default function Applications({ user }) {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <GraduationCap size={22} className="text-blue-600" /> Applications Hub
-          </h2>
-          <p className="text-sm text-slate-500">
-            {filtered.length} active · {sourceMarket === 'all' ? 'All Markets' : sourceMarket === 'china' ? 'China Market' : 'Bangladesh Market'}
-            {sourceMarket === 'bangladesh' && ` · ${bdChannel === 'office' ? 'Office (In-House)' : 'B2B / Agent'}`}
-            {destinationFilter !== 'all' && ` · Destination: ${destinationFilter}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-
-          <button onClick={load} disabled={loading} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
-          {selectedIds.length > 0 && isFullAdmin(user) && (
-            <button onClick={() => setBulkDeleting(true)} className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-              <Trash2 size={16} /> Delete ({selectedIds.length})
-            </button>
-          )}
-          {(isFullAdmin(user) || userHasRole(user, 'application_manager')) && (
-            <button onClick={handleExportExcel} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-              <Download size={16} /> Export
-            </button>
-          )}
-          {!isAgentUser && (sourceMarket !== 'china' || canAddChinaApplication(user)) && (
-            <button onClick={() => {
-              setNewApp(prev => ({
-                ...prev,
-                destination: getDefaultDestinationForTab(),
-                source: getDefaultSourceForTab()
-              }));
-              setShowAddModal(true);
-            }} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-              <Plus size={16} /> Add Application
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════
-          SOURCE MARKET TABS (Business Model: China vs Bangladesh)
-          ═══════════════════════════════════════════════════════ */}
-      {!isAgentUser && (
-      <>
-      <div className="flex gap-2 border-b border-slate-200 pb-0">
-        <button onClick={() => { setSourceMarket('all'); setBdChannel('office'); }}
-          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'all' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-          All Markets
-        </button>
-        {/* China tab — visible only to Founder & CEO + Application Manager. Managing Director does NOT see this. */}
-        {canViewChinaData(user) && (
-          <button onClick={() => { setSourceMarket('china'); setBdChannel('all'); }}
-            className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'china' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            🇨🇳 China <span className="text-[10px] font-normal text-slate-400 ml-1">(Source)</span>
-          </button>
-        )}
-        <button onClick={() => { setSourceMarket('bangladesh'); setBdChannel('office'); }}
-          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 ${sourceMarket === 'bangladesh' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-          🇧🇩 Bangladesh <span className="text-[10px] font-normal text-slate-400 ml-1">(Source)</span>
-        </button>
-      </div>
-
-      {/* Bangladesh Channel Sub-tabs */}
-      {sourceMarket === 'bangladesh' && (
-        <div className="flex items-center gap-3">
-          <div className="flex gap-2">
-            <button onClick={() => setBdChannel('office')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'office' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              Office (In-House / B2C)
-            </button>
-            <button onClick={() => setBdChannel('b2b')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'b2b' ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              B2B / Agent
-            </button>
-          </div>
-          <div className="h-px flex-1 bg-slate-100" />
-        </div>
-      )}
-      </>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════
-          DESTINATION FILTER (syncable across the whole app)
-          ═══════════════════════════════════════════════════════ */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Globe size={14} className="text-slate-400" />
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Destination</span>
-          <select value={destinationFilter} onChange={e => setDestinationFilter(e.target.value)}
-            className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${destinationFilter !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-            <option value="all">All Destinations</option>
-            {settings?.destinations?.map(dest => <option key={dest} value={dest}>{dest}</option>)}
-          </select>
-          {destinationFilter !== 'all' && (
-            <button onClick={() => setDestinationFilter('all')}
-              className="text-xs text-slate-400 hover:text-rose-500 px-2 py-1 rounded-lg hover:bg-rose-50 transition-all">
-              <X size={12} />
-            </button>
-          )}
-        </div>
-        <p className="text-[10px] text-slate-400">Where the student goes TO study. Synced across app.</p>
-      </div>
-
-      {/* Stats Bar */}
-      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-        {[
-          { label: 'Total', value: stats.total, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Docs Ready', value: stats.docs, icon: FileText, color: 'text-slate-600', bg: 'bg-slate-50' },
-          { label: 'Submitted', value: stats.submitted, icon: ArrowRight, color: 'text-violet-600', bg: 'bg-violet-50' },
-          { label: 'Admitted', value: stats.admitted, icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: 'Visa Approved', value: stats.visa, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-          { label: 'Enrolled', value: stats.enrolled, icon: GraduationCap, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-        ].map(s => (
-          <div key={s.label} className={`${s.bg} rounded-xl border border-slate-200/60 p-3 flex items-center gap-3`}>
-            <s.icon size={16} className={s.color} />
+    <div className="space-y-5">
+      {/* Executive Banner Header */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
+        <div className="bg-blue-500/10 blur-3xl rounded-full absolute -right-10 -top-10 w-72 h-72 pointer-events-none" />
+        <div className="bg-indigo-500/10 blur-3xl rounded-full absolute -left-10 -bottom-10 w-72 h-72 pointer-events-none" />
+        
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="flex items-center gap-4">
+            <div className="w-13 h-13 rounded-2xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shadow-inner flex-shrink-0">
+              <GraduationCap size={28} />
+            </div>
             <div>
-              <p className="text-lg font-bold text-slate-800 leading-tight">{s.value}</p>
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{s.label}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-2xl font-black text-white tracking-tight">Applications Hub</h2>
+                <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 uppercase tracking-wider">
+                  {filtered.length} Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-300/80 mt-1 flex items-center gap-2 flex-wrap font-medium">
+                <span>{sourceMarket === 'all' ? '🌐 All Markets' : sourceMarket === 'china' ? '🇨🇳 China Market' : '🇧🇩 Bangladesh Market'}</span>
+                {sourceMarket === 'bangladesh' && <span className="opacity-75">· {bdChannel === 'office' ? '🏢 Office (In-House)' : '🤝 B2B / Partner Agent'}</span>}
+                {destinationFilter !== 'all' && <span className="opacity-90 font-semibold text-blue-300">· Destination: {getCountryEmoji(destinationFilter)} {destinationFilter}</span>}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button onClick={load} disabled={loading} title="Refresh data"
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-all active:scale-95 cursor-pointer backdrop-blur-md">
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            </button>
+
+            {selectedIds.length > 0 && isFullAdmin(user) && (
+              <button onClick={() => setBulkDeleting(true)}
+                className="flex items-center gap-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-rose-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                <Trash2 size={15} /> Delete ({selectedIds.length})
+              </button>
+            )}
+
+            {(isFullAdmin(user) || userHasRole(user, 'application_manager')) && (
+              <button onClick={handleExportExcel}
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                <Download size={15} /> Export Excel
+              </button>
+            )}
+
+            {!isAgentUser && (sourceMarket !== 'china' || canAddChinaApplication(user)) && (
+              <button onClick={() => {
+                setNewApp(prev => ({
+                  ...prev,
+                  destination: getDefaultDestinationForTab(),
+                  source: getDefaultSourceForTab()
+                }));
+                setShowAddModal(true);
+              }} className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                <Plus size={16} /> Add Application
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Source Market Segmented Tabs & Destination Filter Bar */}
+      {!isAgentUser && (
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-sm space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* Market Tabs */}
+            <div className="bg-slate-100/90 p-1 rounded-2xl border border-slate-200/80 inline-flex flex-wrap gap-1">
+              <button onClick={() => { setSourceMarket('all'); setBdChannel('office'); }}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${sourceMarket === 'all' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}>
+                🌐 All Markets
+              </button>
+
+              {canViewChinaData(user) && (
+                <button onClick={() => { setSourceMarket('china'); setBdChannel('all'); }}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${sourceMarket === 'china' ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}>
+                  🇨🇳 China Market <span className="text-[10px] opacity-80">(Source)</span>
+                </button>
+              )}
+
+              <button onClick={() => { setSourceMarket('bangladesh'); setBdChannel('office'); }}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${sourceMarket === 'bangladesh' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}>
+                🇧🇩 Bangladesh Market <span className="text-[10px] opacity-80">(Source)</span>
+              </button>
+            </div>
+
+            {/* Bangladesh Channel Sub-tabs */}
+            {sourceMarket === 'bangladesh' && (
+              <div className="bg-slate-50 p-1 rounded-xl border border-slate-200/70 inline-flex gap-1">
+                <button onClick={() => setBdChannel('office')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'office' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/60'}`}>
+                  🏢 Office (In-House)
+                </button>
+                <button onClick={() => setBdChannel('b2b')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${bdChannel === 'b2b' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/60'}`}>
+                  🤝 B2B / Agent
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Destination Pills */}
+          <div className="pt-2 border-t border-slate-100 flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1 flex-shrink-0 mr-1">
+              <Globe size={13} className="text-blue-500" /> Destination:
+            </span>
+            <button onClick={() => setDestinationFilter('all')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex-shrink-0 ${destinationFilter === 'all' ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+              🌐 All Destinations
+            </button>
+            {settings?.destinations?.map(dest => {
+              const active = destinationFilter === dest;
+              const flag = getCountryEmoji(dest);
+              return (
+                <button key={dest} onClick={() => setDestinationFilter(active ? 'all' : dest)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 flex-shrink-0 ${active ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md shadow-blue-500/20 scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300'}`}>
+                  <span>{flag}</span> {dest}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* KPI Stats Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {[
+          { label: 'Total Apps', value: stats.total, icon: BarChart3, border: 'border-blue-200', bg: 'from-blue-50/80 to-white', color: 'text-blue-600', iconBg: 'bg-blue-500/10' },
+          { label: 'Docs Ready', value: stats.docs, icon: FileText, border: 'border-slate-200', bg: 'from-slate-50/80 to-white', color: 'text-slate-700', iconBg: 'bg-slate-500/10' },
+          { label: 'Submitted', value: stats.submitted, icon: ArrowRight, border: 'border-violet-200', bg: 'from-violet-50/80 to-white', color: 'text-violet-600', iconBg: 'bg-violet-500/10' },
+          { label: 'Admitted', value: stats.admitted, icon: CheckCircle, border: 'border-emerald-200', bg: 'from-emerald-50/80 to-white', color: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
+          { label: 'Visa Approved', value: stats.visa, icon: CheckCircle2, border: 'border-green-200', bg: 'from-green-50/80 to-white', color: 'text-green-600', iconBg: 'bg-green-500/10' },
+          { label: 'Enrolled', value: stats.enrolled, icon: GraduationCap, border: 'border-indigo-200', bg: 'from-indigo-50/80 to-white', color: 'text-indigo-600', iconBg: 'bg-indigo-500/10' },
+        ].map(s => (
+          <div key={s.label} className={`bg-gradient-to-br ${s.bg} rounded-2xl border ${s.border} p-3.5 shadow-sm hover:shadow-md transition-all flex items-center justify-between`}>
+            <div>
+              <p className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{s.value}</p>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">{s.label}</p>
+            </div>
+            <div className={`w-10 h-10 rounded-xl ${s.iconBg} ${s.color} flex items-center justify-center flex-shrink-0`}>
+              <s.icon size={20} />
             </div>
           </div>
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm flex flex-wrap gap-2.5 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" className="pl-10 pr-9 h-10 bg-slate-50 border border-slate-200/80 rounded-xl text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all placeholder:text-slate-400"
-            placeholder="Search by name, phone, passport, university…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+      {/* Toolbar Filters */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-3.5 shadow-sm flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input type="text" className="pl-10 pr-9 h-10 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-medium w-full focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+            placeholder="Search student, phone, passport, university…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"><X size={14} /></button>
           )}
         </div>
+        
         <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
-          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterStage !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterStage !== 'all' ? 'border-blue-500 text-blue-700 bg-blue-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
           <option value="all">All Stages</option>
           {stages.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
+        
         <select value={filterUniversity} onChange={e => setFilterUniversity(e.target.value)}
-          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterUniversity !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          className={`h-10 min-w-[150px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterUniversity !== 'all' ? 'border-blue-500 text-blue-700 bg-blue-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
           <option value="all">All Universities</option>
           {universities.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
+        
         <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
-          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterSource !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterSource !== 'all' ? 'border-blue-500 text-blue-700 bg-blue-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
           <option value="all">All Sources</option>
           {meta.sources?.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
+        
         <select value={filterConsultant} onChange={e => setFilterConsultant(e.target.value)}
-          className={`h-10 min-w-[160px] px-3 py-2 border rounded-xl text-sm bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterConsultant !== 'all' ? 'border-blue-300 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+          className={`h-10 min-w-[150px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 ${filterConsultant !== 'all' ? 'border-blue-500 text-blue-700 bg-blue-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
           <option value="all">All Consultants</option>
           {consultants.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
 
         {isFilterActive && (
           <button onClick={() => { setSearchQuery(''); setFilterStage('all'); setFilterUniversity('all'); setFilterSource('all'); setFilterConsultant('all'); setDestinationFilter('all'); }}
-            className="flex items-center gap-1 h-10 text-xs text-slate-500 hover:text-rose-600 px-3 py-2 rounded-xl hover:bg-rose-50 transition-all font-semibold">
-            <X size={14} /> Clear
+            className="flex items-center gap-1.5 h-10 text-xs font-bold text-rose-600 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all border border-rose-200">
+            <X size={14} /> Clear Filters
           </button>
         )}
       </div>
 
-      {/* Stage Pills */}
+      {/* Stage Pipeline Buttons */}
       {stages.length > 0 && rows.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           <button onClick={() => setFilterStage('all')}
-            className={`flex-shrink-0 text-xs font-semibold px-3 py-2 rounded-xl border transition-all ${filterStage === 'all' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
-            All <span className="ml-1 opacity-75">{rows.length}</span>
+            className={`flex-shrink-0 text-xs font-bold px-3.5 py-2 rounded-xl border transition-all ${filterStage === 'all' ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300'}`}>
+            All Stages <span className="ml-1 opacity-75">({rows.length})</span>
           </button>
           {stages.map((s, index) => {
             const n = stageCounts[s.key] || 0;
@@ -503,11 +577,11 @@ export default function Applications({ user }) {
             const color = STAGE_COLORS[s.key] || STAGE_COLORS_LIST[index % STAGE_COLORS_LIST.length];
             return (
               <button key={s.key} onClick={() => setFilterStage(active ? 'all' : s.key)} disabled={n === 0}
-                className={`flex-shrink-0 flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl border transition-all
-                  ${active ? `${color.bg} border-current shadow-sm scale-[1.02]` : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${color.pill.split(' ')[0]}`} />
+                className={`flex-shrink-0 flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl border transition-all
+                  ${active ? `${color.bg} border-blue-500 shadow-md scale-[1.02] text-slate-900` : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 disabled:opacity-40 disabled:cursor-not-allowed'}`}>
+                <span className={`w-2 h-2 rounded-full ${color.pill.split(' ')[0]}`} />
                 {s.label}
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-white/60' : 'bg-slate-100'}`}>{n}</span>
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${active ? 'bg-white shadow-sm' : 'bg-slate-100'}`}>{n}</span>
               </button>
             );
           })}
@@ -708,35 +782,65 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {paginatedRows.map((r) => (
-              <tr key={r.id} onClick={() => onPick(r)} className="even:bg-slate-50/70 hover:bg-blue-50/60 transition-colors cursor-pointer">
-                <Td onClick={e => e.stopPropagation()}>
-                  <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={(e) => { if (e.target.checked) setSelectedIds(prev => [...prev, r.id]); else setSelectedIds(prev => prev.filter(id => id !== r.id)); }}
-                    className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
-                </Td>
-                <Td>
-                  <div className="font-medium text-slate-800">{r.client_name}</div>
-                  <div className="text-[11px] text-slate-400">{r.lead_id}</div>
-                </Td>
-                <Td>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border
-                    ${r.lead_market === 'China' ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : (r.lead_type === 'B2B') ? 'bg-violet-50 text-violet-700 border-violet-200 shadow-sm' : 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'}`}>
-                    {r.lead_market||''} / {r.lead_type||''} <br/> <span className="text-[10px] opacity-70">{r.source || ''}</span>
-                  </span>
-                </Td>
-                <Td>{r.destination || '—'}</Td>
-                <Td>{r.nationality || '—'}</Td>
-                <Td className="font-mono text-[12px]">{r.passport || '—'}</Td>
-                <Td>{r.intake_term || '—'}</Td>
-                <Td>{r.degree || '—'}</Td>
-                <Td className="max-w-[180px] truncate">{r.major || r.university || '—'}</Td>
-                <Td><span className="text-[11px] font-semibold text-slate-700">{stageLabel(r.application_stage)}</span></Td>
-                <Td className="max-w-[200px] truncate" title={r.uni_list}>{r.uni_list || '—'}</Td>
-                <Td>{r.employee_name || r.assigned_consultant || '—'}</Td>
-                <Td>{r.deposit ? fmtCurrency(r.deposit) : '—'}</Td>
-                <Td>{r.balance > 0 ? fmtCurrency(r.balance) : '—'}</Td>
-              </tr>
-            ))}
+            {paginatedRows.map((r) => {
+              const flag = getCountryEmoji(r.destination);
+              const stageInfo = STAGE_COLORS[r.application_stage] || { bg: 'bg-slate-100 text-slate-700', border: 'border-slate-200', pill: 'bg-slate-500' };
+              const initials = getInitials(r.client_name);
+              const avatarGrad = getAvatarGradient(r.client_name);
+
+              return (
+                <tr key={r.id} onClick={() => onPick(r)}
+                  className="even:bg-slate-50/50 hover:bg-blue-50/80 transition-all cursor-pointer group border-l-4 border-l-transparent hover:border-l-blue-600">
+                  <Td onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={(e) => { if (e.target.checked) setSelectedIds(prev => [...prev, r.id]); else setSelectedIds(prev => prev.filter(id => id !== r.id)); }}
+                      className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" />
+                  </Td>
+                  <Td>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${avatarGrad} text-white font-extrabold text-xs flex items-center justify-center shadow-sm flex-shrink-0`}>
+                        {initials}
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors text-xs sm:text-sm">{r.client_name}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-semibold">{r.lead_id}</span>
+                          {r.phone && <span className="text-[10px] text-slate-400 font-medium">{r.phone}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </Td>
+                  <Td>
+                    <div className="flex flex-col gap-1">
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border w-max
+                        ${r.lead_market === 'China' ? 'bg-amber-50 text-amber-800 border-amber-200 shadow-2xs' : (r.lead_type === 'B2B') ? 'bg-violet-50 text-violet-800 border-violet-200 shadow-2xs' : 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-2xs'}`}>
+                        {r.lead_market === 'China' ? '🇨🇳 China' : '🇧🇩 BD'} · {r.lead_type || 'B2C'}
+                      </span>
+                      {r.source && <span className="text-[10px] text-slate-400 font-medium truncate max-w-[120px]">{r.source}</span>}
+                    </div>
+                  </Td>
+                  <Td>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100/90 text-slate-800 font-bold text-xs border border-slate-200/70 shadow-2xs">
+                      <span>{flag}</span> {r.destination || 'Unspecified'}
+                    </span>
+                  </Td>
+                  <Td className="text-xs text-slate-600 font-medium">{r.nationality || '—'}</Td>
+                  <Td className="font-mono text-xs text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-200/50 w-max">{r.passport || '—'}</Td>
+                  <Td className="text-xs font-semibold text-slate-700">{r.intake_term || '—'}</Td>
+                  <Td><span className="text-xs font-semibold text-slate-700 px-2 py-0.5 rounded bg-slate-100">{r.degree || '—'}</span></Td>
+                  <Td className="max-w-[180px] truncate text-xs text-slate-700 font-medium" title={r.major || r.university}>{r.major || r.university || '—'}</Td>
+                  <Td>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-xl border shadow-2xs ${stageInfo.bg} ${stageInfo.border}`}>
+                      <span className={`w-2 h-2 rounded-full ${stageInfo.pill.split(' ')[0]} animate-pulse`} />
+                      {stageLabel(r.application_stage)}
+                    </span>
+                  </Td>
+                  <Td className="max-w-[200px] truncate text-xs text-slate-600 font-medium" title={r.uni_list}>{r.uni_list || '—'}</Td>
+                  <Td className="text-xs font-medium text-slate-700">{r.employee_name || r.assigned_consultant || '—'}</Td>
+                  <Td className="font-bold text-xs text-emerald-700">{r.deposit ? fmtCurrency(r.deposit) : '—'}</Td>
+                  <Td className="font-bold text-xs text-amber-700">{r.balance > 0 ? fmtCurrency(r.balance) : '—'}</Td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
