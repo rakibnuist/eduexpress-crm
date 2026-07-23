@@ -1114,6 +1114,8 @@ app.put('/api/leads/:id/stage', (req, res) => {
     service_fee, paid, last_education,
   } = req.body || {};
 
+  const majorVal = (major || program) ?? null;
+
   const stages = getApplicationStages();
   if (stage && !stages.some(s => s.key === stage)) {
     return res.status(400).json({ error: 'Unknown stage' });
@@ -1160,7 +1162,7 @@ app.put('/api/leads/:id/stage', (req, res) => {
       stage ?? null, visa_deadline ?? null, departure_date ?? null,
       university ?? null, intake_term ?? null, application_notes ?? null,
       source ?? null, req.body.lead_market ?? null, req.body.lead_type ?? null, req.body.lead_source ?? null, referrer ?? null, nationality ?? null, passport ?? null,
-      degree ?? null, major ?? null, drive_link ?? null,
+      degree ?? null, majorVal, drive_link ?? null,
       (deposit === '' || deposit == null) ? null : Number(deposit),
       blood_group ?? null, date_of_birth ?? null, medical_notes ?? null, emergency_contact ?? null,
       destination ?? null, assigned_consultant ?? null,
@@ -1766,6 +1768,8 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     try {
       db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
       db.prepare("UPDATE leads SET nationality='Bangladesh' WHERE (nationality IS NULL OR nationality='' OR nationality='—') AND (phone LIKE '+880%' OR lead_market='Bangladesh' OR lead_market IS NULL)").run();
+      db.prepare("UPDATE leads SET major=program WHERE (major IS NULL OR major='') AND program IS NOT NULL AND program!=''").run();
+      db.prepare("UPDATE leads SET program=major WHERE (program IS NULL OR program='') AND major IS NOT NULL AND major!=''").run();
       try { db.prepare("ALTER TABLE expenses ADD COLUMN student_name TEXT").run(); } catch {}
       try { db.prepare("ALTER TABLE expenses ADD COLUMN lead_id TEXT").run(); } catch {}
     } catch {}

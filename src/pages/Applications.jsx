@@ -854,7 +854,7 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
                   <Td className="font-mono text-xs text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-200/50 w-max">{r.passport || '—'}</Td>
                   <Td className="text-xs font-semibold text-slate-700">{r.intake_term || '—'}</Td>
                   <Td><span className="text-xs font-semibold text-slate-700 px-2 py-0.5 rounded bg-slate-100">{r.degree || '—'}</span></Td>
-                  <Td className="max-w-[180px] truncate text-xs text-slate-700 font-medium" title={r.major || r.university}>{r.major || r.university || '—'}</Td>
+                  <Td className="max-w-[180px] truncate text-xs text-slate-700 font-medium" title={r.major || r.program || r.university}>{r.major || r.program || r.university || '—'}</Td>
                   <Td>
                     <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-xl border shadow-2xs ${stageInfo.bg} ${stageInfo.border}`}>
                       <span className={`w-2 h-2 rounded-full ${stageInfo.pill.split(' ')[0]} animate-pulse`} />
@@ -991,6 +991,11 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
     setSaving(true);
     try {
       const payload = { ...form };
+      if (payload.major || payload.program) {
+        const m = payload.major || payload.program;
+        payload.major = m;
+        payload.program = m;
+      }
       // Sync assigned_consultant with assigned_employee_id
       if (payload.assigned_employee_id) {
         const emp = employees.find(e => e.id === Number(payload.assigned_employee_id));
@@ -1004,10 +1009,10 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
       payload.service_fee = (payload.service_fee === '' || payload.service_fee == null) ? null : Number(payload.service_fee);
       payload.paid = (payload.paid === '' || payload.paid == null) ? null : Number(payload.paid);
       payload.assigned_employee_id = (payload.assigned_employee_id === '' || payload.assigned_employee_id == null) ? null : Number(payload.assigned_employee_id);
-      await api.updateStage(leadId, payload);
+      await api.updateLead(leadId, payload);
       await load();
       onChanged?.();
-      toast.success('Saved');
+      toast.success('Saved details');
     }
     catch (e) { toast.error(e.message || 'Could not save'); }
     setSaving(false);
@@ -1093,7 +1098,7 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
                 <ExternalLink size={12} /> Drive
               </a>
             )}
-            <button onClick={() => setEditMode(e => !e)} className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${editMode ? 'bg-blue-600 text-white border-blue-500' : 'border-slate-600 text-slate-300 hover:bg-slate-800'}`}>
+            <button onClick={() => { if (editMode) saveAll(); setEditMode(e => !e); }} className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${editMode ? 'bg-blue-600 text-white border-blue-500' : 'border-slate-600 text-slate-300 hover:bg-slate-800'}`}>
               {editMode ? 'Done' : 'Edit'}
             </button>
             <button onClick={deleteLead} className="flex items-center gap-1.5 text-xs font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 px-3 py-1.5 rounded-lg border border-rose-800/50 transition-colors">
