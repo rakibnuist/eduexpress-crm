@@ -14,9 +14,9 @@ async function req(path, opts = {}, attempt = 1) {
     }
     throw new Error('Unauthorized');
   }
-  // Server is restarting or warming up — wait and retry transparently.
-  if (r.status === 503 && attempt <= 3) {
-    await new Promise(res => setTimeout(res, 800 * attempt));
+  // Server is restarting, warming up, or under temporary proxy load — wait and retry transparently.
+  if ([500, 502, 503, 504].includes(r.status) && attempt <= 3) {
+    await new Promise(res => setTimeout(res, 1000 * attempt));
     return req(path, opts, attempt + 1);
   }
   if (!r.ok) {
