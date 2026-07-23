@@ -976,6 +976,12 @@ app.get('/api/application/meta', (req, res) => {
     { key: 'office', label: 'Office (In-House)', sourceMatch: ['In-House'] },
     { key: 'b2b', label: 'B2B / Agent', sourceMatch: ['B2B', 'Agent'] }
   ];
+  const distinctCol = (col) => {
+    try {
+      return db.prepare(`SELECT DISTINCT ${col} AS val FROM leads WHERE ${col} IS NOT NULL AND ${col} != '' AND ${col} != '—' ORDER BY ${col} ASC LIMIT 100`).all().map(r => r.val);
+    } catch { return []; }
+  };
+
   res.json({ 
     stages: getApplicationStages(), 
     docTemplates: DOC_TEMPLATES, 
@@ -983,7 +989,17 @@ app.get('/api/application/meta', (req, res) => {
     destinations,
     sourceMarkets,
     bdChannels,
-    sources: allSources.map(s => ({ key: s, label: s }))
+    sources: allSources.map(s => ({ key: s, label: s })),
+    suggestions: {
+      majors: Array.from(new Set([...distinctCol('major'), ...distinctCol('program'), 'Computer Science & Technology', 'Digital Media Technology', 'International Economy & Trade', 'Civil Engineering', 'Business Administration', 'Software Engineering', 'Medicine / MBBS'])),
+      universities: Array.from(new Set([...distinctCol('university'), 'Sichuan University', 'Zhejiang University', 'Nanjing University of Science and Technology', 'Xian ShinYu University', 'Wuhan University', 'Tsinghua University'])),
+      referrers: distinctCol('referrer'),
+      degrees: Array.from(new Set([...distinctCol('degree'), 'Bachelor', 'Master', 'PhD / Doctorate', 'Diploma', 'Associate'])),
+      intakes: Array.from(new Set([...distinctCol('intake_term'), 'September 2026', 'March 2026', 'September 2027', 'March 2027'])),
+      lastEducations: Array.from(new Set([...distinctCol('last_education'), 'HSC · Science', 'HSC · Business Studies', 'HSC · Humanities', 'A-Levels', 'Bachelor Degree', 'Diploma in Engineering'])),
+      englishScores: Array.from(new Set([...distinctCol('english_score'), 'IELTS 6.5', 'IELTS 6.0', 'MOI (Medium of Instruction)', 'Duolingo 110', 'No IELTS'])),
+      nationalities: Array.from(new Set([...distinctCol('nationality'), 'Bangladesh', 'China', 'India', 'Pakistan', 'Nepal']))
+    }
   });
 });
 
@@ -5528,9 +5544,19 @@ app.get('/api/leads/:id', (req, res) => {
 // Whitelist exactly the columns we persist so unknown fields in req.body
 // can't slip into the SQL.
 function leadParams(d, lead_id, balance) {
-  const num = v => v === '' || v == null ? 0 : Number(v);
-  const txt = v => (v === '' || v == null) ? null : v;
-  let assigned_employee_id = d.assigned_employee_id ? Number(d.assigned_employee_id) : null;
+  const num = v => {
+    if (v === '' || v == null) return 0;
+    const n = Number(v);
+    return isNaN(n) ? 0 : n;
+  };
+  const numNull = v => {
+    if (v === '' || v == null) return null;
+    const n = Number(v);
+    return isNaN(n) ? null : n;
+  };
+  const txt = v => (v === '' || v == null) ? null : String(v).trim();
+
+  let assigned_employee_id = numNull(d.assigned_employee_id);
   let assigned_consultant = txt(d.assigned_consultant);
   // If employee_id is provided but consultant name is not, resolve from employees table
   if (assigned_employee_id && !assigned_consultant) {
@@ -5549,16 +5575,18 @@ function leadParams(d, lead_id, balance) {
     }
   }
 
+  const majorVal = txt(d.major || d.program);
+
   return {
-    lead_id, balance,
+    lead_id, balance: isNaN(Number(balance)) ? 0 : Number(balance),
     date_added: d.date_added || new Date().toISOString().slice(0,10),
-    client_name: d.client_name,
-    phone: phone, email: d.email,
+    client_name: txt(d.client_name),
+    phone: phone, email: txt(d.email),
     destination: txt(d.destination),
     last_education: txt(d.last_education),
-    gpa: d.gpa === '' || d.gpa == null ? null : Number(d.gpa),
+    gpa: numNull(d.gpa),
     english_score: txt(d.english_score),
-    program: txt(d.program || d.major),
+    program: majorVal,
     lead_source: d.lead_source || 'Manual',
     lead_status: d.lead_status || 'New Lead',
     assigned_employee_id,
@@ -5582,7 +5610,7 @@ function leadParams(d, lead_id, balance) {
       return nat;
     })(),
     passport: txt(d.passport),
-    degree: txt(d.degree), major: txt(d.major),
+    degree: txt(d.degree), major: majorVal,
     intake_term: txt(d.intake_term), university: txt(d.university),
     drive_link: txt(d.drive_link), deposit: num(d.deposit),
     // Academic additions
@@ -5595,17 +5623,17 @@ function leadParams(d, lead_id, balance) {
     payment_agreement: txt(d.payment_agreement),
     hardcopy_status: txt(d.hardcopy_status),
     hardcopy_documents: txt(d.hardcopy_documents),
-    age: num(d.age),
+    age: numNull(d.age),
     // Active application stage
     application_stage: txt(d.application_stage),
     // Market & Agent Portal
     lead_market: txt(d.lead_market) || 'Bangladesh',
-    agency_id: d.agency_id ? Number(d.agency_id) : null,
+    agency_id: numNull(d.agency_id),
     lead_type: txt(d.lead_type) || 'B2C',
     // Ad Attribution
     ad_name: txt(d.ad_name),
     page_name: txt(d.page_name),
-    channel_id: d.channel_id ? Number(d.channel_id) : null,
+    channel_id: numNull(d.channel_id),
   };
 }
 
@@ -5670,6 +5698,36 @@ app.post('/api/leads', async (req, res) => {
     d.destination = 'Bangladesh';
     d.source = d.source || 'In-House';
   }
+  // Deduplication check: if lead with phone number or exact name exists, update existing record to prevent duplicate entries
+  if (d.phone || d.client_name) {
+    let existing = null;
+    if (d.phone && String(d.phone).trim().length >= 8) {
+      const cleanPhone = String(d.phone).trim();
+      existing = db.prepare("SELECT * FROM leads WHERE phone=? OR phone LIKE ?").get(cleanPhone, `%${cleanPhone.slice(-8)}`);
+    }
+    if (!existing && d.client_name && d.client_name.trim().length >= 3) {
+      existing = db.prepare("SELECT * FROM leads WHERE TRIM(LOWER(client_name)) = TRIM(LOWER(?))").get(d.client_name.trim());
+    }
+    if (existing) {
+      // Update existing lead status to File Opened & application_stage to documents instead of creating duplicate
+      db.prepare(`UPDATE leads SET
+        lead_status = 'File Opened',
+        application_stage = COALESCE(NULLIF(application_stage,''), 'documents'),
+        destination = COALESCE(?, destination),
+        degree = COALESCE(?, degree),
+        major = COALESCE(?, major),
+        university = COALESCE(?, university),
+        intake_term = COALESCE(?, intake_term)
+        WHERE id=?`).run(
+          d.destination || null, d.degree || null, d.major || d.program || null,
+          d.university || null, d.intake_term || null, existing.id
+        );
+      const updatedLead = db.prepare("SELECT * FROM leads WHERE id=?").get(existing.id);
+      logActivity({ type: 'lead_updated_via_app', actor: req.user, lead: updatedLead, details: { note: 'Merged duplicate application entry into existing student record' } });
+      return res.json(updatedLead);
+    }
+  }
+
   const lead_id = d.lead_id || (isChinaApp ? nextChinaLeadId() : nextLeadId());
   const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
   if (isAgent(req.user)) {

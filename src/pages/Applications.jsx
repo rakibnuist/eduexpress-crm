@@ -305,6 +305,36 @@ export default function Applications({ user }) {
     return unique([...fromRows, ...defaults]);
   }, [rows]);
 
+  const referrers = useMemo(() => {
+    const fromRows = rows.map(r => r.referrer).filter(Boolean);
+    const fromMeta = meta?.suggestions?.referrers || [];
+    return unique([...fromRows, ...fromMeta, 'BheUni', 'Mahmud', 'Mukta Rahaman']);
+  }, [rows, meta]);
+
+  const intakes = useMemo(() => {
+    const fromRows = rows.map(r => r.intake_term).filter(Boolean);
+    const fromMeta = meta?.suggestions?.intakes || [];
+    return unique([...fromRows, ...fromMeta, 'September 2026', 'March 2026', 'September 2027', 'March 2027']);
+  }, [rows, meta]);
+
+  const lastEducations = useMemo(() => {
+    const fromRows = rows.map(r => r.last_education).filter(Boolean);
+    const fromMeta = meta?.suggestions?.lastEducations || [];
+    return unique([...fromRows, ...fromMeta, 'HSC · Science', 'HSC · Business Studies', 'HSC · Humanities', 'A-Levels', 'Bachelor Degree', 'Diploma in Engineering']);
+  }, [rows, meta]);
+
+  const englishScores = useMemo(() => {
+    const fromRows = rows.map(r => r.english_score).filter(Boolean);
+    const fromMeta = meta?.suggestions?.englishScores || [];
+    return unique([...fromRows, ...fromMeta, 'IELTS 6.5 / MOI', 'IELTS 6.0', 'MOI (Medium of Instruction)', 'Duolingo 110', 'No IELTS']);
+  }, [rows, meta]);
+
+  const nationalities = useMemo(() => {
+    const fromRows = rows.map(r => r.nationality).filter(Boolean);
+    const fromMeta = meta?.suggestions?.nationalities || [];
+    return unique([...fromRows, ...fromMeta, 'Bangladesh', 'China', 'India', 'Pakistan', 'Nepal']);
+  }, [rows, meta]);
+
   const consultants = useMemo(() => {
     // Use settings.consultants (same source as Leads & Settings) for consistent filter list
     const list = (settings?.consultants || []).map(name => ({ value: name, label: name }));
@@ -621,6 +651,15 @@ export default function Applications({ user }) {
       ) : (
         <TableView rows={filtered} onPick={setSelected} stages={stages} selectedIds={selectedIds} setSelectedIds={setSelectedIds} user={user} sortConfig={sortConfig} setSortConfig={setSortConfig} />
       )}
+
+      {/* Global Auto-Suggestion Datalists */}
+      <datalist id="app-major-list">{majors.map(m => <option key={m} value={m} />)}</datalist>
+      <datalist id="app-uni-list">{universities.map(u => <option key={u} value={u} />)}</datalist>
+      <datalist id="app-referrer-list">{referrers.map(r => <option key={r} value={r} />)}</datalist>
+      <datalist id="app-intake-list">{intakes.map(i => <option key={i} value={i} />)}</datalist>
+      <datalist id="app-last-edu-list">{lastEducations.map(e => <option key={e} value={e} />)}</datalist>
+      <datalist id="app-english-list">{englishScores.map(e => <option key={e} value={e} />)}</datalist>
+      <datalist id="app-nationality-list">{nationalities.map(n => <option key={n} value={n} />)}</datalist>
 
       {selected && <ApplicationPanel leadId={selected.id} stages={stages} onClose={() => setSelected(null)} onChanged={load} user={user} employees={employees} settings={settings} />}
 
@@ -1170,25 +1209,25 @@ function ApplicationPanel({ leadId, stages = [], onClose, onChanged, user, emplo
             <Field label="Full name" value={form.client_name} onChange={v => updateField('client_name', v)} placeholder="e.g. Md Saiful Haque" disabled={!editMode} />
             <Field label="Phone" value={form.phone} onChange={v => updateField('phone', v)} placeholder="+8801XXX-XXXXXX" disabled={!editMode} />
             <Field label="Email" value={form.email} onChange={v => updateField('email', v)} placeholder="student@example.com" type="email" disabled={!editMode} />
-            <Field label="Nationality" value={form.nationality} onChange={v => updateField('nationality', v)} placeholder="Bangladesh" disabled={!editMode} />
+            <Field label="Nationality" value={form.nationality} onChange={v => updateField('nationality', v)} placeholder="Bangladesh" disabled={!editMode} list="app-nationality-list" />
             <Field label="Passport number" value={form.passport} onChange={v => updateField('passport', v)} placeholder="A12345678" mono disabled={!editMode} />
           </div>
 
           {/* Academic & Program */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Destination" type="select" value={form.destination} onChange={v => updateField('destination', v)} options={['', ...(settings?.destinations || ['China', 'Malta', 'Hungary', 'Greece', 'Estonia'])]} disabled={!editMode} />
-            <Field label="Intake" value={form.intake_term} onChange={v => updateField('intake_term', v)} placeholder="September 2026" disabled={!editMode} />
+            <Field label="Intake" value={form.intake_term} onChange={v => updateField('intake_term', v)} placeholder="September 2026" disabled={!editMode} list="app-intake-list" />
             <Field label="Degree" type="select" value={form.degree} onChange={v => updateField('degree', v)} options={['', ...DEGREES]} disabled={!editMode} />
             <Field label="Major / Program" value={form.major} onChange={v => updateField('major', v)} placeholder="International Economy" disabled={!editMode} list="app-major-list" />
             <Field label="Primary university" value={form.university} onChange={v => updateField('university', v)} placeholder="e.g. Sichuan University" disabled={!editMode} list="app-uni-list" />
-            <Field label="English score" value={form.english_score} onChange={v => updateField('english_score', v)} placeholder="IELTS 6.5 / MOI" disabled={!editMode} />
-            <Field label="Last education" value={form.last_education} onChange={v => updateField('last_education', v)} placeholder="HSC · Science" disabled={!editMode} />
+            <Field label="English score" value={form.english_score} onChange={v => updateField('english_score', v)} placeholder="IELTS 6.5 / MOI" disabled={!editMode} list="app-english-list" />
+            <Field label="Last education" value={form.last_education} onChange={v => updateField('last_education', v)} placeholder="HSC · Science" disabled={!editMode} list="app-last-edu-list" />
           </div>
 
           {/* Source & Assignment */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Source (Remark)" type="select" value={form.source} onChange={v => updateField('source', v)} options={['', 'In-House', 'B2B', 'China', 'Agent']} disabled={!editMode} />
-            <Field label="Referrer" value={form.referrer} onChange={v => updateField('referrer', v)} placeholder="e.g. BheUni, Mahmud" disabled={!editMode} />
+            <Field label="Referrer" value={form.referrer} onChange={v => updateField('referrer', v)} placeholder="e.g. BheUni, Mahmud" disabled={!editMode} list="app-referrer-list" />
             <Field label="Lead source" type="select" value={form.lead_source} onChange={v => updateField('lead_source', v)} options={['', ...(settings?.leadSources || [])]} disabled={!editMode} />
             <Field label="Next follow-up" type="date" value={form.next_followup} onChange={v => updateField('next_followup', v)} disabled={!editMode} />
           </div>
