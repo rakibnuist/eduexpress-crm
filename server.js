@@ -839,7 +839,8 @@ function getApplicationStages() {
     'Final Settlement',
     'Pre-Departure & Flight',
     'Arrival & Enrollment',
-    'Documents Withdraw'
+    'Documents Withdraw',
+    'Application Withdraw'
   ]);
   return list.map((label, order) => {
     let key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -855,7 +856,8 @@ function getApplicationStages() {
     if (key === 'final_settlement' || key === 'payment') key = 'payment';
     if (key === 'pre_departure_flight' || key === 'air_ticket') key = 'air_ticket';
     if (key === 'arrival_enrollment' || key === 'fly') key = 'fly';
-    if (key === 'documents_withdraw' || key === 'document_withdraw' || key === 'documents_withdrawn' || key === 'withdraw') key = 'documents_withdraw';
+    if (key === 'documents_withdraw' || key === 'document_withdraw' || key === 'documents_withdrawn') key = 'documents_withdraw';
+    if (key === 'application_withdraw' || key === 'application_withdrawn' || key === 'app_withdraw' || key === 'withdraw') key = 'application_withdraw';
     return { key, label, order };
   });
 }
@@ -1109,14 +1111,27 @@ app.get('/api/applications', (req, res) => {
     ORDER BY l.id DESC`).all(params);
 
   const stages = getApplicationStages();
-  const defaultStageKey = stages[0]?.key || 'documents';
-  // Sort rows dynamically in memory based on the order of stages from Settings list
+
+  function getIntakeSortVal(term) {
+    if (!term) return 0;
+    const match = String(term).match(/(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Spring|Fall|Autumn|Winter)?\s*(\d{4})/i);
+    if (!match) return 0;
+    const monthMap = {
+      january: 1, jan: 1, spring: 3, march: 3, mar: 3, april: 4, apr: 4, may: 5, june: 6, jun: 6,
+      july: 7, jul: 7, august: 8, aug: 8, fall: 9, autumn: 9, september: 9, sep: 9, october: 10, oct: 10,
+      november: 11, nov: 11, december: 12, dec: 12, winter: 12
+    };
+    const mStr = (match[1] || '').toLowerCase();
+    const month = monthMap[mStr] || 6;
+    const year = parseInt(match[2]);
+    return year * 100 + month;
+  }
+
+  // Sort rows dynamically: Latest Intake first, then latest application ID DESC
   rows.sort((a, b) => {
-    const stageA = a.application_stage || defaultStageKey;
-    const stageB = b.application_stage || defaultStageKey;
-    const orderA = stages.find(s => s.key === stageA)?.order ?? 0;
-    const orderB = stages.find(s => s.key === stageB)?.order ?? 0;
-    if (orderA !== orderB) return orderA - orderB;
+    const intakeA = getIntakeSortVal(a.intake_term);
+    const intakeB = getIntakeSortVal(b.intake_term);
+    if (intakeA !== intakeB) return intakeB - intakeA;
     return b.id - a.id;
   });
 

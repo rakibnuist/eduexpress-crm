@@ -49,8 +49,8 @@ const STAGE_COLORS = {
   visa_rejected:      { bg: 'bg-red-50 text-red-800',      border: 'border-red-200',     pill: 'bg-red-200 text-red-800' },
   enrolled:           { bg: 'bg-emerald-100 text-emerald-800', border: 'border-emerald-300', pill: 'bg-emerald-600 text-white font-bold' },
   cancelled:          { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300',   pill: 'bg-slate-500 text-white' },
-  withdraw:           { bg: 'bg-rose-100 text-rose-800', border: 'border-rose-300', pill: 'bg-rose-600 text-white font-bold' },
-  documents_withdraw: { bg: 'bg-rose-100 text-rose-800', border: 'border-rose-300', pill: 'bg-rose-600 text-white font-bold' },
+  documents_withdraw:   { bg: 'bg-rose-50 text-rose-800', border: 'border-rose-300', pill: 'bg-rose-600 text-white font-bold' },
+  application_withdraw: { bg: 'bg-red-50 text-red-800', border: 'border-red-300', pill: 'bg-red-700 text-white font-bold' },
 };
 
 const STAGE_COLORS_LIST = [
@@ -178,10 +178,26 @@ export default function Applications({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [filterUniversity, setFilterUniversity] = useState('all');
+  const [filterIntake, setFilterIntake] = useState('all');
   const [filterConsultant, setFilterConsultant] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: null, dir: 'asc' });
   const [hideEmptyColumns, setHideEmptyColumns] = useState(() => localStorage.getItem('hide_empty_cols') === 'true');
+
+  function getIntakeSortVal(term) {
+    if (!term) return 0;
+    const match = String(term).match(/(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Spring|Fall|Autumn|Winter)?\s*(\d{4})/i);
+    if (!match) return 0;
+    const monthMap = {
+      january: 1, jan: 1, spring: 3, march: 3, mar: 3, april: 4, apr: 4, may: 5, june: 6, jun: 6,
+      july: 7, jul: 7, august: 8, aug: 8, fall: 9, autumn: 9, september: 9, sep: 9, october: 10, oct: 10,
+      november: 11, nov: 11, december: 12, dec: 12, winter: 12
+    };
+    const mStr = (match[1] || '').toLowerCase();
+    const month = monthMap[mStr] || 6;
+    const year = parseInt(match[2]);
+    return year * 100 + month;
+  }
 
   const [newApp, setNewApp] = useState({
     client_name: '', phone: '', nationality: 'Bangladesh', destination: '', degree: 'Bachelor', major: '',
@@ -211,7 +227,7 @@ export default function Applications({ user }) {
   useEffect(() => { localStorage.setItem('global_destination', destinationFilter); }, [destinationFilter]);
   useEffect(() => { localStorage.setItem('app_view', view); }, [view]);
   useEffect(() => { localStorage.setItem('hide_empty_cols', hideEmptyColumns); }, [hideEmptyColumns]);
-  useEffect(() => { setSelectedIds([]); }, [sourceMarket, bdChannel, destinationFilter, view, filterStage, filterUniversity, filterConsultant, filterSource, searchQuery]);
+  useEffect(() => { setSelectedIds([]); }, [sourceMarket, bdChannel, destinationFilter, view, filterStage, filterIntake, filterUniversity, filterConsultant, filterSource, searchQuery]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -232,6 +248,9 @@ export default function Applications({ user }) {
     let list = [...rows];
     if (filterStage !== 'all') {
       list = list.filter(r => (r.application_stage || stages[0]?.key || 'documents') === filterStage);
+    }
+    if (filterIntake !== 'all') {
+      list = list.filter(r => (r.intake_term || '') === filterIntake);
     }
     if (filterUniversity !== 'all') {
       list = list.filter(r => (r.university || '').toLowerCase().includes(filterUniversity.toLowerCase()) || (r.uni_list || '').toLowerCase().includes(filterUniversity.toLowerCase()));
@@ -259,9 +278,16 @@ export default function Applications({ user }) {
         if (typeof av === 'number' && typeof bv === 'number') return sortConfig.dir === 'asc' ? av - bv : bv - av;
         return sortConfig.dir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
       });
+    } else {
+      list.sort((a, b) => {
+        const intakeA = getIntakeSortVal(a.intake_term);
+        const intakeB = getIntakeSortVal(b.intake_term);
+        if (intakeA !== intakeB) return intakeB - intakeA;
+        return b.id - a.id;
+      });
     }
     return list;
-  }, [rows, filterStage, filterUniversity, filterConsultant, filterSource, searchQuery, sortConfig, stages]);
+  }, [rows, filterStage, filterIntake, filterUniversity, filterConsultant, filterSource, searchQuery, sortConfig, stages]);
 
   const stageCounts = useMemo(() => {
     const m = Object.fromEntries(stages.map(s => [s.key, 0]));
@@ -350,7 +376,7 @@ export default function Applications({ user }) {
     return list.sort((a, b) => a.label.localeCompare(b.label));
   }, [rows, settings]);
 
-  const isFilterActive = filterStage !== 'all' || filterUniversity !== 'all' || filterConsultant !== 'all' || filterSource !== 'all' || searchQuery || destinationFilter !== 'all';
+  const isFilterActive = filterStage !== 'all' || filterIntake !== 'all' || filterUniversity !== 'all' || filterConsultant !== 'all' || filterSource !== 'all' || searchQuery || destinationFilter !== 'all';
 
   const handleBulkDelete = async () => {
     if (!selectedIds.length) return;
@@ -595,6 +621,12 @@ export default function Applications({ user }) {
           {stages.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
         
+        <select value={filterIntake} onChange={e => setFilterIntake(e.target.value)}
+          className={`h-10 min-w-[140px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[170px] ${filterIntake !== 'all' ? 'border-indigo-500 text-indigo-700 bg-indigo-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+          <option value="all">All Intakes</option>
+          {intakes.map(i => <option key={i} value={i}>{i}</option>)}
+        </select>
+
         <select value={filterUniversity} onChange={e => setFilterUniversity(e.target.value)}
           className={`h-10 min-w-[150px] px-3 py-2 border rounded-xl text-xs font-semibold bg-white transition-all cursor-pointer focus:ring-2 focus:ring-blue-100 max-w-[180px] ${filterUniversity !== 'all' ? 'border-blue-500 text-blue-700 bg-blue-50/50' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
           <option value="all">All Universities</option>
@@ -614,7 +646,7 @@ export default function Applications({ user }) {
         </select>
 
         {isFilterActive && (
-          <button onClick={() => { setSearchQuery(''); setFilterStage('all'); setFilterUniversity('all'); setFilterSource('all'); setFilterConsultant('all'); setDestinationFilter('all'); }}
+          <button onClick={() => { setSearchQuery(''); setFilterStage('all'); setFilterIntake('all'); setFilterUniversity('all'); setFilterSource('all'); setFilterConsultant('all'); setDestinationFilter('all'); }}
             className="flex items-center gap-1.5 h-10 text-xs font-bold text-rose-600 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 transition-all border border-rose-200">
             <X size={14} /> Clear Filters
           </button>
@@ -897,7 +929,16 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
                   </Td>
                   <Td className="text-xs text-slate-600 font-medium">{r.nationality || '—'}</Td>
                   <Td className="font-mono text-xs text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-200/50 w-max">{r.passport || '—'}</Td>
-                  <Td className="text-xs font-semibold text-slate-700">{r.intake_term || '—'}</Td>
+                  <Td>
+                    {r.intake_term ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50/80 text-indigo-700 border border-indigo-200/70 text-xs font-extrabold shadow-2xs">
+                        <CalendarClock size={12} className="text-indigo-500 flex-shrink-0" />
+                        {r.intake_term}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-xs font-medium">—</span>
+                    )}
+                  </Td>
                   <Td><span className="text-xs font-semibold text-slate-700 px-2 py-0.5 rounded bg-slate-100">{r.degree || '—'}</span></Td>
                   <Td className="max-w-[180px] truncate text-xs text-slate-700 font-medium" title={r.major || r.program || r.university}>{r.major || r.program || r.university || '—'}</Td>
                   <Td>
