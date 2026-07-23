@@ -1725,6 +1725,8 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     db.resumeSave(); // Resume and perform a single batched save
     try {
       db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
+      try { db.prepare("ALTER TABLE expenses ADD COLUMN student_name TEXT").run(); } catch {}
+      try { db.prepare("ALTER TABLE expenses ADD COLUMN lead_id TEXT").run(); } catch {}
     } catch {}
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
@@ -6508,17 +6510,28 @@ app.get('/api/expenses', (req, res) => {
 });
 app.post('/api/expenses', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes,employee_id) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes,@employee_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null });
+  const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes,employee_id,student_name,lead_id) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes,@employee_id,@student_name,@lead_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null, lead_id: d.lead_id || null });
   const row = db.prepare("SELECT * FROM expenses WHERE id=?").get(info.lastInsertRowid);
-  logActivity({ type: 'expense_recorded', actor: req.user, amount: row.amount, details: { paid_to: row.paid_to, category: row.category, reference: row.reference } });
+  logActivity({ type: 'expense_recorded', actor: req.user, amount: row.amount, details: { paid_to: row.paid_to, category: row.category, reference: row.reference, student_name: row.student_name, lead_id: row.lead_id } });
   res.json(row);
 });
 app.put('/api/expenses/:id', (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  db.prepare(`UPDATE expenses SET date=@date,month=@month,category=@category,paid_to=@paid_to,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null });
+  db.prepare(`UPDATE expenses SET date=@date,month=@month,category=@category,paid_to=@paid_to,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id,student_name=@student_name,lead_id=@lead_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null, lead_id: d.lead_id || null });
   res.json(db.prepare("SELECT * FROM expenses WHERE id=?").get(req.params.id));
 });
 app.delete('/api/expenses/:id', (req, res) => { db.prepare("DELETE FROM expenses WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+
+app.get('/api/students-list', (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, university, application_stage, lead_status
+    FROM leads
+    WHERE client_name IS NOT NULL AND client_name != '' AND client_name != 'Messenger User' AND client_name != 'no name'
+    ORDER BY client_name ASC
+    LIMIT 500
+  `).all();
+  res.json(rows);
+});
 
 app.get('/api/pnl', (req, res) => {
   const months = db.prepare("SELECT DISTINCT month FROM (SELECT month FROM income UNION SELECT month FROM expenses) WHERE month IS NOT NULL ORDER BY month").all().map(r => r.month);

@@ -7,7 +7,7 @@ import {
   Plus, Trash2, Pencil, TrendingUp, TrendingDown, DollarSign,
   Wallet, ArrowDownCircle, ArrowUpCircle, Activity,
   PiggyBank, ChevronLeft, ChevronRight, Save, Settings as Cog,
-  Search, Filter, ArrowUpRight, ArrowDownRight, BarChart3, Receipt, CreditCard, Landmark, LayoutDashboard, Calendar, X, Zap, Users
+  Search, Filter, ArrowUpRight, ArrowDownRight, BarChart3, Receipt, CreditCard, Landmark, LayoutDashboard, Calendar, X, Zap, Users, GraduationCap
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -564,7 +564,15 @@ export default function Finance() {
                           <td className="py-2.5 px-4 text-xs text-slate-400 font-medium">{idx + 1}</td>
                           <td className="py-2.5 px-4 text-slate-600">{r.date}</td>
                           <td className="py-2.5 px-4 text-slate-600">{r.category || '—'}</td>
-                          <td className="py-2.5 px-4 text-slate-600">{r.paid_to || '—'}</td>
+                          <td className="py-2.5 px-4 text-slate-600">
+                            <div>{r.paid_to || '—'}</div>
+                            {r.student_name && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md mt-0.5">
+                                <GraduationCap size={12} className="text-blue-600" />
+                                {r.student_name} {r.lead_id ? `(${r.lead_id})` : ''}
+                              </span>
+                            )}
+                          </td>
                           <td className="py-2.5 px-4 text-slate-500 text-xs">{r.reference || '—'}</td>
                           <td className="py-2.5 px-4 text-right font-bold text-rose-600 tabular-nums">{cFmt(r.amount)}</td>
                           <td className="py-2.5 px-4 text-slate-500 text-xs max-w-[200px] truncate">{r.notes || '—'}</td>
@@ -662,8 +670,37 @@ function EmptyFinance({ onAdd }) {
 function FinanceForm({ type, record, settings, onSave }) {
   const [form, setForm] = useState(record || { date: new Date().toISOString().slice(0, 10) });
   const [saving, setSaving] = useState(false);
+  const [students, setStudents] = useState([]);
   const cats = type === 'income' ? settings?.incomeCategories || [] : settings?.expenseCategories || [];
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    api.studentsList()
+      .then(data => setStudents(data || []))
+      .catch(() => {});
+  }, []);
+
+  const studentCategories = ['Visa', 'Visa Fee', 'Application Fee', 'App Fee', 'Air Ticket', 'Ticket', 'Medical', 'Service Charge', 'File Opening', 'Application Deposit', 'Tuition Fee'];
+  const isStudentRelated = studentCategories.some(c => (form.category || '').toLowerCase().includes(c.toLowerCase()));
+
+  const handleStudentSelect = (e) => {
+    const val = e.target.value;
+    if (!val) {
+      set('student_name', '');
+      set('client_name', '');
+      set('lead_id', '');
+      return;
+    }
+    const sel = students.find(s => String(s.id) === String(val) || String(s.lead_id) === String(val));
+    if (sel) {
+      set('student_name', sel.client_name);
+      set('client_name', sel.client_name);
+      set('lead_id', sel.lead_id || `L-${sel.id}`);
+      if (type === 'expenses' && !form.paid_to && form.category) {
+        set('paid_to', `${form.category} - ${sel.client_name}`);
+      }
+    }
+  };
 
   async function submit(e) {
     e.preventDefault(); setSaving(true);
@@ -695,6 +732,7 @@ function FinanceForm({ type, record, settings, onSave }) {
             value={form.amount || ''} onChange={e => set('amount', e.target.value)} />
         </div>
       </div>
+
       <div>
         <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Category</label>
         <select
@@ -704,20 +742,65 @@ function FinanceForm({ type, record, settings, onSave }) {
           {cats.map(c => <option key={c}>{c}</option>)}
         </select>
       </div>
-      {type === 'income' && (
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Lead ID</label>
-          <input
-            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
-            value={form.lead_id || ''} onChange={e => set('lead_id', e.target.value)} placeholder="L-00001" />
+
+      {/* Student / Application sync dropdown */}
+      <div className={`p-3 rounded-xl transition-all ${isStudentRelated ? 'bg-blue-50/70 border border-blue-200' : 'bg-slate-50/60 border border-slate-200/60'}`}>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <GraduationCap size={15} className="text-blue-600" /> Student Name / Application Sync
+          </label>
+          {isStudentRelated && (
+            <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">
+              Linked for {form.category}
+            </span>
+          )}
         </div>
-      )}
+
+        <select
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none mb-2"
+          value={students.find(s => s.client_name === (form.student_name || form.client_name) || (s.lead_id && s.lead_id === form.lead_id))?.id || ''}
+          onChange={handleStudentSelect}>
+          <option value="">— Select Student / Application —</option>
+          {students.map(s => (
+            <option key={s.id} value={s.id}>
+              {s.client_name} ({s.lead_id || `ID:${s.id}`}) {s.destination ? `• ${s.destination}` : ''}
+            </option>
+          ))}
+        </select>
+
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Student Name</label>
+            <input
+              type="text"
+              placeholder="e.g. Ilhan"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+              value={form.student_name || form.client_name || ''}
+              onChange={e => {
+                set('student_name', e.target.value);
+                set('client_name', e.target.value);
+              }}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Lead / App ID</label>
+            <input
+              type="text"
+              placeholder="e.g. L-00042"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+              value={form.lead_id || ''}
+              onChange={e => set('lead_id', e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
       {type === 'expenses' && (
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Paid To</label>
           <input
             className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
-            value={form.paid_to || ''} onChange={e => set('paid_to', e.target.value)} />
+            value={form.paid_to || ''} onChange={e => set('paid_to', e.target.value)} placeholder="e.g. Chinese VISA Center" />
         </div>
       )}
       <div>

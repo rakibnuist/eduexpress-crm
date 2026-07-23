@@ -145,6 +145,7 @@ export const api = {
   cashflowCategories: ()       => req('/cashflow/categories'),
   cashflowInvestors:  ()       => req('/cashflow/investors'),
   setInitialCash:     (amount) => req('/cashflow/initial', { method: 'PUT', body: JSON.stringify({ amount }) }),
+  studentsList:       ()       => req('/students-list'),
 
   // Broadcasts (owner sticky notes)
   broadcasts:        ()        => req('/broadcasts'),
