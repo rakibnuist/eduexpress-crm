@@ -3,17 +3,33 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, copyFileSync } from 'fs';
+import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, copyFileSync, renameSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join, resolve } from 'path';
+import { dirname, extname, join } from 'path';
 import { createRequire } from 'module';
-import { initDatabase, isDead } from './sqldb.js';
+import { initDatabase, isDead, validateDatabaseBuffer } from './sqldb.js';
 import { initWaLinked, connectWaLinked, logoutWaLinked, getWaLinkedStatus, isWaLinkedConnected, sendWaLinkedMessage } from './wa-linked.js';
 
 const require = createRequire(import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || process.env.LSNODE_SOCKET || 3001;
+const INTERNAL_API_KEY = String(process.env.INTERNAL_API_KEY || '');
+const WEBSITE_WEBHOOK_SECRET = String(process.env.WEBSITE_WEBHOOK_SECRET || '');
+const N8N_WELCOME_WEBHOOK = String(process.env.N8N_WELCOME_WEBHOOK || '');
+const META_WEBHOOK_VERIFY_TOKEN = String(process.env.META_WEBHOOK_VERIFY_TOKEN || '');
+const RUN_DATA_BACKFILLS = process.env.RUN_DATA_BACKFILLS === 'true';
+
+function safeSecretEqual(provided, expected) {
+  if (!provided || !expected) return false;
+  const a = Buffer.from(String(provided));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function isInternalApiRequest(req) {
+  return safeSecretEqual(req.headers['x-api-key'], INTERNAL_API_KEY);
+}
 
 const PERSISTENT_HOME = '/home/u898266115';
 const LOCAL_DB_PATH = join(__dirname, 'crm.db');
@@ -43,20 +59,30 @@ if (!DB_PATH) {
   }
 }
 
-  const restoreDbPath = join(__dirname, 'restore.db');
-  if (existsSync(restoreDbPath)) {
-    try {
-      try { unlinkSync(restoreDbPath); } catch {}
-    } catch (err) {
-      console.error(`[database] Restore failed:`, err.message);
+const DB_DIR = dirname(DB_PATH);
+const restoreDbPath = join(DB_DIR, 'restore.db');
+if (existsSync(restoreDbPath)) {
+  try {
+    const backupDir = join(DB_DIR, 'backups');
+    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
+    if (existsSync(DB_PATH)) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      copyFileSync(DB_PATH, join(backupDir, `crm_pre_restore_${timestamp}.db`));
     }
-  } else if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH) && DB_PATH !== LOCAL_DB_PATH) {
+    const stagedRestorePath = `${DB_PATH}.restore.tmp`;
+    copyFileSync(restoreDbPath, stagedRestorePath);
+    renameSync(stagedRestorePath, DB_PATH);
+    unlinkSync(restoreDbPath);
+    console.log(`[database] Pending restore applied atomically to ${DB_PATH}`);
+  } catch (err) {
+    console.error('[database] Restore failed; existing database was kept:', err.message);
+  }
+} else if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH) && DB_PATH !== LOCAL_DB_PATH) {
     try {
       copyFileSync(LOCAL_DB_PATH, DB_PATH);
       console.log(`[database] Copied bundled database to ${DB_PATH}`);
     } catch (err) {}
-  }
-const DB_DIR = dirname(DB_PATH);
+}
 
 // ── Automated Pre-Upgrade Snapshot & Auto-Recovery Protection ──
 try {
@@ -67,21 +93,29 @@ try {
   const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
 
   if (dbSize > 100000) {
-    // DB has valid data: take an automated snapshot before initializing
-    const timeStr = new Date().toISOString().replace(/[:.]/g, '-');
-    const snapshotPath = join(backupDir, `crm_upgrade_snapshot_${timeStr}.db`);
-    fs.copyFileSync(DB_PATH, snapshotPath);
-    console.log(`[database] 🛡️ Pre-upgrade snapshot created: ${snapshotPath}`);
+    // DB has valid data: take an automated snapshot before initializing, but
+    // avoid creating another full copy when the latest snapshot is identical.
+    const snapshots = fs.readdirSync(backupDir)
+      .filter(file => file.startsWith('crm_upgrade_snapshot_') && file.endsWith('.db'))
+      .sort();
+    const latestSnapshot = snapshots.length ? join(backupDir, snapshots.at(-1)) : null;
+    const databaseHash = crypto.createHash('sha256').update(fs.readFileSync(DB_PATH)).digest('hex');
+    const latestHash = latestSnapshot && fs.existsSync(latestSnapshot)
+      ? crypto.createHash('sha256').update(fs.readFileSync(latestSnapshot)).digest('hex')
+      : null;
 
-    // Retain 30 most recent snapshots
-    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort();
-    if (files.length > 30) {
-      files.slice(0, files.length - 30).forEach(f => {
-        try { fs.unlinkSync(join(backupDir, f)); } catch {}
-      });
+    if (databaseHash !== latestHash) {
+      const timeStr = new Date().toISOString().replace(/[:.]/g, '-');
+      const snapshotPath = join(backupDir, `crm_upgrade_snapshot_${timeStr}.db`);
+      fs.copyFileSync(DB_PATH, snapshotPath);
+      console.log(`[database] 🛡️ Pre-upgrade snapshot created: ${snapshotPath}`);
+    } else {
+      console.log('[database] Existing pre-upgrade snapshot already matches the database.');
     }
-  } else {
-    // If DB is missing or fresh/empty (<100KB), auto-restore from latest snapshot!
+
+  } else if (!fs.existsSync(DB_PATH)) {
+    // Only restore automatically when the database is truly missing. A small
+    // existing database may be valid and must never be overwritten implicitly.
     const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort();
     if (files.length > 0) {
       const latest = files.pop();
@@ -90,18 +124,9 @@ try {
         fs.copyFileSync(latestPath, DB_PATH);
         console.log(`[database] 🛡️ Auto-restored database from latest snapshot: ${latest}`);
       }
-    } else {
-      // Fallback: check for corrupt- backup files
-      const corruptFiles = fs.readdirSync(DB_DIR).filter(f => f.startsWith('crm.db.corrupt-')).sort();
-      if (corruptFiles.length > 0) {
-        const latestCorrupt = corruptFiles.pop();
-        const corruptPath = join(DB_DIR, latestCorrupt);
-        if (fs.statSync(corruptPath).size > 100000) {
-          fs.copyFileSync(corruptPath, DB_PATH);
-          console.log(`[database] Auto-recovered database from corrupt backup: ${latestCorrupt}`);
-        }
-      }
     }
+  } else {
+    console.warn(`[database] Existing database is small (${dbSize} bytes); leaving it untouched.`);
   }
 } catch (err) {
   console.error('[database] Snapshot safeguard error:', err.message);
@@ -115,7 +140,6 @@ function logToFile(msg) {
     appendFileSync(LOG_PATH, `[${time}] ${msg}\n`);
   } catch {}
 }
-import { appendFileSync } from 'fs';
 const originalLog = console.log;
 const originalError = console.error;
 console.log = (...args) => {
@@ -128,12 +152,39 @@ console.error = (...args) => {
 };
 
 console.log('[startup] Port detected:', PORT, 'type:', typeof PORT);
-console.log('[startup] Env keys:', Object.keys(process.env).join(', '));
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (e.g. Hostinger's reverse proxy)
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '50mb' }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      mediaSrc: ["'self'", 'blob:', 'https:'],
+      connectSrc: ["'self'", 'https:'],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
+}));
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: configuredCorsOrigins.length ? configuredCorsOrigins : false,
+  credentials: true,
+}));
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl?.startsWith('/webhook/meta')) req.rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Rate limiting — prevent brute-force and abuse
@@ -158,28 +209,39 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Upload quota exceeded, please try again later.' },
 });
+const websiteWebhookLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many lead submissions, please try again later.' },
+});
+const portalWriteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many portal updates, please try again later.' },
+});
 app.use(standardLimiter);
 // Emergency admin reset — gated behind a secret key (RESET_KEY env var).
 // Without a configured key the endpoint is fully disabled, so it can never be
 // abused by an anonymous visitor. Rate-limited to blunt brute-force attempts.
-app.get('/api/auth/emergency-reset', authLimiter, (req, res) => {
-  const expected = process.env.RESET_KEY || getConfig('reset_key') || '';
+app.post('/api/auth/emergency-reset', authLimiter, (req, res) => {
+  const expected = process.env.RESET_KEY || '';
   if (!expected) {
     return res.status(404).json({ error: 'Not found' }); // disabled until RESET_KEY is set
   }
-  const provided = String(req.query.key || '');
-  // Constant-time comparison to avoid leaking the key via timing
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
-  if (!ok) {
+  if (!dbReady || !db) return res.status(503).json({ error: 'Server is starting' });
+  const provided = String(req.headers['x-reset-key'] || req.body?.key || '');
+  if (!safeSecretEqual(provided, expected)) {
     return res.status(404).json({ error: 'Not found' }); // hide existence on wrong/missing key
   }
 
-  // Optional custom password: ?password=... (min 8 chars); otherwise a strong random one is issued.
-  const newPassword = typeof req.query.password === 'string' && req.query.password.length >= 8
-    ? req.query.password
-    : crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+  // Optional custom password in the JSON body (min 12 chars); otherwise a strong random one is issued.
+  const newPassword = typeof req.body?.password === 'string' && req.body.password.length >= 12
+    ? req.body.password
+    : crypto.randomBytes(18).toString('base64url');
   const newHash = hashPassword(newPassword);
 
   try {
@@ -231,9 +293,12 @@ if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
       try {
         const files = readdirSync(LOCAL_UPLOADS_DIR);
         files.forEach(file => {
-          copyFileSync(join(LOCAL_UPLOADS_DIR, file), join(PERSISTENT_UPLOADS_DIR, file));
+          const destination = join(PERSISTENT_UPLOADS_DIR, file);
+          if (!existsSync(destination)) {
+            copyFileSync(join(LOCAL_UPLOADS_DIR, file), destination);
+          }
         });
-        console.log(`[uploads] Auto-migrated ${files.length} uploads to persistent path.`);
+        console.log('[uploads] Existing uploads checked for non-destructive migration.');
       } catch (err) {
         console.error(`[uploads] Uploads migration failed:`, err.message);
       }
@@ -247,7 +312,15 @@ if (!UPLOADS_DIR || UPLOADS_DIR === LOCAL_UPLOADS_DIR) {
     mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 }
-app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  setHeaders: (res, filePath) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    if (['.pdf', '.doc', '.docx', '.txt'].includes(extname(filePath).toLowerCase())) {
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+  },
+}));
 
 // ─── AUTH primitives ───────────────────────────────────────────────────────
 // Get or create persistent stable JWT_SECRET if process.env.JWT_SECRET is not set
@@ -332,26 +405,9 @@ app.get('/health', (_req, res) => {
   res.json({ status: dbReady ? 'ready' : 'starting' });
 });
 
-app.get('/diagnose-db', (req, res) => {
-  try {
-    if (!db) return res.status(503).json({ error: 'Database loading...' });
-    const fs = require('fs');
-    const size = existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-    const integrity = db.prepare("PRAGMA integrity_check").get();
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-    const userCount = db.prepare("SELECT COUNT(*) as c FROM users").get().c;
-    const leadsCount = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
-    const recentLeads = db.prepare("SELECT id, lead_id, client_name, lead_status, application_stage, destination, lead_market, lead_type, source, date_added, created_at FROM leads ORDER BY id DESC LIMIT 15").all();
-    res.json({ db_path: DB_PATH, size, integrity, tables_count: tables.length, userCount, leadsCount, recentLeads, tables });
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
-
 // Block all API calls until DB is ready, and return 503 cleanly if the WASM
 // instance died from OOM (the process is restarting itself in the background).
 app.use((req, res, next) => {
-  console.log('[request]', req.method, req.path);
   if (req.path.startsWith('/api')) {
     if (isDead()) {
       return res.status(503).json({ error: 'Server is restarting — please retry in a few seconds.' });
@@ -365,120 +421,130 @@ app.use((req, res, next) => {
 
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
-  const { email, password, lat, lng, ssid, device_id } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
-  
-  const queryVal = String(email).trim().toLowerCase();
-  // Find user matching email, name, consultant_name, or emp_id (case-insensitive lookup)
-  const user = db.prepare(`
-    SELECT * FROM users 
-    WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(consultant_name) = ? OR LOWER(emp_id) = ?) 
-      AND active = 1
-  `).get(queryVal, queryVal, queryVal, queryVal);
-
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Invalid username/email or password' });
-  }
-
-  // ── Network & Location enforcement ────────────────────────────────────────
-  // Login is only permitted from the office network and/or office location.
-  // • SSID check  — enforced when client sends an SSID value AND allowed list is configured.
-  //                 (Browsers cannot detect SSID, so this only fires from a native/PWA app.)
-  // • Geo check   — enforced when office lat/lng are stored in config.
-  //                 All browsers that grant location permission are gated by this.
-  // If neither config is set the check is skipped (safe for initial setup).
-  // Admins may log in from anywhere — they are exempt from the office network
-  // and geofence gates (their password has already been verified above).
-  // Load multi-roles for token and enforcement
-  const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
-  if (userRoles.length === 0) {
-    const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
-    userRoles.push(roleMap[user.role] || user.role || 'consultant');
-  }
-
-  const enforceLocation = !isFullAdmin(user) && !userRoles.includes('agent'); // Full admins & agents exempt from location enforcement
-  const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
-  const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
-
-  // Build allowed SSIDs list: JSON array in office_allowed_ssids, fallback to single office_wifi_ssid
-  let allowedSSIDs = [];
-  try { allowedSSIDs = JSON.parse(getConfig('office_allowed_ssids') || '[]'); } catch {}
-  if (!Array.isArray(allowedSSIDs) || allowedSSIDs.length === 0) {
-    const single = getConfig('office_wifi_ssid');
-    if (single) allowedSSIDs = [single];
-  }
-
-  const officeLat = parseFloat(getConfig('office_lat'));
-  const officeLng = parseFloat(getConfig('office_lng'));
-  const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
-
-  if (enforceLocation) {
-    let ssidPassed = false;
-    let ssidFailed = false;
-    if (ssid && allowedSSIDs.length > 0) {
-      ssidPassed = allowedSSIDs.some(s =>
-        String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
-      );
-      if (!ssidPassed) ssidFailed = true;
-    }
-
-    let geoPassed = false;
-    let geoFailed = false;
-    let distFromOffice = null;
-    if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
-      if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
-        distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
-        if (distFromOffice <= officeRadius) {
-          geoPassed = true;
-        } else {
-          geoFailed = true;
-        }
-      } else {
-        console.warn(`[login] User ${email} logged in without location coordinates`);
-      }
-    }
-
-    // Allow login to proceed. Geofence is only for auto-attendance.
-    if (!ssidPassed && !geoPassed) {
-      if (geoFailed) {
-        console.warn(`[login] User ${email} logged in from outside office radius. Geofence is for attendance only, allowing login.`);
-      }
-    }
-  }
-  // ── End enforcement ────────────────────────────────────────────────────────
-
-  db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-  // Roles are loaded above
-  const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
-  setAuthCookie(res, token);
-
-  // Auto attendance (best-effort; never blocks login if it fails)
-  let attendance = null;
   try {
-    attendance = autoCheckIn(user, {
-      lat: Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : undefined,
-      lng: Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : undefined,
-      ssid,
-      device_id,
-    });
-  } catch (e) { console.error('[auto-attendance]', e.message); }
+    const { email, password, lat, lng, ssid, device_id } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
+    
+    const queryVal = String(email).trim().toLowerCase();
+    // Find user matching email, name, consultant_name, or emp_id (case-insensitive lookup)
+    const user = db.prepare(`
+      SELECT * FROM users 
+      WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(COALESCE(consultant_name, '')) = ? OR LOWER(COALESCE(emp_id, '')) = ?) 
+        AND active = 1
+    `).get(queryVal, queryVal, queryVal, queryVal);
 
-  res.json({
-    id: user.id, email: user.email, name: user.name, role: user.role, roles: userRoles,
-    consultant_name: user.consultant_name, emp_id: user.emp_id,
-    attendance, // { ok, created/alreadyIn/reason, time, status }
-  });
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid username/email or password' });
+    }
+
+    // ── Network & Location enforcement ────────────────────────────────────────
+    // Login is only permitted from the office network and/or office location.
+    // • SSID check  — enforced when client sends an SSID value AND allowed list is configured.
+    //                 (Browsers cannot detect SSID, so this only fires from a native/PWA app.)
+    // • Geo check   — enforced when office lat/lng are stored in config.
+    //                 All browsers that grant location permission are gated by this.
+    // If neither config is set the check is skipped (safe for initial setup).
+    // Admins may log in from anywhere — they are exempt from the office network
+    // and geofence gates (their password has already been verified above).
+    // Load multi-roles for token and enforcement
+    const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+    if (userRoles.length === 0) {
+      const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
+      userRoles.push(roleMap[user.role] || user.role || 'consultant');
+    }
+
+    const enforceLocation = !isFullAdmin({ ...user, roles: userRoles }) && !userRoles.includes('agent'); // Full admins & agents exempt from location enforcement
+    const parsedLat = Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : NaN;
+    const parsedLng = Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : NaN;
+
+    // Build allowed SSIDs list: JSON array in office_allowed_ssids, fallback to single office_wifi_ssid
+    let allowedSSIDs = [];
+    try { allowedSSIDs = JSON.parse(getConfig('office_allowed_ssids') || '[]'); } catch {}
+    if (!Array.isArray(allowedSSIDs) || allowedSSIDs.length === 0) {
+      const single = getConfig('office_wifi_ssid');
+      if (single) allowedSSIDs = [single];
+    }
+
+    const officeLat = parseFloat(getConfig('office_lat'));
+    const officeLng = parseFloat(getConfig('office_lng'));
+    const officeRadius = parseInt(getConfig('office_radius_m')) || 200;
+
+    if (enforceLocation) {
+      let ssidPassed = false;
+      if (ssid && allowedSSIDs.length > 0) {
+        ssidPassed = allowedSSIDs.some(s =>
+          String(s).toLowerCase().trim() === String(ssid).toLowerCase().trim()
+        );
+      }
+
+      let geoPassed = false;
+      let geoFailed = false;
+      if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
+        if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+          const distFromOffice = haversineMeters(officeLat, officeLng, parsedLat, parsedLng);
+          if (distFromOffice <= officeRadius) {
+            geoPassed = true;
+          } else {
+            geoFailed = true;
+          }
+        } else {
+          console.warn(`[login] User ${email} logged in without location coordinates`);
+        }
+      }
+
+      // Allow login to proceed. Geofence is only for auto-attendance.
+      if (!ssidPassed && !geoPassed) {
+        if (geoFailed) {
+          console.warn(`[login] User ${email} logged in from outside office radius. Geofence is for attendance only, allowing login.`);
+        }
+      }
+    }
+    // ── End enforcement ────────────────────────────────────────────────────────
+
+    db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
+    // Roles are loaded above
+    const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
+    setAuthCookie(res, token);
+
+    // Auto attendance (best-effort; never blocks login if it fails)
+    let attendance = null;
+    try {
+      attendance = autoCheckIn(user, {
+        lat: Number.isFinite(parseFloat(lat)) ? parseFloat(lat) : undefined,
+        lng: Number.isFinite(parseFloat(lng)) ? parseFloat(lng) : undefined,
+        ssid,
+        device_id,
+      });
+    } catch (e) { console.error('[auto-attendance]', e.message); }
+
+    res.json({
+      id: user.id, email: user.email, name: user.name, role: user.role, roles: userRoles,
+      consultant_name: user.consultant_name, emp_id: user.emp_id, agency_id: user.agency_id,
+      attendance, // { ok, created/alreadyIn/reason, time, status }
+    });
+  } catch (err) {
+    console.error('[login error]', err.message, err.stack);
+    res.status(500).json({ error: 'Login failed due to a server error. Please try again.' });
+  }
 });
 
 app.post('/api/auth/logout', (_req, res) => { clearAuthCookie(res); res.json({ ok: true }); });
 
 app.get('/api/admin/logs', (req, res) => {
-  const apiKey = req.headers['x-api-key'] || req.query.key;
-  const cookie = getCookie(req, AUTH_COOKIE);
-  let payload = null;
-  try { payload = verifyToken(cookie); } catch {}
-  const isAdmin = payload && payload.role === 'admin';
-  if (apiKey !== 'eduexpress-n8n-2024' && !isAdmin) {
+  let actor = null;
+  if (isInternalApiRequest(req)) {
+    actor = { role: 'admin', roles: ['founder_ceo'] };
+  } else if (dbReady && db) {
+    const payload = verifyToken(getCookie(req, AUTH_COOKIE));
+    if (payload?.id) {
+      const currentUser = db.prepare("SELECT id, role, active FROM users WHERE id=? AND active=1").get(payload.id);
+      if (currentUser) {
+        const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(currentUser.id).map(row => row.role);
+        actor = { ...currentUser, roles };
+      }
+    }
+  }
+  if (!isFullAdmin(actor)) {
     return res.status(401).send('Unauthorized');
   }
   try {
@@ -493,9 +559,7 @@ app.get('/api/admin/logs', (req, res) => {
 });
 
 app.get('/api/auth/me', (req, res) => {
-  console.log('[api/auth/me] Starting...');
   const cookie = getCookie(req, AUTH_COOKIE);
-  console.log('[api/auth/me] Cookie retrieved:', cookie ? 'exists' : 'null');
   let payload;
   try {
     payload = verifyToken(cookie);
@@ -503,25 +567,19 @@ app.get('/api/auth/me', (req, res) => {
     console.error('[api/auth/me] Token verification crashed:', err.message);
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  console.log('[api/auth/me] Token verified. Payload:', payload);
   if (!payload) {
-    console.log('[api/auth/me] Unauthorized (no payload)');
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  console.log('[api/auth/me] Querying users for id:', payload.id);
   let user;
   try {
-    user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=? AND active=1").get(payload.id);
+    user = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,agency_id,active FROM users WHERE id=? AND active=1").get(payload.id);
   } catch (err) {
     console.error('[api/auth/me] User query crashed:', err.message);
     return res.status(500).json({ error: err.message });
   }
-  console.log('[api/auth/me] User query result:', user ? user.email : 'null');
   if (!user) {
-    console.log('[api/auth/me] Unauthorized (user not found)');
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  console.log('[api/auth/me] Querying roles for id:', user.id);
   let roles;
   try {
     roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
@@ -529,22 +587,41 @@ app.get('/api/auth/me', (req, res) => {
     console.error('[api/auth/me] Roles query crashed:', err.message);
     return res.status(500).json({ error: err.message });
   }
-  console.log('[api/auth/me] Roles query result:', roles);
   if (roles.length === 0) {
     const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
     roles.push(roleMap[user.role] || user.role || 'consultant');
   }
   user.roles = roles;
-  console.log('[api/auth/me] Sending user response...');
   res.json(user);
-  console.log('[api/auth/me] Done!');
 });
 
-// ─── REQUIRE AUTH on every /api/* below (except whitelisted paths) ──────────
-const AUTH_FREE = ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/events', '/api/webhook/website-lead', '/api/auth/emergency-reset', '/api/import/file-updates-2026', '/api/admin/delete-by-page', '/api/admin/db-breakdown'];
-const AUTH_FREE_PREFIX = ['/api/public/']; // student portal endpoints
-// Internal API key for trusted services (n8n, automation scripts)
-const INTERNAL_API_KEY = 'eduexpress-n8n-2024';
+// ─── REQUIRE AUTH on every /api/* below (except narrowly-scoped public paths)
+const AUTH_FREE = new Set([
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/webhook/website-lead',
+  '/api/auth/emergency-reset',
+]);
+const LEGACY_BLOCKED_PATHS = new Set([
+  '/diagnose-db',
+  '/api/public/diag2',
+  '/api/public/diag3',
+  '/api/public/diag4',
+  '/api/public/fix-leads-manual',
+]);
+function isPublicApiPath(path) {
+  return path.startsWith('/api/public/student/') || path.startsWith('/api/public/destinations/');
+}
+
+app.use((req, res, next) => {
+  // Hard-block retired diagnostics so they stay dark even if an old route is
+  // reintroduced during a merge or a stale client still probes them.
+  if (LEGACY_BLOCKED_PATHS.has(req.path)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  next();
+});
 
 app.use(async (req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
@@ -554,21 +631,26 @@ app.use(async (req, res, next) => {
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
 
-  if (AUTH_FREE.includes(req.path)) return next();
-  if (AUTH_FREE_PREFIX.some(p => req.path.startsWith(p))) return next();
+  if (AUTH_FREE.has(req.path)) return next();
+  if (isPublicApiPath(req.path)) return next();
   // Service-account bypass: trusted internal key (no location restriction)
-  if (req.headers['x-api-key'] === INTERNAL_API_KEY) {
+  if (isInternalApiRequest(req)) {
     req.user = { id: 0, role: 'super_admin', roles: ['founder_ceo'], name: 'n8n Bot', email: 'bot@eduexpress.internal' };
     return next();
   }
   const payload = verifyToken(getCookie(req, AUTH_COOKIE));
   if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-  // Ensure roles array is present (fallback for legacy tokens)
-  if (!payload.roles || !Array.isArray(payload.roles)) {
+  const currentUser = db.prepare(`
+    SELECT id,email,name,role,consultant_name,emp_id,agency_id,active
+    FROM users WHERE id=? AND active=1
+  `).get(payload.id);
+  if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+  const roles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(currentUser.id).map(row => row.role);
+  if (roles.length === 0) {
     const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
-    payload.roles = [roleMap[payload.role] || payload.role || 'consultant'];
+    roles.push(roleMap[currentUser.role] || currentUser.role || 'consultant');
   }
-  req.user = payload;
+  req.user = { ...currentUser, roles };
   next();
 });
 
@@ -631,6 +713,35 @@ function canViewOwnConversations(user) {
   return userHasRole(user, 'consultant');
 }
 
+function normalizeOptionalText(value) {
+  if (value == null) return null;
+  const text = String(value).trim().replace(/\s+/g, ' ');
+  return text || null;
+}
+
+function getEmployeeNameByEmpId(empId) {
+  const normalizedEmpId = normalizeOptionalText(empId);
+  if (!normalizedEmpId) return null;
+  try {
+    return db.prepare("SELECT name FROM employees WHERE emp_id=? LIMIT 1").get(normalizedEmpId)?.name || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveConsultantIdentity({ roles = [], consultant_name = null, emp_id = null }) {
+  const normalizedRoles = Array.isArray(roles) ? roles : [];
+  if (!normalizedRoles.includes('consultant')) {
+    return { consultantName: null, empId: normalizeOptionalText(emp_id) };
+  }
+  const normalizedEmpId = normalizeOptionalText(emp_id);
+  const employeeName = getEmployeeNameByEmpId(normalizedEmpId);
+  return {
+    consultantName: normalizeOptionalText(employeeName || consultant_name),
+    empId: normalizedEmpId,
+  };
+}
+
 function canViewChinaData(user) {
   return userHasAnyRole(user, 'founder_ceo', 'application_manager');
 }
@@ -645,6 +756,20 @@ function requireAdmin(req, res, next) {
 function requireFinance(req, res, next) {
   if (!isFullAdmin(req.user) && !isInvestor(req.user)) {
     return res.status(403).json({ error: 'Finance access only' });
+  }
+  next();
+}
+
+function requireFinanceManager(req, res, next) {
+  if (!isFullAdmin(req.user)) {
+    return res.status(403).json({ error: 'Finance management access only' });
+  }
+  next();
+}
+
+function requireHRView(req, res, next) {
+  if (!isFullAdmin(req.user) && !isInvestor(req.user)) {
+    return res.status(403).json({ error: 'HR access only' });
   }
   next();
 }
@@ -683,14 +808,16 @@ function userHasAccessToConversation(user, conversationId) {
     let c;
     if (conversationId && typeof conversationId === 'object' && conversationId.channel_id !== undefined) {
       c = db.prepare(`
-        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant, NULL AS assigned_to, channel_access.access_type
+        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant,
+               NULL AS assigned_to, NULL AS assigned_to_id, channel_access.access_type
         FROM channels
         LEFT JOIN channel_access ON channel_access.channel_id = channels.id AND channel_access.user_id = @userId
         WHERE channels.id = @channelId
       `).get({ userId: user.id, channelId: conversationId.channel_id });
     } else {
       c = db.prepare(`
-        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant, conversations.assigned_to, channel_access.access_type
+        SELECT channels.type AS channel_type, channels.name, channels.phone_number_id, channels.consultant,
+               conversations.assigned_to, conversations.assigned_to_id, channel_access.access_type
         FROM conversations
         LEFT JOIN channels ON channels.id = conversations.channel_id
         LEFT JOIN channel_access ON channel_access.channel_id = conversations.channel_id AND channel_access.user_id = @userId
@@ -718,7 +845,12 @@ function userHasAccessToConversation(user, conversationId) {
         }
       }
 
-      return matchConsultant || c.assigned_to === user.id || c.access_type || matchPhone;
+      const assignedEmployee = meUser?.emp_id
+        ? db.prepare("SELECT id FROM employees WHERE emp_id=? LIMIT 1").get(meUser.emp_id)
+        : null;
+      const isAssigned = Number(c.assigned_to_id) === Number(user.id)
+        || (assignedEmployee && Number(c.assigned_to_id) === Number(assignedEmployee.id));
+      return matchConsultant || isAssigned || Boolean(c.access_type) || matchPhone;
     }
     // All other channels: full access
     return true;
@@ -728,7 +860,7 @@ function userHasAccessToConversation(user, conversationId) {
 
 // Random URL-safe token for the student portal share link.
 function generatePublicToken() {
-  return crypto.randomBytes(9).toString('base64url'); // 12 char URL-safe
+  return crypto.randomBytes(18).toString('base64url'); // 24 char URL-safe bearer token
 }
 
 app.post('/api/admin/fix-page-names', (req, res) => requireAdmin(req, res, () => {
@@ -765,11 +897,19 @@ app.post('/api/users', (req, res) => requireAdmin(req, res, () => {
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   try {
     const safeRole = ['admin', 'manager', 'consultant', 'agent'].includes(role) ? role : 'consultant';
-    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id,agency_id) VALUES (?,?,?,?,?,?,?)`)
-      .run(String(email).toLowerCase().trim(), name || null, hashPassword(password), safeRole, consultant_name, emp_id, agency_id);
-    const newUserId = info.lastInsertRowid;
-    // Insert into user_roles if roles provided
     const newRoles = Array.isArray(roles) && roles.length ? roles : [safeRole === 'admin' ? 'founder_ceo' : safeRole === 'manager' ? 'application_manager' : 'consultant'];
+    const consultantIdentity = resolveConsultantIdentity({ roles: newRoles, consultant_name, emp_id });
+    const info = db.prepare(`INSERT INTO users (email,name,password_hash,role,consultant_name,emp_id,agency_id) VALUES (?,?,?,?,?,?,?)`)
+      .run(
+        String(email).toLowerCase().trim(),
+        normalizeOptionalText(name),
+        hashPassword(password),
+        safeRole,
+        consultantIdentity.consultantName,
+        consultantIdentity.empId,
+        agency_id
+      );
+    const newUserId = info.lastInsertRowid;
     const insertRole = db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)`);
     for (const r of newRoles) insertRole.run(newUserId, r);
     const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(newUserId);
@@ -785,14 +925,46 @@ app.put('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
   const cur = db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
   const newHash = password ? hashPassword(password) : cur.password_hash;
-  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=COALESCE(?,consultant_name), emp_id=COALESCE(?,emp_id), active=COALESCE(?,active), password_hash=?, agency_id=COALESCE(?,agency_id) WHERE id=?`)
-    .run(name ?? null, role ?? null, consultant_name ?? null, emp_id ?? null, active ?? null, newHash, agency_id ?? null, req.params.id);
-  // Update user_roles if roles array provided
+  const nextRoles = Array.isArray(roles)
+    ? roles
+    : db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(req.params.id).map(r => r.role);
+  const fallbackRoles = nextRoles.length ? nextRoles : [cur.role === 'admin' ? 'founder_ceo' : cur.role === 'manager' ? 'application_manager' : 'consultant'];
+  const consultantIdentity = resolveConsultantIdentity({
+    roles: fallbackRoles,
+    consultant_name: consultant_name ?? cur.consultant_name,
+    emp_id: emp_id ?? cur.emp_id,
+  });
+
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), role=COALESCE(?,role), consultant_name=?, emp_id=?, active=COALESCE(?,active), password_hash=?, agency_id=COALESCE(?,agency_id) WHERE id=?`)
+    .run(
+      name == null ? null : normalizeOptionalText(name),
+      role ?? null,
+      consultantIdentity.consultantName,
+      consultantIdentity.empId,
+      active ?? null,
+      newHash,
+      agency_id ?? null,
+      req.params.id
+    );
+
   if (Array.isArray(roles)) {
     db.prepare("DELETE FROM user_roles WHERE user_id=?").run(req.params.id);
     const insertRole = db.prepare("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)");
     for (const r of roles) insertRole.run(req.params.id, r);
   }
+
+  const previousConsultant = normalizeOptionalText(cur.consultant_name);
+  const nextConsultant = consultantIdentity.consultantName;
+  if (previousConsultant && nextConsultant && previousConsultant.toLowerCase() !== nextConsultant.toLowerCase()) {
+    const renameConsultantReferences = db.transaction(() => {
+      db.prepare("UPDATE leads SET assigned_consultant=? WHERE TRIM(LOWER(assigned_consultant)) = TRIM(LOWER(?))").run(nextConsultant, previousConsultant);
+      db.prepare("UPDATE channels SET consultant=? WHERE TRIM(LOWER(consultant)) = TRIM(LOWER(?))").run(nextConsultant, previousConsultant);
+      db.prepare("UPDATE conversations SET assigned_to=? WHERE TRIM(LOWER(assigned_to)) = TRIM(LOWER(?))").run(nextConsultant, previousConsultant);
+      db.prepare("UPDATE kpi_targets SET consultant=? WHERE TRIM(LOWER(consultant)) = TRIM(LOWER(?))").run(nextConsultant, previousConsultant);
+    });
+    renameConsultantReferences();
+  }
+
   const u = db.prepare("SELECT id,email,name,role,consultant_name,emp_id,active FROM users WHERE id=?").get(req.params.id);
   const updatedRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(req.params.id).map(r => r.role);
   u.roles = updatedRoles.length ? updatedRoles : [role === 'admin' ? 'founder_ceo' : role === 'manager' ? 'application_manager' : 'consultant'];
@@ -809,6 +981,13 @@ app.delete('/api/users/:id', (req, res) => requireAdmin(req, res, () => {
 const OFFICE_KEYS = ['office_open_time', 'office_close_time', 'office_lat', 'office_lng', 'office_radius_m', 'office_wifi_ssid', 'office_allowed_ssids'];
 app.get('/api/office-config', (req, res) => {
   const cfg = Object.fromEntries(OFFICE_KEYS.map(k => [k, getConfig(k)]));
+  if (!isFullAdmin(req.user)) {
+    return res.json({
+      office_open_time: cfg.office_open_time,
+      office_close_time: cfg.office_close_time,
+      office_wifi_ssid: cfg.office_wifi_ssid,
+    });
+  }
   res.json(cfg);
 });
 app.post('/api/office-config', (req, res) => requireAdmin(req, res, () => {
@@ -882,6 +1061,11 @@ function templateFor(destination) {
 
 function leadIsVisibleTo(lead, user) {
   if (canViewAllLeads(user)) return true;
+  if (isAgent(user)) {
+    return user?.agency_id != null
+      && lead?.agency_id != null
+      && Number(lead.agency_id) === Number(user.agency_id);
+  }
   const me = user?.consultant_name || user?.name || '';
   if (!me) return false;
 
@@ -1503,17 +1687,17 @@ app.get('/api/activity', (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/debug/webhooks', (req, res) => {
+app.get('/api/debug/webhooks', (req, res) => requireAdmin(req, res, () => {
   try {
     const logs = db.prepare("SELECT * FROM webhook_logs ORDER BY id DESC LIMIT 50").all();
     res.json(logs.map(l => ({ ...l, payload: JSON.parse(l.payload) })));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
-});
+}));
 
 
-app.get('/api/admin/backfill-meta', async (req, res) => {
+app.post('/api/admin/backfill-meta', (req, res) => requireAdmin(req, res, async () => {
   try {
     const logs = [];
     const missingLeads = db.prepare("SELECT DISTINCT meta_form_id FROM leads WHERE meta_form_id IS NOT NULL AND page_name IS NULL").all();
@@ -1555,97 +1739,13 @@ app.get('/api/admin/backfill-meta', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}));
 
 
 
 
 
 
-
-app.get('/api/public/diag', (req, res) => {
-  try {
-    const nullLeads = db.prepare("SELECT id, lead_id, client_name, page_name, channel_id, meta_form_id FROM leads WHERE page_name IS NULL OR page_name = '' LIMIT 20").all();
-    const totalNull = db.prepare("SELECT COUNT(*) as c FROM leads WHERE page_name IS NULL OR page_name = ''").get().c;
-    res.json({ totalNull, nullLeads });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/public/fix-leads-manual', (req, res) => {
-  try {
-    const leadsToFix = db.prepare("SELECT id FROM leads WHERE page_name IS NULL OR page_name = ''").all();
-    let fixedCount = 0;
-    let logs = [];
-    for (const l of leadsToFix) {
-       const throughConv = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id WHERE conv.lead_id = ? LIMIT 1`).get(l.id);
-       const throughContact = db.prepare(`SELECT c.name, c.id FROM channels c JOIN conversations conv ON conv.channel_id = c.id JOIN contacts con ON conv.contact_id = con.id WHERE con.lead_id = ? LIMIT 1`).get(l.id);
-       
-       if (throughConv && throughConv.name) {
-         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughConv.name, throughConv.id, l.id);
-         fixedCount++;
-         logs.push(`Fixed lead ${l.id} via throughConv with ${throughConv.name}`);
-       } else if (throughContact && throughContact.name) {
-         db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(throughContact.name, throughContact.id, l.id);
-         fixedCount++;
-         logs.push(`Fixed lead ${l.id} via throughContact with ${throughContact.name}`);
-       } else {
-         const orphanConv = db.prepare(`SELECT channel_id FROM conversations WHERE lead_id = ? LIMIT 1`).get(l.id);
-         if (orphanConv && orphanConv.channel_id) {
-           const peerLead = db.prepare(`SELECT l.page_name FROM leads l JOIN conversations c ON l.id = c.lead_id WHERE c.channel_id = ? AND l.page_name IS NOT NULL AND l.page_name != '' LIMIT 1`).get(orphanConv.channel_id);
-           if (peerLead && peerLead.page_name) {
-             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run(peerLead.page_name, orphanConv.channel_id, l.id);
-             fixedCount++;
-             logs.push(`Fixed lead ${l.id} via peerLead with ${peerLead.page_name}`);
-           } else {
-             db.prepare("UPDATE leads SET page_name = ?, channel_id = ? WHERE id = ?").run("Unknown Page", orphanConv.channel_id, l.id);
-             fixedCount++;
-             logs.push(`Fixed lead ${l.id} via Unknown Page (channel ${orphanConv.channel_id})`);
-           }
-         } else {
-             db.prepare("UPDATE leads SET page_name = ? WHERE id = ?").run("Unknown Page", l.id);
-             fixedCount++;
-             logs.push(`Fixed lead ${l.id} via Unknown Page (no conversation)`);
-         }
-       }
-    }
-    res.json({ ok: true, fixedCount, logs });
-  } catch (e) {
-    res.status(500).json({ error: e.message, stack: e.stack });
-  }
-});
-
-app.get('/api/public/diag2', (req, res) => {
-  try {
-    const l = db.prepare("SELECT * FROM leads WHERE lead_id = 'L260023'").get();
-    const conv = db.prepare("SELECT * FROM conversations WHERE lead_id = ?").all(l.id);
-    const cont = db.prepare("SELECT * FROM contacts WHERE lead_id = ?").all(l.id);
-    res.json({ lead: l, conv, cont });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-
-app.get('/api/public/diag3', (req, res) => {
-  try {
-    const c = db.prepare("SELECT * FROM channels WHERE id = 9").get();
-    res.json(c || { error: 'Channel 9 not found' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-
-app.get('/api/public/diag4', (req, res) => {
-  try {
-    const channels = db.prepare("SELECT * FROM channels").all();
-    res.json(channels);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 async function syncMetaAdPerformance() {
   console.log('[cron] Starting Meta Ad Performance Sync...');
@@ -1791,14 +1891,16 @@ app.listen(PORT, () => console.log(`🚀 CRM + Messaging API → http://localhos
     }
 
     db.resumeSave(); // Resume and perform a single batched save
-    try {
-      db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
-      db.prepare("UPDATE leads SET nationality='Bangladesh' WHERE (nationality IS NULL OR nationality='' OR nationality='—') AND (phone LIKE '+880%' OR lead_market='Bangladesh' OR lead_market IS NULL)").run();
-      db.prepare("UPDATE leads SET major=program WHERE (major IS NULL OR major='') AND program IS NOT NULL AND program!=''").run();
-      db.prepare("UPDATE leads SET program=major WHERE (program IS NULL OR program='') AND major IS NOT NULL AND major!=''").run();
-      try { db.prepare("ALTER TABLE expenses ADD COLUMN student_name TEXT").run(); } catch {}
-      try { db.prepare("ALTER TABLE expenses ADD COLUMN lead_id TEXT").run(); } catch {}
-    } catch {}
+    if (RUN_DATA_BACKFILLS) {
+      try {
+        db.prepare("UPDATE leads SET page_name='WhatsApp' WHERE page_name IS NULL OR page_name='' OR page_name='Unknown Page' OR page_name='Unknown'").run();
+        db.prepare("UPDATE leads SET nationality='Bangladesh' WHERE (nationality IS NULL OR nationality='' OR nationality='—') AND (phone LIKE '+880%' OR lead_market='Bangladesh' OR lead_market IS NULL)").run();
+        db.prepare("UPDATE leads SET major=program WHERE (major IS NULL OR major='') AND program IS NOT NULL AND program!=''").run();
+        db.prepare("UPDATE leads SET program=major WHERE (program IS NULL OR program='') AND major IS NOT NULL AND major!=''").run();
+      } catch (err) {
+        console.error('[startup] Optional data backfills failed:', err.message);
+      }
+    }
     dbReady = true;
     console.log('[startup] Database ready ✅ — tables:', (db.tableNames ? db.tableNames().length : '?'));
 
@@ -2116,7 +2218,7 @@ function setupSchema() { db.exec(`
     page_id TEXT,
     ig_account_id TEXT,
     access_token TEXT,
-    webhook_verify_token TEXT DEFAULT 'eduexpress_verify_2024',
+    webhook_verify_token TEXT,
     status TEXT DEFAULT 'active',
     color TEXT DEFAULT '#3b82f6',
     created_at TEXT DEFAULT (datetime('now'))
@@ -2788,6 +2890,7 @@ function runMigrations() {
     `ALTER TABLE channels   ADD COLUMN consultant TEXT`,
     `ALTER TABLE channels   ADD COLUMN avatar_url TEXT`,
     `ALTER TABLE users      ADD COLUMN emp_id TEXT`,
+    `ALTER TABLE users      ADD COLUMN consultant_name TEXT`,
     `ALTER TABLE leads      ADD COLUMN application_stage TEXT`,
     `ALTER TABLE leads      ADD COLUMN visa_deadline TEXT`,
     `ALTER TABLE leads      ADD COLUMN departure_date TEXT`,
@@ -2833,10 +2936,13 @@ function runMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id)`,
     `ALTER TABLE income ADD COLUMN exclude_from_cash INTEGER DEFAULT 0`,
     `ALTER TABLE contacts ADD COLUMN tiktok_id TEXT`,
+    `ALTER TABLE messages ADD COLUMN is_internal_note INTEGER DEFAULT 0`,
     `ALTER TABLE leads ADD COLUMN assigned_employee_id INTEGER`,
     `ALTER TABLE leads ADD COLUMN ctwa_clid TEXT`,
     `ALTER TABLE income ADD COLUMN employee_id INTEGER`,
     `ALTER TABLE expenses ADD COLUMN employee_id INTEGER`,
+    `ALTER TABLE expenses ADD COLUMN student_name TEXT`,
+    `ALTER TABLE expenses ADD COLUMN lead_id TEXT`,
     // ── Social Media Engine v2.0 migrations ──
     `ALTER TABLE content_posts ADD COLUMN quality_score INTEGER`,
     `ALTER TABLE content_posts ADD COLUMN quality_checks TEXT`,
@@ -2878,7 +2984,6 @@ function runMigrations() {
     `ALTER TABLE content_posts ADD COLUMN notes TEXT`,
     `ALTER TABLE content_posts ADD COLUMN tags TEXT`,
     `ALTER TABLE conversations ADD COLUMN assigned_to_id INTEGER`,
-    `DELETE FROM conversations WHERE id NOT IN (SELECT MAX(id) FROM conversations GROUP BY contact_id, channel_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_contact_channel ON conversations(contact_id, channel_id)`,
     // ── Ad Attribution columns (which FB page / ad created the lead) ──
     `ALTER TABLE leads ADD COLUMN ad_name TEXT`,
@@ -2913,8 +3018,6 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_channel_access_channel ON channel_access(channel_id);
       CREATE TABLE IF NOT EXISTS webhook_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
     `);
-    db.exec("UPDATE leads SET lead_type = 'B2B' WHERE source IN ('B2B', 'Agent') AND (lead_type IS NULL OR lead_type = 'B2C' OR lead_type = '')");
-
     // Migrate legacy single-role users to user_roles junction table
     const legacyUsers = db.prepare(`SELECT id, role FROM users WHERE id NOT IN (SELECT user_id FROM user_roles)`).all();
     const roleMap = {
@@ -2934,166 +3037,6 @@ function runMigrations() {
     console.error('[migration] RBAC migration failed:', e.message);
   }
 
-  // Custom migration for payroll UNIQUE constraint
-  try {
-    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='payroll'").get()?.sql || "";
-    if (sql.includes("UNIQUE(month, emp_id)") && !sql.includes("UNIQUE(month, emp_id, name)")) {
-      console.log("[migration] Updating payroll unique constraint to UNIQUE(month, emp_id, name)...");
-      db.exec(`
-        CREATE TABLE payroll_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          month TEXT NOT NULL,
-          emp_id TEXT NOT NULL,
-          name TEXT,
-          base_salary REAL DEFAULT 0,
-          days_worked INTEGER DEFAULT 0,
-          working_days INTEGER DEFAULT 0,
-          bonus REAL DEFAULT 0,
-          deductions REAL DEFAULT 0,
-          net_pay REAL DEFAULT 0,
-          paid_on TEXT,
-          status TEXT DEFAULT 'pending',
-          notes TEXT,
-          created_at TEXT DEFAULT (datetime('now')),
-          UNIQUE(month, emp_id, name)
-        );
-        INSERT INTO payroll_new (id, month, emp_id, name, base_salary, days_worked, working_days, bonus, deductions, net_pay, paid_on, status, notes, created_at)
-        SELECT id, month, emp_id, name, base_salary, days_worked, working_days, bonus, deductions, net_pay, paid_on, status, notes, created_at FROM payroll;
-        DROP TABLE payroll;
-        ALTER TABLE payroll_new RENAME TO payroll;
-      `);
-      console.log("[migration] Payroll unique constraint updated successfully!");
-    }
-  } catch (e) {
-    console.error("[migration] Payroll update failed:", e.message);
-  }
-
-  // Dynamic self-healing migration to reset and force file stages config to the updated professional pipeline
-  try {
-    const currentStagesRaw = db.prepare("SELECT value FROM meta_config WHERE key = 'settings_fileStages'").get()?.value;
-    if (currentStagesRaw && currentStagesRaw.includes('Documents Collecting')) {
-      const newStages = [
-        'Document Collection',
-        'Document Verification',
-        'Application Submitted',
-        'University Interview',
-        'Conditional Offer',
-        'Tuition Deposit',
-        'Unconditional Offer & JW202',
-        'Visa Application',
-        'Visa Approval',
-        'Final Settlement',
-        'Pre-Departure & Flight',
-        'Arrival & Enrollment'
-      ];
-      db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('settings_fileStages', ?)").run(JSON.stringify(newStages));
-      console.log("[migration] Updated settings_fileStages in database to professional requested default flow.");
-    }
-
-
-    // Migrate any existing legacy application stages in leads table to their closest new counterparts
-    db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'in_review'").run();
-    db.prepare("UPDATE leads SET application_stage = 'admitted' WHERE application_stage = 'jw202'").run();
-    db.prepare("UPDATE leads SET application_stage = 'submitted' WHERE application_stage = 'rejected'").run();
-    db.prepare("UPDATE leads SET application_stage = 'visa_approved' WHERE application_stage = 'payment_complete'").run();
-    console.log("[migration] Successfully remapped legacy lead stages.");
-  } catch (e) {
-    console.error("[migration] settings_fileStages reset/remap failed:", e.message);
-  }
-
-  // Self-healing migration to rename legacy source names in existing leads
-  try {
-    db.prepare("UPDATE leads SET source = 'China' WHERE source = 'China Agent'").run();
-    db.prepare("UPDATE leads SET source = 'B2B' WHERE source = 'Agent'").run();
-    db.prepare("UPDATE leads SET source = 'In-House' WHERE source = 'In-house'").run();
-    console.log("[migration] Migrated existing source names to China, B2B, and In-House.");
-  } catch (e) {
-    console.error("[migration] Remap source names failed:", e.message);
-  }
-
-  // Self-healing migration to seed pre-June 2026 partner investments
-  try {
-    // Delete duplicate cumulative entries if they exist
-    db.prepare("DELETE FROM income WHERE notes LIKE 'Pre-June 2026 %'").run();
-
-    db.prepare("UPDATE income SET client_name = 'Sakib Al Jubaer' WHERE category='Investment' AND client_name IN ('Sakib', 'Sakib Al Jubaer')").run();
-
-    const investments = [
-      { name: 'Abdullah Al Rakib', date: '2024-09-01', month: '2024-09', ref: 'Capital Injection 2024', val: 281800 },
-      { name: 'Abdullah Al Rakib', date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 387915 },
-      { name: 'Sakib Al Jubaer',    date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 37000 },
-      { name: 'Tahmid Imam',        date: '2024-09-01', month: '2024-09', ref: 'Capital Injection 2024', val: 100100 },
-      { name: 'Tahmid Imam',        date: '2025-09-01', month: '2025-09', ref: 'Capital Injection 2025', val: 70000 },
-      { name: 'Tahmid Imam',        date: '2026-01-15', month: '2026-01', ref: 'Capital Injection 2026', val: 96521 }
-    ];
-
-    const check = db.prepare("SELECT COUNT(*) as c FROM income WHERE category='Investment' AND client_name=? AND reference=?");
-    const insert = db.prepare(`INSERT INTO income (date, month, category, client_name, reference, amount, notes)
-                               VALUES (?, ?, 'Investment', ?, ?, ?, 'Consolidated capital injection pre-data')`);
-    
-    investments.forEach(inv => {
-      if (check.get(inv.name, inv.ref).c === 0) {
-        insert.run(inv.date, inv.month, inv.name, inv.ref, inv.val);
-        console.log(`[migration] Seeded investment for ${inv.name}: ${inv.val} BDT`);
-      }
-    });
-
-    // Exclude prior investments from cash calculations (except Sakib's last 100k)
-    db.prepare(`
-      UPDATE income 
-      SET exclude_from_cash = 1 
-      WHERE category = 'Investment' 
-        AND date < '2026-06-01'
-        AND NOT (client_name = 'Sakib Al Jubaer' AND amount = 100000 AND date = '2026-05-15')
-    `).run();
-
-    // Ensure newer investments (June 2026 onwards) are included in cash calculations
-    db.prepare(`
-      UPDATE income 
-      SET exclude_from_cash = 0 
-      WHERE category = 'Investment' 
-        AND date >= '2026-06-01'
-    `).run();
-
-    console.log("[migration] Partner investments self-healing checks complete.");
-  } catch (e) {
-    console.error("[migration] Seeding partner investments failed:", e.message);
-  }
-
-  // Self-healing migration: messages.is_internal_note is referenced by the
-  // automation engine + analytics but was never added to the schema.
-  try {
-    db.run("ALTER TABLE messages ADD COLUMN is_internal_note INTEGER DEFAULT 0");
-    console.log('[migration] Added messages.is_internal_note column.');
-  } catch { /* column already exists */ }
-
-  // Self-healing migration to set the WhatsApp channel consultant to "Abdullah Al Rakib"
-  try {
-    const info = db.prepare("UPDATE channels SET consultant = 'Abdullah Al Rakib' WHERE type = 'whatsapp'").run();
-    if (info.changes > 0) {
-      console.log(`[migration] Updated ${info.changes} WhatsApp channels consultant to Abdullah Al Rakib.`);
-    }
-  } catch (e) {
-    console.error("[migration] Failed to set WhatsApp channel consultant:", e.message);
-  }
-
-  // Self-healing migration to assign "Abdullah Al Rakib" to any existing unassigned WhatsApp leads
-  try {
-    const info = db.prepare(`
-      UPDATE leads 
-      SET assigned_consultant = 'Abdullah Al Rakib' 
-      WHERE (assigned_consultant IS NULL OR assigned_consultant = '') 
-        AND (lead_source = 'WhatsApp' OR id IN (
-          SELECT DISTINCT lead_id FROM conversations WHERE channel_type = 'whatsapp' AND lead_id IS NOT NULL
-        ))
-    `).run();
-    if (info.changes > 0) {
-      console.log(`[migration] Updated ${info.changes} unassigned WhatsApp leads to consultant Abdullah Al Rakib.`);
-    }
-  } catch (e) {
-    console.error("[migration] Failed to set WhatsApp leads consultant:", e.message);
-  }
-
   // Self-healing migration to ensure all conversations have status set
   try {
     const info = db.prepare("UPDATE conversations SET status = 'open' WHERE status IS NULL OR status = ''").run();
@@ -3102,41 +3045,6 @@ function runMigrations() {
     }
   } catch (e) {
     console.error("[migration] Failed to self-heal conversations status:", e.message);
-  }
-
-  // Self-healing migration to automatically update all channels and meta_config to use the new valid System User token if empty
-  try {
-    const newToken = 'EAAVoF1AFCwoBR1ZAIqUN6mXMlFpaXhpzMgFlCP1KplZBNSY0FPagOD6iJBKeamBTvaCZAPo6YEw9YO1IZCT63BqzrtqBzZBSDGZCG4mtlPZAKQF4ZBmXGlowYXoSIzgZCB1j102Klcx4gMbOjeJwAUtroyJ9D95CnQ3C7j5tZA6OfItn22siqZAyzVXL1gI4KI7NoPstAZDZD';
-    const oldToken = 'EAAVoF1AFCwoBRl9hbdnnxIUj5nFoaIEOj0doThSY3p159jABiZApMlSQTr4IguvIBNpyC1bsHewaq1jkr57Dkn349tyd458NpwGbZBhcw3NGv3d41TVj1VnLz5SKcNFNGHZBOL091vEIBJEQyH9DLyXz3JlSeVGxKGS9ZB4WWs0VwE3W9yfLGwQMr16BsBRGBgZDZD';
-    
-    // Update channels still using old or empty tokens
-    const info = db.prepare("UPDATE channels SET access_token = ? WHERE access_token IS NULL OR access_token = '' OR access_token = ?").run(newToken, oldToken);
-    
-    // Always force update the global configs to the active token
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('page_access_token', ?)").run(newToken);
-    db.prepare("INSERT OR REPLACE INTO meta_config (key, value) VALUES ('capi_token', ?)").run(newToken);
-    
-    if (info.changes > 0) {
-      console.log(`[migration] Self-healed ${info.changes} channels with updated Global Access Token.`);
-    }
-  } catch (e) {
-    console.error("[migration] Failed to apply new System User token:", e.message);
-  }
-  // Self-healing migration to assign lead L-00003 and others to Afsana Meme
-  try {
-    const afsanaEmp = db.prepare("SELECT id FROM employees WHERE name LIKE '%Afsana%'").get();
-    if (afsanaEmp) {
-      const info = db.prepare("UPDATE leads SET assigned_consultant = 'Afsana Meme', assigned_employee_id = ? WHERE lead_id = 'L-00003' OR client_name LIKE 'Sumi Iftin%'").run(afsanaEmp.id);
-      if (info.changes > 0) {
-        console.log(`[migration] Self-healed ${info.changes} leads and assigned them to Afsana Meme.`);
-      }
-    }
-    // Self-heal users table mapping for Afsana Meme and Tahmid Imam
-    db.prepare("UPDATE users SET emp_id = 'E-04', consultant_name = 'Afsana Meme' WHERE email LIKE '%afsana@eduexpressint.com%' OR name = 'Afsana'").run();
-    db.prepare("UPDATE users SET emp_id = 'E-03' WHERE email LIKE '%tahmidrazi%' OR name LIKE '%Tahmid Imam%'").run();
-    console.log(`[migration] Self-healed users table mappings for Afsana and Tahmid.`);
-  } catch (e) {
-    console.error("[migration] Failed to self-heal Afsana lead assignment:", e.message);
   }
 
     // Seed best time slots for Bangladesh market (EDT optimized)
@@ -3437,12 +3345,9 @@ const sseClients = new Map();
 const longPollClients = new Set();
 
 app.post('/api/messages/poll', (req, res) => {
-  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
-  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
-
   let isResolved = false;
   const clientObj = {
-    user: payload,
+    user: req.user,
     send: (event) => {
       if (isResolved) return;
       isResolved = true;
@@ -3467,10 +3372,6 @@ app.post('/api/messages/poll', (req, res) => {
 });
 
 app.get('/api/events', (req, res) => {
-  // Auth via cookie — EventSource always sends cookies, no extra setup needed.
-  const payload = verifyToken(getCookie(req, AUTH_COOKIE));
-  if (!payload) return res.status(401).end();
-
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -3480,7 +3381,7 @@ app.get('/api/events', (req, res) => {
   res.flushHeaders();
 
   const id = Date.now() + Math.random();
-  sseClients.set(id, { res, user: payload });
+  sseClients.set(id, { res, user: req.user });
   res.write(`event: connected\ndata: ${JSON.stringify({ type: 'connected', id })}\n\n`);
   if (typeof res.flush === 'function') res.flush();
 
@@ -3499,8 +3400,20 @@ app.get('/api/events', (req, res) => {
 // IMPORTANT: We send `event: <type>` so browser EventSource named listeners fire.
 function broadcast(type, data, filter = null) {
   const msg = `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const canReceive = filter || ((user) => {
+    if (data?.lead) {
+      return !isChinaBlockedForUser(data.lead, user) && leadIsVisibleTo(data.lead, user);
+    }
+    const conversationId = data?.conversation_id
+      || (type.startsWith('conversation_') ? data?.id : null);
+    if (conversationId) return userHasAccessToConversation(user, conversationId);
+    if (data?.channel_id && type.startsWith('sync_')) {
+      return userHasAccessToConversation(user, { channel_id: data.channel_id });
+    }
+    return true;
+  });
   sseClients.forEach((client, id) => {
-    if (filter && !filter(client.user)) return;
+    if (!canReceive(client.user)) return;
     try {
       client.res.write(msg);
       if (typeof client.res.flush === 'function') client.res.flush();
@@ -3510,7 +3423,7 @@ function broadcast(type, data, filter = null) {
   });
 
   longPollClients.forEach(client => {
-    if (filter && !filter(client.user)) return;
+    if (!canReceive(client.user)) return;
     try {
       client.send({ type, ...data });
     } catch {
@@ -4056,7 +3969,7 @@ function createLeadFromContact(contactId, source, initialMessage, creatorUser, o
 
       broadcast('new_lead', { lead });
       sendCAPIEvent('Lead', lead).catch(() => {});
-      console.log(`✅ Auto-created Lead from ${source}: ${lead_id} — ${client_name}`);
+      console.log(`✅ Auto-created lead from ${source}: ${lead_id}`);
       return lead;
     }
     throw new Error("Lead could not be retrieved after insert");
@@ -4156,9 +4069,8 @@ function createLeadFromReferral({ contact, channel, referralData, sourcePlatform
 
 // ── n8n AI Welcome Bot Integration ───────────────────────────────────────────
 // New messages are forwarded to n8n where Gemini generates a personalised reply.
-const N8N_WELCOME_WEBHOOK = 'https://vibeacademy.cloud/webhook/eduexpress-welcome';
-
 function forwardToN8N(data) {
+  if (!N8N_WELCOME_WEBHOOK) return;
   fetch(N8N_WELCOME_WEBHOOK, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4358,8 +4270,9 @@ async function executeAutomationRules({ conversation, message, channel, contact 
           break;
         }
         case 'no_response': {
-          const delayMin = Number(cfg.delay) || 30;
-          triggered = hasAgentReply && minutesSinceAgentReply >= delayMin;
+          // Silence-based rules are evaluated by the scheduler so they trigger
+          // after an unanswered inbound message, not immediately on message arrival.
+          triggered = false;
           break;
         }
         case 'time_based': {
@@ -4425,7 +4338,7 @@ async function executeAutomationRules({ conversation, message, channel, contact 
             db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), last_message_direction='out' WHERE id=?").run(replyText, conversation.id);
             broadcast('new_message', { conversation_id: conversation.id, message: { content: replyText, direction: 'out', sent_by: 'auto', created_at: new Date().toISOString() } });
             executed = true;
-            console.log(`[auto] Rule ${rule.id} → auto-reply sent: "${replyText.slice(0, 60)}..."`);
+            console.log(`[auto] Rule ${rule.id} sent an auto-reply.`);
           } else if (sent?.error) {
             console.error(`[auto] Rule ${rule.id} send failed:`, sent.error.message || sent.error);
           }
@@ -4548,7 +4461,7 @@ async function executeRuleAction(rule, { conversation, contact, channel, lead })
         db.prepare("UPDATE conversations SET last_message=?, last_message_at=datetime('now'), last_message_direction='out' WHERE id=?").run(replyText, conversation.id);
         broadcast('new_message', { conversation_id: conversation.id, message: { content: replyText, direction: 'out', sent_by: 'auto', created_at: new Date().toISOString() } });
         executed = true;
-        console.log(`[auto] Rule ${rule.id} (${rule.trigger_type}) → sent: "${replyText.slice(0, 60)}"`);
+        console.log(`[auto] Rule ${rule.id} (${rule.trigger_type}) sent a reply.`);
       } else if (sent?.error) {
         console.error(`[auto] Rule ${rule.id} send failed:`, sent.error.message || sent.error);
       }
@@ -4688,6 +4601,61 @@ async function processTimeBasedRules() {
         await executeRuleAction(rule, { conversation, contact, channel, lead });
       } catch (e) {
         console.error(`[scheduler] time_based rule ${rule.id} conv ${conversation.id}:`, e.message);
+      }
+    }
+  }
+}
+
+async function processNoResponseRules() {
+  // Don't message customers in the middle of the night (Dhaka 9:00–21:00 window)
+  const hour = getBangladeshTime().getHours();
+  if (hour < 9 || hour >= 21) return;
+
+  const rules = db.prepare("SELECT * FROM automation_rules WHERE active=1 AND trigger_type='no_response' ORDER BY priority DESC, id DESC").all();
+  for (const rule of rules) {
+    let cfg = {};
+    try { cfg = JSON.parse(rule.trigger_config || '{}'); } catch {}
+    const delayMin = Math.max(Number(cfg.delay) || 30, 1);
+
+    const convs = db.prepare(`
+      SELECT c.*,
+             (
+               SELECT m.created_at
+               FROM messages m
+               WHERE m.conversation_id = c.id AND m.direction = 'in'
+               ORDER BY m.created_at DESC, m.id DESC
+               LIMIT 1
+             ) AS last_inbound_at,
+             (
+               SELECT m.created_at
+               FROM messages m
+               WHERE m.conversation_id = c.id AND m.direction = 'out' AND COALESCE(m.is_internal_note, 0) = 0
+               ORDER BY m.created_at DESC, m.id DESC
+               LIMIT 1
+             ) AS last_outbound_at
+      FROM conversations c
+      WHERE c.status='open'
+      HAVING last_inbound_at IS NOT NULL
+         AND datetime(last_inbound_at) <= datetime('now', '-' || ? || ' minutes')
+         AND (last_outbound_at IS NULL OR datetime(last_outbound_at) < datetime(last_inbound_at))
+         AND NOT EXISTS (
+           SELECT 1 FROM automation_analytics a
+           WHERE a.rule_id = ? AND a.conversation_id = c.id
+             AND a.event_type = 'executed' AND a.created_at >= last_inbound_at
+         )
+      ORDER BY last_inbound_at ASC
+      LIMIT 20
+    `).all(delayMin, rule.id);
+
+    for (const conversation of convs) {
+      try {
+        const contact = db.prepare("SELECT * FROM contacts WHERE id=?").get(conversation.contact_id);
+        const channel = conversation.channel_id ? db.prepare("SELECT * FROM channels WHERE id=?").get(conversation.channel_id) : null;
+        const lead = conversation.lead_id ? db.prepare("SELECT * FROM leads WHERE id=?").get(conversation.lead_id) : null;
+        db.prepare("INSERT INTO automation_analytics (rule_id, event_type, conversation_id, created_at) VALUES (?, 'triggered', ?, datetime('now'))").run(rule.id, conversation.id);
+        await executeRuleAction(rule, { conversation, contact, channel, lead });
+      } catch (e) {
+        console.error(`[scheduler] no_response rule ${rule.id} conv ${conversation.id}:`, e.message);
       }
     }
   }
@@ -4933,6 +4901,7 @@ async function runAutomationScheduler() {
   if (!dbReady || schedulerBusy) return;
   schedulerBusy = true;
   try { await processTimeBasedRules(); } catch (e) { console.error('[scheduler] time_based:', e.message); }
+  try { await processNoResponseRules(); } catch (e) { console.error('[scheduler] no_response:', e.message); }
   try { await processScheduledBroadcasts(); } catch (e) { console.error('[scheduler] broadcasts:', e.message); }
   try { await sendMorningFollowupNudges(); } catch (e) { console.error('[scheduler] nudges:', e.message); }
   try { await processDripEnrollments(); } catch (e) { console.error('[scheduler] drips:', e.message); }
@@ -5070,7 +5039,6 @@ async function sendCAPIEvent(eventName, leadData) {
   if (leadData.phone) {
     let p = String(leadData.phone).replace(/\D/g, '');
     if (p.startsWith('01') && p.length === 11) p = '880' + p.slice(1);
-    else if (p.startsWith('8801') && p.length === 13) p = p;
     else if (p.length === 10 && p.startsWith('1')) p = '880' + p;
     normalizedPhone = p;
   }
@@ -5518,9 +5486,11 @@ app.get('/api/leads', (req, res) => {
     where.push("(l.destination != 'China' AND l.lead_market != 'China')");
   }
   const ws = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
+  const offset = (pageNum - 1) * limitNum;
   const total  = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws}`).get(params).c;
-  const leads  = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id ${ws} ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}`).all(params);
+  const leads  = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id ${ws} ORDER BY l.id DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
   
   // Compute global stats based on the current filters
   const consultations = db.prepare(`SELECT COUNT(*) as c FROM leads l ${ws ? ws + " AND" : "WHERE"} l.lead_status='Office Visited'`).get(params).c;
@@ -5532,11 +5502,12 @@ app.get('/api/leads', (req, res) => {
   res.json({ 
     leads, 
     total, 
-    page: parseInt(page), 
-    pages: Math.ceil(total / parseInt(limit)),
+    page: pageNum,
+    pages: Math.ceil(total / limitNum),
     stats: { totalInquiries: total, consultations, activeFiles, dueToday }
   });
 });
+app.get('/api/leads/duplicates', handleLeadDuplicates);
 app.get('/api/leads/:id', (req, res) => {
   const lead = db.prepare(`SELECT l.*, e.name as employee_name, e.emp_id as employee_emp_id, e.role as employee_role FROM leads l LEFT JOIN employees e ON l.assigned_employee_id = e.id WHERE l.id=? OR l.lead_id=?`).get(req.params.id, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Not found' });
@@ -5552,7 +5523,8 @@ app.get('/api/leads/:id', (req, res) => {
 // Build a uniform params object for the lead create/update statements.
 // Whitelist exactly the columns we persist so unknown fields in req.body
 // can't slip into the SQL.
-function leadParams(d, lead_id, balance) {
+function leadParams(d, lead_id, balance, options = {}) {
+  const applyCreateDefaults = options.applyCreateDefaults !== false;
   const num = v => {
     if (v === '' || v == null) return 0;
     const n = Number(v);
@@ -5585,6 +5557,11 @@ function leadParams(d, lead_id, balance) {
   }
 
   const majorVal = txt(d.major || d.program);
+  const nationalityVal = txt(d.nationality);
+  const leadSourceVal = txt(d.lead_source);
+  const leadStatusVal = txt(d.lead_status);
+  const leadMarketVal = txt(d.lead_market);
+  const leadTypeVal = txt(d.lead_type);
 
   return {
     lead_id, balance: isNaN(Number(balance)) ? 0 : Number(balance),
@@ -5596,8 +5573,8 @@ function leadParams(d, lead_id, balance) {
     gpa: numNull(d.gpa),
     english_score: txt(d.english_score),
     program: majorVal,
-    lead_source: d.lead_source || 'Manual',
-    lead_status: d.lead_status || 'New Lead',
+    lead_source: applyCreateDefaults ? (leadSourceVal || 'Manual') : leadSourceVal,
+    lead_status: applyCreateDefaults ? (leadStatusVal || 'New Lead') : leadStatusVal,
     assigned_employee_id,
     assigned_consultant,
     service_fee: num(d.service_fee), paid: num(d.paid),
@@ -5608,8 +5585,8 @@ function leadParams(d, lead_id, balance) {
     meta_ad_id: txt(d.meta_ad_id), meta_campaign: txt(d.meta_campaign),
     // Excel-aligned
     source: txt(d.source), referrer: txt(d.referrer),
-    nationality: (function() {
-      let nat = txt(d.nationality);
+    nationality: applyCreateDefaults ? (function() {
+      let nat = nationalityVal;
       if (!nat || nat === '—') {
         if (d.phone && String(d.phone).startsWith('+880')) return 'Bangladesh';
         if (d.phone && String(d.phone).startsWith('+86')) return 'China';
@@ -5617,7 +5594,7 @@ function leadParams(d, lead_id, balance) {
         return 'Bangladesh';
       }
       return nat;
-    })(),
+    })() : nationalityVal,
     passport: txt(d.passport),
     degree: txt(d.degree), major: majorVal,
     intake_term: txt(d.intake_term), university: txt(d.university),
@@ -5636,9 +5613,9 @@ function leadParams(d, lead_id, balance) {
     // Active application stage
     application_stage: txt(d.application_stage),
     // Market & Agent Portal
-    lead_market: txt(d.lead_market) || 'Bangladesh',
+    lead_market: applyCreateDefaults ? (leadMarketVal || 'Bangladesh') : leadMarketVal,
     agency_id: numNull(d.agency_id),
-    lead_type: txt(d.lead_type) || 'B2C',
+    lead_type: applyCreateDefaults ? (leadTypeVal || 'B2C') : leadTypeVal,
     // Ad Attribution
     ad_name: txt(d.ad_name),
     page_name: txt(d.page_name),
@@ -5779,7 +5756,7 @@ app.put('/api/leads/:id', async (req, res) => {
     if (!d.lead_market) d.lead_market = 'Bangladesh';
 
     const balance = (parseFloat(d.service_fee)||0) - (parseFloat(d.paid)||0);
-    const params = leadParams(d, oldLead.lead_id, balance);
+    const params = leadParams(d, oldLead.lead_id, balance, { applyCreateDefaults: false });
     delete params.lead_id;
     delete params.date_added;
     db.prepare(LEAD_UPDATE_SQL).run({ ...params, id: oldLead.id });
@@ -5861,7 +5838,8 @@ app.post('/api/leads/bulk-assign', (req, res) => requireManagerOrAdmin(req, res,
   }
 }));
 
-app.get('/api/leads/duplicates', (req, res) => requireManagerOrAdmin(req, res, () => {
+function handleLeadDuplicates(req, res) {
+  requireManagerOrAdmin(req, res, () => {
   try {
     const query = `
       SELECT * FROM leads 
@@ -5882,7 +5860,8 @@ app.get('/api/leads/duplicates', (req, res) => requireManagerOrAdmin(req, res, (
     }
     res.json({ ok: true, groups: Object.values(groups) });
   } catch (e) { res.status(500).json({ error: e.message }); }
-}));
+  });
+}
 
 app.post('/api/leads/merge', (req, res) => requireManagerOrAdmin(req, res, () => {
   const { primary_id, secondary_ids } = req.body;
@@ -5957,7 +5936,7 @@ app.post('/api/leads/bulk-delete', (req, res) => requireManagerOrAdmin(req, res,
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
-app.get('/api/admin/db-breakdown', (req, res) => {
+app.get('/api/admin/db-breakdown', (req, res) => requireAdmin(req, res, () => {
   try {
     const totalLeads = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
     const pageBreakdown = db.prepare("SELECT page_name, COUNT(*) as count FROM leads GROUP BY page_name").all();
@@ -5981,41 +5960,11 @@ app.get('/api/admin/db-breakdown', (req, res) => {
       WHERE lead_id LIKE 'LEAD-%' OR passport IS NOT NULL AND passport != ''
     `).get().c;
 
-    let purgedCount = 0;
-    if (req.query.purge === 'true') {
-      const studyLeads = db.prepare(`
-        SELECT id, lead_id FROM leads 
-        WHERE LOWER(COALESCE(page_name,'')) LIKE '%study%' 
-           OR LOWER(COALESCE(page_name,'')) LIKE '%work%' 
-           OR LOWER(COALESCE(page_name,'')) LIKE '%abroad%'
-           OR LOWER(COALESCE(source,'')) LIKE '%study%'
-           OR LOWER(COALESCE(source,'')) LIKE '%work%'
-           OR LOWER(COALESCE(source,'')) LIKE '%abroad%'
-           OR LOWER(COALESCE(lead_source,'')) LIKE '%study%'
-           OR LOWER(COALESCE(lead_source,'')) LIKE '%work%'
-           OR LOWER(COALESCE(lead_source,'')) LIKE '%abroad%'
-      `).all();
-
-      const runPurgeTxn = db.transaction(() => {
-        for (const l of studyLeads) {
-          db.prepare("DELETE FROM conversations WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id);
-          db.prepare("DELETE FROM contacts WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id);
-          try { db.prepare("DELETE FROM lead_documents WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
-          try { db.prepare("DELETE FROM lead_university_applications WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
-          try { db.prepare("DELETE FROM activity_log WHERE lead_id=? OR lead_id=?").run(l.id, l.lead_id); } catch {}
-          const info = db.prepare("DELETE FROM leads WHERE id=?").run(l.id);
-          purgedCount += info.changes;
-        }
-      });
-      runPurgeTxn();
-    }
-
     res.json({
       success: true,
       totalLeads,
       excelLeadsCount,
       studyLeadsCount,
-      purgedCount,
       pageBreakdown,
       statusBreakdown,
       stageBreakdown
@@ -6023,10 +5972,13 @@ app.get('/api/admin/db-breakdown', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}));
 
-app.post('/api/admin/delete-by-page', (req, res) => {
+app.post('/api/admin/delete-by-page', (req, res) => requireAdmin(req, res, () => {
   try {
+    if (req.body?.confirmation !== 'DELETE_STUDY_WORK_ABROAD') {
+      return res.status(400).json({ error: 'Explicit deletion confirmation is required.' });
+    }
     const matchingLeads = db.prepare(`
       SELECT id, lead_id, client_name, page_name, phone 
       FROM leads 
@@ -6082,7 +6034,7 @@ app.post('/api/admin/delete-by-page', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}));
 
 app.post('/api/leads/auto-cleanup', (req, res) => requireManagerOrAdmin(req, res, () => {
   try {
@@ -6371,7 +6323,7 @@ app.post('/api/import/applications', (req, res) => requireAdmin(req, res, () => 
   catch (e) { res.status(500).json({ error: e.message }); }
 }));
 
-app.post('/api/import/file-updates-2026', (req, res) => {
+app.post('/api/import/file-updates-2026', (req, res) => requireAdmin(req, res, () => {
   try {
     const xlsx = require('xlsx');
     const fs = require('fs');
@@ -6476,7 +6428,7 @@ app.post('/api/import/file-updates-2026', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 app.get('/api/debug/db', (req, res) => requireAdmin(req, res, () => {
   try {
@@ -6504,6 +6456,9 @@ app.get('/api/debug/db', (req, res) => requireAdmin(req, res, () => {
 // Finance (income/expenses), employees, attendance, payroll, users & settings are NEVER touched.
 app.delete('/api/admin/wipe-leads', (req, res) => requireAdmin(req, res, () => {
   try {
+    if (req.body?.confirmation !== 'WIPE_ALL_LEADS') {
+      return res.status(400).json({ error: 'Explicit deletion confirmation is required.' });
+    }
     const wipeConversations = !!(req.body && req.body.conversations);
     const count = db.prepare("SELECT COUNT(*) as c FROM leads").get().c;
 
@@ -6556,9 +6511,9 @@ app.post('/api/health/restore', express.raw({ type: 'application/octet-stream', 
     if (!req.body || !Buffer.isBuffer(req.body)) {
       return res.status(400).json({ error: 'No database file provided or invalid format.' });
     }
-    const restorePath = join(__dirname, 'restore.db');
-    writeFileSync(restorePath, req.body);
-    res.json({ message: 'Backup file received. Server is restarting to apply changes...' });
+    validateDatabaseBuffer(req.body, ['users', 'leads', 'channels', 'conversations', 'messages']);
+    writeFileSync(restoreDbPath, req.body, { mode: 0o600 });
+    res.json({ message: 'Validated backup received. Server is restarting to apply it atomically...' });
     
     // Give response time to flush before exiting
     setTimeout(() => {
@@ -6611,7 +6566,7 @@ app.post('/api/leads/:id/reply-to-student', (req, res) => {
 app.get('/api/media/:msgId', async (req, res) => {
   try {
     const row = db.prepare(`
-      SELECT m.id, m.media_url, m.media_mime, m.type as msg_type,
+      SELECT m.id, m.conversation_id, m.media_url, m.media_mime, m.type as msg_type,
              ch.access_token, ch.type as chan_type
       FROM messages m
       JOIN conversations cv ON cv.id = m.conversation_id
@@ -6622,6 +6577,9 @@ app.get('/api/media/:msgId', async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: 'Message not found' });
     }
+    if (!userHasAccessToConversation(req.user, row.conversation_id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     if (!row.media_url) {
       return res.status(400).json({ error: 'Message has no media attachment' });
@@ -6629,7 +6587,8 @@ app.get('/api/media/:msgId', async (req, res) => {
 
     // 1. Local uploads
     if (row.media_url.startsWith('/uploads')) {
-      const filePath = join(__dirname, row.media_url);
+      const filename = row.media_url.split('/').pop();
+      const filePath = join(UPLOADS_DIR, filename);
       if (existsSync(filePath)) {
         return res.sendFile(filePath);
       }
@@ -6639,7 +6598,14 @@ app.get('/api/media/:msgId', async (req, res) => {
     // 2. Direct HTTP/HTTPS URLs (Messenger/Instagram)
     if (row.media_url.startsWith('http')) {
       try {
-        const mediaRes = await fetch(row.media_url);
+        const remoteUrl = new URL(row.media_url);
+        const allowedHost = ['facebook.com', 'fbcdn.net', 'cdninstagram.com'].some(
+          domain => remoteUrl.hostname === domain || remoteUrl.hostname.endsWith(`.${domain}`)
+        );
+        if (remoteUrl.protocol !== 'https:' || !allowedHost) {
+          return res.status(400).json({ error: 'Remote media host is not allowed.' });
+        }
+        const mediaRes = await fetch(remoteUrl);
         if (!mediaRes.ok) {
           return res.status(mediaRes.status).json({ error: `Failed to fetch remote media: ${mediaRes.statusText}` });
         }
@@ -6700,37 +6666,6 @@ app.get('/api/media/:msgId', async (req, res) => {
   }
 });
 
-app.get('/api/public/debug-db', (req, res) => {
-  const token = req.query.token || req.headers['x-api-key'];
-  if (token !== INTERNAL_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  res.download(DB_PATH, 'crm.db');
-});
-
-app.post('/api/public/client-log', (req, res) => {
-  try {
-    const logPath = join(__dirname, 'dist', 'client-errors.json');
-    let logs = [];
-    if (existsSync(logPath)) {
-      try {
-        logs = JSON.parse(readFileSync(logPath, 'utf8'));
-      } catch {}
-    }
-    const entry = {
-      timestamp: new Date().toISOString(),
-      ...req.body
-    };
-    console.log('[Client Error Logged]', entry);
-    logs.push(entry);
-    if (logs.length > 100) logs = logs.slice(-100);
-    writeFileSync(logPath, JSON.stringify(logs, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[Client Log Error]', err.message);
-  }
-  res.json({ ok: true });
-});
-
 // Public — student fetches the conversation thread (their messages + staff replies)
 app.get('/api/public/student/:token/thread', (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
@@ -6773,6 +6708,8 @@ app.put('/api/leads/:id/public', (req, res) => {
 
 // QR code as a PNG image, generated via a public QR endpoint. We proxy it so
 // the front-end can embed without exposing the URL builder logic.
+// This route stays read-only: enabling the portal or minting a token must
+// happen explicitly through the share-link endpoints.
 app.get('/api/leads/:id/qr', async (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE id=?").get(req.params.id);
   if (!lead) return res.status(404).end();
@@ -6781,10 +6718,8 @@ app.get('/api/leads/:id/qr', async (req, res) => {
     return res.status(403).end();
   }
   if (!leadIsVisibleTo(lead, req.user)) return res.status(403).end();
-  if (!lead.public_token) {
-    const token = generatePublicToken();
-    db.prepare("UPDATE leads SET public_token=?, public_enabled=1 WHERE id=?").run(token, lead.id);
-    lead.public_token = token;
+  if (!lead.public_enabled || !lead.public_token) {
+    return res.status(409).json({ error: 'Portal link is not active.' });
   }
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   const host = req.headers['x-forwarded-host'] || req.get('host');
@@ -6858,14 +6793,17 @@ app.get('/api/public/student/:token', (req, res) => {
 });
 
 // PUBLIC — student attaches a Drive (or any URL) link for a requested doc.
-app.post('/api/public/student/:token/documents/:docId', (req, res) => {
+app.post('/api/public/student/:token/documents/:docId', portalWriteLimiter, (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
   if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
   const doc = db.prepare("SELECT * FROM lead_documents WHERE id=? AND lead_id=?").get(req.params.docId, lead.id);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   const { url, notes } = req.body || {};
-  if (!url || !/^https?:\/\//i.test(String(url))) {
+  if (!url || String(url).length > 2048 || !/^https?:\/\//i.test(String(url))) {
     return res.status(400).json({ error: 'A valid http(s) URL is required (e.g. a Google Drive share link).' });
+  }
+  if (notes != null && String(notes).length > 1000) {
+    return res.status(400).json({ error: 'Notes must be 1000 characters or fewer.' });
   }
   db.prepare(`UPDATE lead_documents SET
       student_uploaded_url=?, student_uploaded_at=datetime('now'),
@@ -6879,11 +6817,12 @@ app.post('/api/public/student/:token/documents/:docId', (req, res) => {
 });
 
 // PUBLIC — student sends a short message. Becomes a 'note' in the timeline.
-app.post('/api/public/student/:token/message', (req, res) => {
+app.post('/api/public/student/:token/message', portalWriteLimiter, (req, res) => {
   const lead = db.prepare("SELECT * FROM leads WHERE public_token=? AND public_enabled=1").get(req.params.token);
   if (!lead) return res.status(404).json({ error: 'This portal link is not active.' });
   const { text } = req.body || {};
   if (!text || !String(text).trim()) return res.status(400).json({ error: 'text is required' });
+  if (String(text).trim().length > 2000) return res.status(400).json({ error: 'Message must be 2000 characters or fewer.' });
   logActivity({ type: 'note', actor: { name: `${lead.client_name} (Student)` }, lead, details: `[via student portal] ${String(text).trim()}` });
   res.json({ ok: true });
 });
@@ -6891,7 +6830,7 @@ app.post('/api/public/student/:token/message', (req, res) => {
 // ─────────────────────────────────────────────────────────
 // FINANCE
 // ─────────────────────────────────────────────────────────
-app.get('/api/income', (req, res) => {
+app.get('/api/income', requireFinance, (req, res) => {
   const { month, page=1, limit=50 } = req.query;
   const pageNum = Math.max(1, parseInt(page) || 1);
   const limitNum = Math.min(Math.max(1, parseInt(limit) || 50), 500);
@@ -6904,7 +6843,7 @@ app.get('/api/income', (req, res) => {
   const rows = db.prepare(`SELECT i.*, e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id ${w} ORDER BY i.date DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
   res.json({ rows, total, sum, page: pageNum, pages: Math.ceil(total/limitNum) });
 });
-app.post('/api/income', (req, res) => {
+app.post('/api/income', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes,employee_id) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes,@employee_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null });
   const row = db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid);
@@ -6913,14 +6852,14 @@ app.post('/api/income', (req, res) => {
   logActivity({ type: 'payment_recorded', actor: req.user, lead, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference } });
   res.json(row);
 });
-app.put('/api/income/:id', (req, res) => {
+app.put('/api/income/:id', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   db.prepare(`UPDATE income SET date=@date,month=@month,category=@category,lead_id=@lead_id,client_name=@client_name,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null });
   res.json(db.prepare("SELECT * FROM income WHERE id=?").get(req.params.id));
 });
-app.delete('/api/income/:id', (req, res) => { db.prepare("DELETE FROM income WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+app.delete('/api/income/:id', requireFinanceManager, (req, res) => { db.prepare("DELETE FROM income WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
-app.get('/api/expenses', (req, res) => {
+app.get('/api/expenses', requireFinance, (req, res) => {
   const { month, page=1, limit=50 } = req.query;
   const pageNum = Math.max(1, parseInt(page) || 1);
   const limitNum = Math.min(Math.max(1, parseInt(limit) || 50), 500);
@@ -6933,21 +6872,21 @@ app.get('/api/expenses', (req, res) => {
   const rows = db.prepare(`SELECT x.*, e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id ${w} ORDER BY x.date DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
   res.json({ rows, total, sum, page: pageNum, pages: Math.ceil(total/limitNum) });
 });
-app.post('/api/expenses', (req, res) => {
+app.post('/api/expenses', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   const info = db.prepare(`INSERT INTO expenses (date,month,category,paid_to,reference,amount,notes,employee_id,student_name,lead_id) VALUES (@date,@month,@category,@paid_to,@reference,@amount,@notes,@employee_id,@student_name,@lead_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null, lead_id: d.lead_id || null });
   const row = db.prepare("SELECT * FROM expenses WHERE id=?").get(info.lastInsertRowid);
   logActivity({ type: 'expense_recorded', actor: req.user, amount: row.amount, details: { paid_to: row.paid_to, category: row.category, reference: row.reference, student_name: row.student_name, lead_id: row.lead_id } });
   res.json(row);
 });
-app.put('/api/expenses/:id', (req, res) => {
+app.put('/api/expenses/:id', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
   db.prepare(`UPDATE expenses SET date=@date,month=@month,category=@category,paid_to=@paid_to,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id,student_name=@student_name,lead_id=@lead_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null, lead_id: d.lead_id || null });
   res.json(db.prepare("SELECT * FROM expenses WHERE id=?").get(req.params.id));
 });
-app.delete('/api/expenses/:id', (req, res) => { db.prepare("DELETE FROM expenses WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+app.delete('/api/expenses/:id', requireFinanceManager, (req, res) => { db.prepare("DELETE FROM expenses WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
-app.get('/api/students-list', (req, res) => {
+app.get('/api/students-list', requireFinance, (req, res) => {
   const rows = db.prepare(`
     SELECT id, lead_id, client_name, phone, destination, university, application_stage, lead_status
     FROM leads
@@ -6958,7 +6897,7 @@ app.get('/api/students-list', (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/pnl', (req, res) => {
+app.get('/api/pnl', requireFinance, (req, res) => {
   const months = db.prepare("SELECT DISTINCT month FROM (SELECT month FROM income UNION SELECT month FROM expenses) WHERE month IS NOT NULL ORDER BY month").all().map(r => r.month);
   res.json(months.map(m => {
     const inc = db.prepare("SELECT SUM(amount) as s FROM income WHERE month=? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(m).s||0;
@@ -6989,7 +6928,7 @@ function computeOpeningBalance(month) {
 }
 
 // Categories endpoint — frontend uses these as dropdown presets.
-app.get('/api/cashflow/categories', (req, res) => {
+app.get('/api/cashflow/categories', requireFinance, (req, res) => {
   res.json({ income: INCOME_CATEGORIES, expense: EXPENSE_CATEGORIES });
 });
 
@@ -7122,31 +7061,52 @@ app.post('/api/employees/auto-link', (req, res) => {
   }
 });
 
-app.get('/api/employees', (req, res) => res.json(db.prepare("SELECT * FROM employees ORDER BY id").all()));
-app.get('/api/employees/active', (req, res) => res.json(db.prepare("SELECT id, emp_id, name, role, email, phone, salary FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1' ORDER BY name").all()));
-app.post('/api/employees', (req, res) => {
+app.get('/api/employees', (req, res) => {
+  const columns = (isFullAdmin(req.user) || isInvestor(req.user))
+    ? '*'
+    : 'id, emp_id, name, role, email, phone, active, join_date';
+  res.json(db.prepare(`SELECT ${columns} FROM employees ORDER BY id`).all());
+});
+app.get('/api/employees/active', (req, res) => {
+  const columns = (isFullAdmin(req.user) || isInvestor(req.user))
+    ? 'id, emp_id, name, role, email, phone, salary'
+    : 'id, emp_id, name, role, email, phone';
+  res.json(db.prepare(`SELECT ${columns} FROM employees WHERE active = 'Yes' OR active IS NULL OR active = '1' ORDER BY name`).all());
+});
+app.post('/api/employees', requireAdmin, (req, res) => {
   const d = req.body;
   const info = db.prepare(`INSERT INTO employees (emp_id,name,role,email,phone,device_id,salary,active,join_date) VALUES (@emp_id,@name,@role,@email,@phone,@device_id,@salary,@active,@join_date)`).run({ ...d, salary: d.salary||0, active: d.active||'Yes', join_date: d.join_date||null });
   res.json(db.prepare("SELECT * FROM employees WHERE id=?").get(info.lastInsertRowid));
 });
-app.put('/api/employees/:id', (req, res) => {
+app.put('/api/employees/:id', requireAdmin, (req, res) => {
   const d = req.body;
   db.prepare(`UPDATE employees SET emp_id=@emp_id,name=@name,role=@role,email=@email,phone=@phone,device_id=@device_id,salary=@salary,active=@active,join_date=@join_date WHERE id=@id`).run({ ...d, id: req.params.id, salary: d.salary||0, join_date: d.join_date||null });
   res.json(db.prepare("SELECT * FROM employees WHERE id=?").get(req.params.id));
 });
-app.delete('/api/employees/:id', (req, res) => { db.prepare("DELETE FROM employees WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+app.delete('/api/employees/:id', requireAdmin, (req, res) => { db.prepare("DELETE FROM employees WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
 app.get('/api/attendance', (req, res) => {
   const { month, emp_id, date } = req.query;
   const where=[]; const params={};
   if (month)  { where.push("date LIKE @month"); params.month=`${month}%`; }
-  if (emp_id) { where.push("emp_id=@emp_id");   params.emp_id=emp_id; }
+  if (isFullAdmin(req.user) || isInvestor(req.user)) {
+    if (emp_id) { where.push("emp_id=@emp_id"); params.emp_id=emp_id; }
+  } else {
+    const ownEmployee = findEmployeeForUser(req.user);
+    if (!ownEmployee) return res.json([]);
+    where.push("emp_id=@emp_id");
+    params.emp_id = ownEmployee.emp_id;
+  }
   if (date)   { where.push("date=@date");        params.date=date; }
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
   res.json(db.prepare(`SELECT * FROM attendance ${ws} ORDER BY date DESC, check_in DESC`).all(params));
 });
 app.post('/api/attendance/checkin', (req, res) => {
   const { emp_id, date, time, device_id, ssid, source } = req.body;
+  const ownEmployee = findEmployeeForUser(req.user);
+  if (!isFullAdmin(req.user) && (!ownEmployee || String(ownEmployee.emp_id) !== String(emp_id))) {
+    return res.status(403).json({ error: 'You can only check in your own employee record.' });
+  }
   const emp = db.prepare("SELECT * FROM employees WHERE emp_id=?").get(emp_id);
   if (!emp) return res.status(404).json({ error: 'Employee not found' });
   const existing = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date=?").get(emp_id, date);
@@ -7162,6 +7122,10 @@ app.put('/api/attendance/:id/checkout', (req, res) => {
   const { time } = req.body;
   const rec = db.prepare("SELECT * FROM attendance WHERE id=?").get(req.params.id);
   if (!rec) return res.status(404).json({ error: 'Not found' });
+  const ownEmployee = findEmployeeForUser(req.user);
+  if (!isFullAdmin(req.user) && (!ownEmployee || String(ownEmployee.emp_id) !== String(rec.emp_id))) {
+    return res.status(403).json({ error: 'You can only check out your own attendance record.' });
+  }
   let hours_worked = null;
   if (rec.check_in && time) {
     const [ih,im] = rec.check_in.split(':').map(Number);
@@ -7171,20 +7135,20 @@ app.put('/api/attendance/:id/checkout', (req, res) => {
   db.prepare("UPDATE attendance SET check_out=?,hours_worked=? WHERE id=?").run(time, hours_worked, req.params.id);
   res.json(db.prepare("SELECT * FROM attendance WHERE id=?").get(req.params.id));
 });
-app.post('/api/attendance', (req, res) => {
+app.post('/api/attendance', requireAdmin, (req, res) => {
   const d = req.body;
   const emp = db.prepare("SELECT * FROM employees WHERE emp_id=?").get(d.emp_id);
   const info = db.prepare(`INSERT INTO attendance (emp_id,name,date,check_in,check_out,hours_worked,status,device_id,ssid,source,notes) VALUES (@emp_id,@name,@date,@check_in,@check_out,@hours_worked,@status,@device_id,@ssid,@source,@notes)`).run({ emp_id: d.emp_id, name: emp?.name||d.name||'', date: d.date, check_in: d.check_in||d.time, check_out: d.check_out||null, hours_worked: d.hours_worked||null, status: d.status||'Present', device_id: d.device_id||'', ssid: d.ssid||'', source: d.source||'manual', notes: d.notes||null });
   res.json(db.prepare("SELECT * FROM attendance WHERE id=?").get(info.lastInsertRowid));
 });
-app.put('/api/attendance/:id', (req, res) => {
+app.put('/api/attendance/:id', requireAdmin, (req, res) => {
   const d = req.body;
   db.prepare(`UPDATE attendance SET check_in=@check_in,check_out=@check_out,hours_worked=@hours_worked,status=@status,notes=@notes WHERE id=@id`).run({ ...d, id: req.params.id });
   res.json(db.prepare("SELECT * FROM attendance WHERE id=?").get(req.params.id));
 });
-app.delete('/api/attendance/:id', (req, res) => { db.prepare("DELETE FROM attendance WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+app.delete('/api/attendance/:id', requireAdmin, (req, res) => { db.prepare("DELETE FROM attendance WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
-app.get('/api/attendance/summary/:month', (req, res) => {
+app.get('/api/attendance/summary/:month', requireHRView, (req, res) => {
   const { month } = req.params;
   const [y,m] = month.split('-').map(Number);
   const daysInMonth = new Date(y,m,0).getDate();
@@ -7227,7 +7191,7 @@ app.get('/api/kpi/:month', (req, res) => {
     return { consultant:c, total, thisMonth, enrolled:byStatus['Enrolled']||0, fileOpened:byStatus['File Opened']||0, officeVisited:byStatus['Office Visited']||0, positive:byStatus['Positive']||0, notInterested:byStatus['Not Interested']||0, revenue, collected, conversionRate: total>0?((( byStatus['File Opened']||0)/total)*100).toFixed(1):0, responseRate: total>0?(((total-(byStatus['No Response']||0))/total)*100).toFixed(1):0, target_leads:target.target_leads||0, target_enrolled:target.target_enrolled||0, target_revenue:target.target_revenue||0 };
   }));
 });
-app.put('/api/kpi/targets', (req, res) => {
+app.put('/api/kpi/targets', requireAdmin, (req, res) => {
   const { consultant, month, target_leads, target_enrolled, target_revenue } = req.body;
   if (!consultant || !month) return res.status(400).json({ error: 'consultant and month are required' });
   try {
@@ -7744,19 +7708,29 @@ app.get('/api/employee-kpi/:emp_id', (req, res) => requireManagerOrAdmin(req, re
 // ─────────────────────────────────────────────────────────
 app.get('/api/channels', (req, res) => {
   const channels = db.prepare("SELECT * FROM channels ORDER BY id").all();
-  // Mask tokens
-  let result = channels.map(c => ({ ...c, access_token: c.access_token ? c.access_token.slice(0,14)+'••••••' : null }));
+  // Never expose full channel secrets in list responses.
+  let result = channels.map(c => ({
+    ...c,
+    access_token: isFullAdmin(req.user) && c.access_token ? `••••${c.access_token.slice(-4)}` : null,
+    webhook_verify_token: isFullAdmin(req.user) ? c.webhook_verify_token : undefined,
+  }));
   
   // Filter for non-admin/non-manager
   const loggedInUser = db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
-  if (loggedInUser && loggedInUser.role !== 'admin' && loggedInUser.role !== 'manager') {
+  if (loggedInUser && !canViewAllConversations(req.user)) {
     const employee = loggedInUser.emp_id
       ? db.prepare("SELECT phone FROM employees WHERE emp_id=?").get(loggedInUser.emp_id)
       : null;
     const empPhone = employee?.phone ? String(employee.phone).replace(/\D/g, '') : '';
+    const consultantName = String(loggedInUser.consultant_name || loggedInUser.name || '').trim().toLowerCase();
+    const explicitChannelIds = new Set(
+      db.prepare("SELECT channel_id FROM channel_access WHERE user_id=?").all(req.user.id).map(row => Number(row.channel_id)),
+    );
     
     result = result.filter(ch => {
       if (ch.type !== 'whatsapp') return true;
+      if (explicitChannelIds.has(Number(ch.id))) return true;
+      if (consultantName && String(ch.consultant || '').trim().toLowerCase() === consultantName) return true;
       if (!empPhone || empPhone.length < 6) return false;
       const cleanName = String(ch.name || '').replace(/\D/g, '');
       const cleanPhoneId = String(ch.phone_number_id || '').replace(/\D/g, '');
@@ -7768,7 +7742,7 @@ app.get('/api/channels', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/channels/:id/bulk-scan', (req, res) => {
+app.post('/api/channels/:id/bulk-scan', requireManagerOrAdmin, (req, res) => {
   try {
     const channelId = req.params.id;
     const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(channelId);
@@ -7784,7 +7758,7 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
       const allText = messages.map(m => m.content).join(' ');
       const inboundText = messages.filter(m => m.direction === 'in').map(m => m.content).join(' ');
       
-      const phoneRegex = /(?:(?:\+|00)?880?[\s\-]?)?(?:0[\s\-]?)?1[\s\-]?[3-9](?:[\s\-]*\d){8}/g;
+      const phoneRegex = /(?:(?:\+|00)?880?[\s-]?)?(?:0[\s-]?)?1[\s-]?[3-9](?:[\s-]*\d){8}/g;
       
       const banglaToEnglish = (str) => {
         const banglaDigits = {'০':'0','১':'1','২':'2','৩':'3','৪':'4','৫':'5','৬':'6','৭':'7','৮':'8','৯':'9'};
@@ -7800,7 +7774,7 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
       
       let extractedPhone = null;
       for (let p of rawPhones) {
-        let cleanP = p.replace(/[\s\-]/g, '');
+        let cleanP = p.replace(/[\s-]/g, '');
         if (cleanP.startsWith('01')) cleanP = '+88' + cleanP;
         if (!companyNumbers.includes(cleanP)) {
           extractedPhone = cleanP;
@@ -7910,16 +7884,16 @@ app.post('/api/channels/:id/bulk-scan', (req, res) => {
   }
 });
 
-app.post('/api/channels', (req, res) => {
+app.post('/api/channels', requireAdmin, (req, res) => {
   const d = req.body;
   const info = db.prepare(`INSERT INTO channels (type,name,consultant,phone_number_id,waba_id,page_id,ig_account_id,access_token,webhook_verify_token,status,color,active) VALUES (@type,@name,@consultant,@phone_number_id,@waba_id,@page_id,@ig_account_id,@access_token,@webhook_verify_token,@status,@color,@active)`)
-    .run({ type: d.type, name: d.name, consultant: d.consultant||null, phone_number_id: d.phone_number_id||null, waba_id: d.waba_id||null, page_id: d.page_id||null, ig_account_id: d.ig_account_id||null, access_token: d.access_token||null, webhook_verify_token: d.webhook_verify_token||'eduexpress_verify_2024', status: d.status||'active', color: d.color||'#3b82f6', active: d.active ?? 1 });
+    .run({ type: d.type, name: d.name, consultant: d.consultant||null, phone_number_id: d.phone_number_id||null, waba_id: d.waba_id||null, page_id: d.page_id||null, ig_account_id: d.ig_account_id||null, access_token: d.access_token||null, webhook_verify_token: d.webhook_verify_token || getConfig('verify_token') || META_WEBHOOK_VERIFY_TOKEN || null, status: d.status||'active', color: d.color||'#3b82f6', active: d.active ?? 1 });
   const newChan = db.prepare("SELECT * FROM channels WHERE id=?").get(info.lastInsertRowid);
   syncChannelMetadata(newChan.id).catch(e => console.error('[channel-metadata] Post-create sync failed:', e.message));
   res.json(newChan);
 });
 
-app.put('/api/channels/:id', (req, res) => {
+app.put('/api/channels/:id', requireAdmin, (req, res) => {
   const d = req.body;
   const existing = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
@@ -7931,7 +7905,7 @@ app.put('/api/channels/:id', (req, res) => {
   res.json(updatedChan);
 });
 
-app.delete('/api/channels/:id', (req, res) => { db.prepare("DELETE FROM channels WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+app.delete('/api/channels/:id', requireAdmin, (req, res) => { db.prepare("DELETE FROM channels WHERE id=?").run(req.params.id); res.json({ ok:true }); });
 
 // Track in-flight syncs so a channel can't be synced twice at once.
 const activeSyncs = new Set();
@@ -8128,7 +8102,7 @@ async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
       + `&fields=updated_time,participants,snippet`
       + `&limit=50&access_token=${token}`;
 
-    console.log(`[sync] Starting ${channel.name} (${platform}) pageId=${pageId} token=${token.slice(0,14)}...`);
+    console.log(`[sync] Starting ${channel.name} (${platform}) pageId=${pageId}`);
 
     let stop = false;
     while (convUrl && !stop && imported + skipped < MAX_MESSAGES && conversations < maxConvs) {
@@ -8217,7 +8191,7 @@ async function syncChannelMessages(channelId, months = 6, maxConvs = 100) {
 // Runs in the BACKGROUND and responds immediately — a long sync would otherwise
 // exceed nginx's gateway timeout (504). Progress streams over SSE; the inbox
 // polling picks up new conversations as they're imported.
-app.post('/api/channels/:id/load-history', async (req, res) => {
+app.post('/api/channels/:id/load-history', requireAdmin, async (req, res) => {
   const channel = db.prepare("SELECT * FROM channels WHERE id=?").get(req.params.id);
   if (!channel) return res.status(404).json({ error: 'Channel not found' });
   let effectiveToken = channel.access_token || getConfig('page_access_token');
@@ -8331,7 +8305,7 @@ app.get('/api/conversations', (req, res) => {
     const meConsultant = (loggedInUser?.consultant_name || '').trim();
     
     const employee = loggedInUser?.emp_id
-      ? db.prepare("SELECT phone FROM employees WHERE emp_id=?").get(loggedInUser.emp_id)
+      ? db.prepare("SELECT id, phone FROM employees WHERE emp_id=?").get(loggedInUser.emp_id)
       : null;
     const empPhone = employee?.phone ? String(employee.phone).replace(/\D/g, '') : '';
 
@@ -8366,11 +8340,12 @@ app.get('/api/conversations', (req, res) => {
     }
 
     if (accessibleChannelIds.length > 0) {
-      where.push(`(conversations.channel_id IN (${accessibleChannelIds.join(',')}) OR conversations.assigned_to = @user_id)`);
+      where.push(`(conversations.channel_id IN (${accessibleChannelIds.join(',')}) OR conversations.assigned_to_id IN (@user_id, @employee_id))`);
     } else {
-      where.push("conversations.assigned_to = @user_id");
+      where.push("conversations.assigned_to_id IN (@user_id, @employee_id)");
     }
     params.user_id = user.id;
+    params.employee_id = employee?.id || -1;
   }
   
   // China data isolation: exclude conversations linked to China leads for unauthorized users
@@ -8383,9 +8358,12 @@ app.get('/api/conversations', (req, res) => {
     return res.json({ conversations: [], total: 0, page: 1, pages: 0 });
   }
 
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10) || 30));
+  const offset = (pageNum - 1) * limitNum;
   const ws = where.length ? 'WHERE '+where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) as c FROM conversations LEFT JOIN contacts ON contacts.id=conversations.contact_id LEFT JOIN channels ON channels.id=conversations.channel_id LEFT JOIN leads ON leads.id = conversations.lead_id ${ws}`).get(params).c;
-  const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limit} OFFSET ${(page-1)*limit}`).all(params);
+  const convs = db.prepare(`${CONV_SELECT} ${ws} ORDER BY conversations.last_message_at DESC LIMIT ${limitNum} OFFSET ${offset}`).all(params);
 
   // Compute SLA status and priority per conversation
   const now = Date.now();
@@ -8404,13 +8382,19 @@ app.get('/api/conversations', (req, res) => {
       sla_status = 'red';
     }
     // Priority: has 'priority' tag OR new lead without any outbound response
-    let priority = 0;
+    let isPriority = false;
     if (priorityTagIds.length) {
       const hasTag = db.prepare("SELECT 1 FROM conversation_tags WHERE conversation_id=? AND tag_id IN (" + priorityTagIds.map(() => '?').join(',') + ") LIMIT 1").get(c.id, ...priorityTagIds);
-      if (hasTag) priority = 1;
+      isPriority = Boolean(hasTag);
     }
+    let priority = isPriority ? 1 : 0;
     if (!priority && c.lead_id && c.outbound_count === 0) priority = 1;
-    return { ...c, sla_status, priority };
+    const tags = db.prepare(`
+      SELECT t.* FROM contact_tags t
+      JOIN conversation_tags ct ON ct.tag_id=t.id
+      WHERE ct.conversation_id=? ORDER BY t.name
+    `).all(c.id);
+    return { ...c, sla_status, priority, is_priority: isPriority, tags };
   });
 
   // Sort strictly by last_message_at desc
@@ -8418,7 +8402,7 @@ app.get('/api/conversations', (req, res) => {
     return (b.last_message_at || '').localeCompare(a.last_message_at || '');
   });
 
-  res.json({ conversations: convWithMeta, total, page: parseInt(page), pages: Math.ceil(total/limit) });
+  res.json({ conversations: convWithMeta, total, page: pageNum, pages: Math.ceil(total / limitNum) });
 });
 
 app.get('/api/conversations/:id', (req, res) => {
@@ -8430,13 +8414,21 @@ app.get('/api/conversations/:id', (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
-  res.json(conv);
+  const priorityTag = db.prepare("SELECT id FROM contact_tags WHERE LOWER(name)='priority' LIMIT 1").get();
+  const isPriority = priorityTag
+    ? Boolean(db.prepare("SELECT 1 FROM conversation_tags WHERE conversation_id=? AND tag_id=?").get(conv.id, priorityTag.id))
+    : false;
+  const tags = db.prepare(`
+    SELECT t.* FROM contact_tags t
+    JOIN conversation_tags ct ON ct.tag_id=t.id
+    WHERE ct.conversation_id=? ORDER BY t.name
+  `).all(conv.id);
+  res.json({ ...conv, priority: isPriority ? 1 : 0, is_priority: isPriority, tags });
 });
 
 // Convert conversation contact into a CRM lead (creating new lead or linking to existing)
 app.post('/api/conversations/:id/convert-lead', (req, res) => {
   try {
-    if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const { lead_id, destination, phone, degree, client_name } = req.body;
     if (!userHasAccessToConversation(req.user, req.params.id)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -8449,6 +8441,12 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
       // Link to existing lead
       lead = db.prepare("SELECT * FROM leads WHERE id=?").get(lead_id);
       if (!lead) return res.status(404).json({ error: 'Selected lead not found' });
+      if (isChinaBlockedForUser(lead, req.user)) {
+        return res.status(403).json({ error: 'Access denied to China lead records' });
+      }
+      if (!leadIsVisibleTo(lead, req.user)) {
+        return res.status(403).json({ error: 'Access denied to this lead record' });
+      }
 
       db.prepare("UPDATE contacts SET lead_id=? WHERE id=?").run(lead.id, conv.contact_id);
       db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(lead.id, conv.id);
@@ -8456,9 +8454,11 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
       // If lead does not have assigned consultant, assign the channel's consultant
       if (!lead.assigned_consultant || lead.assigned_consultant.trim() === '') {
         const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
-        const consultant = channel?.consultant || 'Abdullah Al Rakib';
-        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(consultant, lead.id);
-        lead.assigned_consultant = consultant;
+        const consultant = channel?.consultant;
+        if (consultant) {
+          db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(consultant, lead.id);
+          lead.assigned_consultant = consultant;
+        }
       }
     } else {
       try {
@@ -8487,6 +8487,9 @@ app.post('/api/conversations/:id/convert-lead', (req, res) => {
 // Quick Convert to Lead from conversation (manual override with provided data)
 app.post('/api/conversations/:id/convert-to-lead', (req, res) => {
   try {
+    if (!userHasAccessToConversation(req.user, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     const { client_name, phone, email, destination, source, notes } = req.body || {};
     const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
@@ -8602,22 +8605,66 @@ app.post('/api/leads/:id/convert-to-application', (req, res) => {
 
 app.put('/api/conversations/:id', (req, res) => {
   if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
-  const { status, assigned_to, lead_id } = req.body;
+  const { status, assigned_to, lead_id, is_priority } = req.body;
   db.prepare("UPDATE conversations SET status=COALESCE(@status,status), assigned_to=COALESCE(@assigned_to,assigned_to), lead_id=COALESCE(@lead_id,lead_id), unread_count=CASE WHEN @status='open' THEN unread_count ELSE 0 END WHERE id=@id")
-    .run({ status: status||null, assigned_to: assigned_to||null, lead_id: lead_id||null, id: req.params.id });
+    .run({ status: status ?? null, assigned_to: assigned_to ?? null, lead_id: lead_id ?? null, id: req.params.id });
 
   if (lead_id) {
     const conv = db.prepare("SELECT channel_id FROM conversations WHERE id=?").get(req.params.id);
     if (conv) {
       const channel = db.prepare("SELECT consultant FROM channels WHERE id=?").get(conv.channel_id);
       const lead = db.prepare("SELECT assigned_consultant FROM leads WHERE id=?").get(lead_id);
-      if (lead && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
-        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel?.consultant || 'Abdullah Al Rakib', lead_id);
+      if (lead && channel?.consultant && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
+        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel.consultant, lead_id);
       }
     }
   }
 
-  res.json(db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id));
+  let priorityTag = db.prepare("SELECT id FROM contact_tags WHERE LOWER(name)='priority' LIMIT 1").get();
+  if (typeof is_priority === 'boolean') {
+    if (!priorityTag && is_priority) {
+      const tagInfo = db.prepare("INSERT INTO contact_tags (name, color) VALUES (?,?)").run('Priority', '#f59e0b');
+      priorityTag = { id: tagInfo.lastInsertRowid };
+    }
+    if (priorityTag) {
+      if (is_priority) {
+        db.prepare("INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?,?)").run(req.params.id, priorityTag.id);
+      } else {
+        db.prepare("DELETE FROM conversation_tags WHERE conversation_id=? AND tag_id=?").run(req.params.id, priorityTag.id);
+      }
+    }
+  }
+
+  const updated = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
+  const isPriority = priorityTag
+    ? Boolean(db.prepare("SELECT 1 FROM conversation_tags WHERE conversation_id=? AND tag_id=?").get(req.params.id, priorityTag.id))
+    : false;
+  res.json({ ...updated, priority: isPriority ? 1 : 0, is_priority: isPriority });
+});
+
+app.put('/api/conversations/:id/assign', (req, res) => {
+  if (!userHasAccessToConversation(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  const userId = Number(req.body?.user_id);
+  if (!Number.isInteger(userId) || userId < 1) {
+    return res.status(400).json({ error: 'A valid user_id is required' });
+  }
+  if (userId !== Number(req.user.id) && !canViewAllConversations(req.user)) {
+    return res.status(403).json({ error: 'Only managers can assign conversations to another user' });
+  }
+  const target = db.prepare("SELECT id, name, consultant_name, emp_id FROM users WHERE id=? AND active=1").get(userId);
+  if (!target) return res.status(404).json({ error: 'Active user not found' });
+  const employee = target.emp_id
+    ? db.prepare("SELECT id, name FROM employees WHERE emp_id=? LIMIT 1").get(target.emp_id)
+    : null;
+  const assignedName = target.consultant_name || employee?.name || target.name;
+  const assignedId = employee?.id || userId;
+  db.prepare("UPDATE conversations SET assigned_to=?, assigned_to_id=? WHERE id=?")
+    .run(assignedName, assignedId, req.params.id);
+  const updated = db.prepare(`${CONV_SELECT} WHERE conversations.id=?`).get(req.params.id);
+  broadcast('conversation_updated', { id: updated.id, assigned_to: assignedName, assigned_to_id: assignedId });
+  res.json(updated);
 });
 
 // Create outbound conversation manually
@@ -8666,8 +8713,8 @@ app.post('/api/conversations', (req, res) => {
       db.prepare("UPDATE conversations SET lead_id=? WHERE id=?").run(resolvedLeadId, conversation.id);
       // Auto-assign consultant to the lead if not set
       const lead = db.prepare("SELECT assigned_consultant FROM leads WHERE id=?").get(resolvedLeadId);
-      if (lead && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
-        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel.consultant || 'Abdullah Al Rakib', resolvedLeadId);
+      if (lead && channel.consultant && (!lead.assigned_consultant || lead.assigned_consultant.trim() === '')) {
+        db.prepare("UPDATE leads SET assigned_consultant=? WHERE id=?").run(channel.consultant, resolvedLeadId);
       }
     }
 
@@ -8703,12 +8750,9 @@ app.delete('/api/conversations/:id', (req, res) => {
     if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
     const conv = db.prepare("SELECT * FROM conversations WHERE id=?").get(req.params.id);
     if (conv) {
+      broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id, 10) });
       db.prepare("DELETE FROM messages WHERE conversation_id=?").run(req.params.id);
       db.prepare("DELETE FROM conversations WHERE id=?").run(req.params.id);
-      broadcast('conversation_deleted', { conversation_id: parseInt(req.params.id) }, (u) => {
-        if (!u) return false;
-        return userHasAccessToConversation(u, req.params.id);
-      });
     }
     res.json({ ok: true });
   } catch (e) {
@@ -8720,14 +8764,16 @@ app.delete('/api/conversations/:id', (req, res) => {
 app.delete('/api/messages/:id', (req, res) => {
   try {
     const msg = db.prepare("SELECT * FROM messages WHERE id=?").get(req.params.id);
-    db.prepare("DELETE FROM messages WHERE id=?").run(req.params.id);
-    if (msg) {
-      // Refresh conversation's last_message preview
-      const last = db.prepare("SELECT content, type, created_at FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1").get(msg.conversation_id);
-      db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
-        .run(last?.content || (last ? `[${last.type}]` : ''), last?.created_at || null, msg.conversation_id);
-      broadcast('message_deleted', { conversation_id: msg.conversation_id, message_id: parseInt(req.params.id) });
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+    if (!userHasAccessToConversation(req.user, msg.conversation_id)) {
+      return res.status(403).json({ error: 'Access denied' });
     }
+    db.prepare("DELETE FROM messages WHERE id=?").run(req.params.id);
+    // Refresh conversation's last_message preview
+    const last = db.prepare("SELECT content, type, created_at FROM messages WHERE conversation_id=? ORDER BY created_at DESC, id DESC LIMIT 1").get(msg.conversation_id);
+    db.prepare("UPDATE conversations SET last_message=?, last_message_at=? WHERE id=?")
+      .run(last?.content || (last ? `[${last.type}]` : ''), last?.created_at || null, msg.conversation_id);
+    broadcast('message_deleted', { conversation_id: msg.conversation_id, message_id: parseInt(req.params.id, 10) });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -8761,26 +8807,56 @@ app.get('/api/conversations/:id/messages', (req, res) => {
 // File upload endpoint for base64 encoded media attachments
 app.post('/api/upload', (req, res) => {
   try {
-    const { name, data } = req.body;
-    if (!name || !data) {
-      return res.status(400).json({ error: 'name and data (base64) are required' });
+    const { name, type, data } = req.body || {};
+    if (!name || !type || !data) {
+      return res.status(400).json({ error: 'name, type, and data (base64) are required' });
     }
-    // Clean filename
-    const cleanName = name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const filename = `${Date.now()}_${cleanName}`;
-    const filePath = join(UPLOADS_DIR, filename);
 
-    // Decode base64
+    const allowedTypes = new Map([
+      ['image/jpeg', ['.jpg', '.jpeg']],
+      ['image/png', ['.png']],
+      ['image/gif', ['.gif']],
+      ['image/webp', ['.webp']],
+      ['application/pdf', ['.pdf']],
+      ['application/msword', ['.doc']],
+      ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', ['.docx']],
+      ['text/plain', ['.txt']],
+    ]);
+    const extension = extname(String(name)).toLowerCase();
+    const allowedExtensions = allowedTypes.get(String(type).toLowerCase());
+    if (!allowedExtensions?.includes(extension)) {
+      return res.status(415).json({ error: 'Unsupported file type.' });
+    }
+
     const buffer = Buffer.from(data, 'base64');
+    if (!buffer.length || buffer.length > 10 * 1024 * 1024) {
+      return res.status(413).json({ error: 'File must be between 1 byte and 10 MB.' });
+    }
+
+    const magicMatches = {
+      '.jpg': buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
+      '.jpeg': buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
+      '.png': buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      '.gif': ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii')),
+      '.webp': buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP',
+      '.pdf': buffer.subarray(0, 5).toString('ascii') === '%PDF-',
+      '.doc': buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])),
+      '.docx': buffer[0] === 0x50 && buffer[1] === 0x4b,
+      '.txt': !buffer.includes(0),
+    };
+    if (!magicMatches[extension]) {
+      return res.status(415).json({ error: 'File content does not match its declared type.' });
+    }
+
+    const filename = `${Date.now()}_${crypto.randomBytes(8).toString('hex')}${extension}`;
+    const filePath = join(UPLOADS_DIR, filename);
     writeFileSync(filePath, buffer);
 
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.get('host');
-    const fileUrl = `${protocol}://${host}/uploads/${filename}`;
+    const fileUrl = `/uploads/${filename}`;
 
     res.json({
       url: fileUrl,
-      relativeUrl: `/uploads/${filename}`,
+      relativeUrl: fileUrl,
       name: filename
     });
   } catch (err) {
@@ -8850,23 +8926,33 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 // QUICK REPLIES
 // ─────────────────────────────────────────────────────────
 app.get('/api/quick-replies', (req, res) => res.json(db.prepare("SELECT * FROM quick_replies ORDER BY category, title").all()));
-app.post('/api/quick-replies', (req, res) => {
+app.post('/api/quick-replies', (req, res) => requireManagerOrAdmin(req, res, () => {
   const { title, content, category } = req.body;
   const info = db.prepare("INSERT INTO quick_replies (title,content,category) VALUES (?,?,?)").run(title, content, category||null);
   res.json(db.prepare("SELECT * FROM quick_replies WHERE id=?").get(info.lastInsertRowid));
-});
-app.put('/api/quick-replies/:id', (req, res) => {
+}));
+app.put('/api/quick-replies/:id', (req, res) => requireManagerOrAdmin(req, res, () => {
   const { title, content, category } = req.body;
   db.prepare("UPDATE quick_replies SET title=?,content=?,category=? WHERE id=?").run(title, content, category||null, req.params.id);
   res.json(db.prepare("SELECT * FROM quick_replies WHERE id=?").get(req.params.id));
-});
-app.delete('/api/quick-replies/:id', (req, res) => { db.prepare("DELETE FROM quick_replies WHERE id=?").run(req.params.id); res.json({ ok:true }); });
+}));
+app.delete('/api/quick-replies/:id', (req, res) => requireManagerOrAdmin(req, res, () => {
+  db.prepare("DELETE FROM quick_replies WHERE id=?").run(req.params.id);
+  res.json({ ok:true });
+}));
 
 // ─────────────────────────────────────────────────────────
 // WEBSITE LEAD INGESTION WEBHOOK (public)
 // ─────────────────────────────────────────────────────────
-app.post('/api/webhook/website-lead', async (req, res) => {
+app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) => {
   try {
+    if (WEBSITE_WEBHOOK_SECRET) {
+      if (!safeSecretEqual(req.headers['x-webhook-secret'], WEBSITE_WEBHOOK_SECRET)) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ error: 'Website webhook is not configured.' });
+    }
     const { name, phone, email, destination, source, referrer, message, page_url } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
     const lead_id = nextLeadId();
@@ -8917,20 +9003,31 @@ app.get('/webhook/meta', (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
   if (mode !== 'subscribe') return res.sendStatus(403);
-  // Accept: global config token, any channel's verify token, or common defaults
-  const globalToken = getConfig('verify_token') || '';
-  const defaults = ['eduexpress2024', 'eduexpress_verify_2024', 'eduexpress', 'verify_token'];
+  // Accept only configured verification tokens.
+  const globalToken = getConfig('verify_token') || META_WEBHOOK_VERIFY_TOKEN;
   const channelTokens = db.prepare("SELECT webhook_verify_token FROM channels").all().map(r => r.webhook_verify_token).filter(Boolean);
-  const allTokens = [globalToken, ...defaults, ...channelTokens].filter(Boolean);
+  const allTokens = [globalToken, ...channelTokens].filter(Boolean);
   if (allTokens.includes(token)) {
-    console.log('✅ Meta webhook verified with token:', token);
+    console.log('✅ Meta webhook verification succeeded.');
     return res.status(200).send(challenge);
   }
-  console.log('❌ Webhook verify failed. Got:', token, '| Expected one of:', allTokens);
+  console.log('❌ Meta webhook verification failed.');
   res.sendStatus(403);
 });
 
+function hasValidMetaSignature(req) {
+  const appSecret = String(process.env.META_APP_SECRET || getConfig('app_secret') || '');
+  const signature = String(req.headers['x-hub-signature-256'] || '');
+  if (!appSecret || !signature || !req.rawBody) return false;
+  const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(req.rawBody).digest('hex')}`;
+  return safeSecretEqual(signature, expected);
+}
+
 app.post('/webhook/meta', async (req, res) => {
+  if (!hasValidMetaSignature(req)) {
+    console.warn('[webhook/meta] Rejected request with missing or invalid signature.');
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
   const body = req.body;
   
@@ -8958,8 +9055,6 @@ app.post('/webhook/meta', async (req, res) => {
               const msg = db.prepare("SELECT conversation_id FROM messages WHERE wa_message_id=?").get(status.id);
               if (msg) {
                 broadcast('message_status', { wa_message_id: status.id, status: status.status }, (u) => userHasAccessToConversation(u, msg.conversation_id));
-              } else {
-                broadcast('message_status', { wa_message_id: status.id, status: status.status });
               }
             } catch(e) { console.error('WA status update error:', e.message); }
           }
@@ -9003,7 +9098,7 @@ app.post('/webhook/meta', async (req, res) => {
               // Forward to n8n — Gemini generates personalised AI welcome
               /* setImmediate(() => forwardToN8N({ ... })); */
             }
-            console.log(`📱 WA [${channel.name}] ${profileName}: ${content}`);
+            console.log(`📱 WA [${channel.name}] inbound message processed.`);
           }
         } catch (outerErr) {
           console.error('WA webhook outer error:', outerErr.message);
@@ -9080,7 +9175,7 @@ app.post('/webhook/meta', async (req, res) => {
                 }
               }
             }
-            console.log(`✅ Meta Lead: ${lead_id} — ${client_name}`);
+            console.log(`✅ Meta lead processed: ${lead_id}`);
           } catch(e) { console.error('Lead webhook error:', e.message); }
         }
       }
@@ -9154,7 +9249,7 @@ app.post('/webhook/meta', async (req, res) => {
               messageText: text || ''
             })); */
           }
-          console.log(`💬 Messenger [${channel.name}]: ${text}`);
+          console.log(`💬 Messenger [${channel.name}] message processed.`);
         } catch (msgErr) {
           console.error('Messenger webhook error:', msgErr.message);
         }
@@ -9198,7 +9293,7 @@ app.post('/webhook/meta', async (req, res) => {
         }
         const text = msg.message.text || '[message]';
         saveMessage(conv.id, isEcho ? 'out' : 'in', text, 'text', msg.message.mid);
-        console.log(`📸 Instagram [${channel.name}]: ${text}`);
+        console.log(`📸 Instagram [${channel.name}] message processed.`);
       }
     }
   }
@@ -9212,15 +9307,16 @@ app.post('/webhook/meta', async (req, res) => {
 // ─────────────────────────────────────────────────────────
 // META CONFIG + CAPI
 // ─────────────────────────────────────────────────────────
-app.get('/api/meta/config', (req, res) => {
+app.get('/api/meta/config', requireAdmin, (req, res) => {
   const rows = db.prepare("SELECT key,value FROM meta_config").all();
   const config = Object.fromEntries(rows.map(r => [r.key, r.value]));
-  if (config.page_access_token) config.page_access_token = config.page_access_token.slice(0,12)+'••••••••';
-  if (config.capi_token) config.capi_token = config.capi_token.slice(0,12)+'••••••••';
-  if (config.meta_ads_access_token) config.meta_ads_access_token = config.meta_ads_access_token.slice(0,12)+'••••••••';
+  if (config.page_access_token) config.page_access_token = `••••${config.page_access_token.slice(-4)}`;
+  if (config.capi_token) config.capi_token = `••••${config.capi_token.slice(-4)}`;
+  if (config.meta_ads_access_token) config.meta_ads_access_token = `••••${config.meta_ads_access_token.slice(-4)}`;
+  if (config.app_secret) config.app_secret = `••••${config.app_secret.slice(-4)}`;
   res.json(config);
 });
-app.post('/api/meta/config', (req, res) => {
+app.post('/api/meta/config', requireAdmin, (req, res) => {
   const allowed = ['page_access_token','capi_token','pixel_id','app_secret','verify_token','test_event_code','office_open','grace_minutes','meta_ads_access_token','meta_ad_account_id','wa_linked_auto_lead'];
   for (const [key,value] of Object.entries(req.body)) {
     if (!allowed.includes(key)||!value||value.includes('••')) continue;
@@ -9228,11 +9324,11 @@ app.post('/api/meta/config', (req, res) => {
   }
   res.json({ ok:true });
 });
-app.post('/api/meta/test-capi', async (req, res) => {
+app.post('/api/meta/test-capi', requireAdmin, async (req, res) => {
   const result = await sendCAPIEvent(req.body.event_name||'Lead', { lead_id:'TEST-001', phone:'01700000000', email:'test@example.com', client_name:'Test User', destination:'China' });
   res.json(result);
 });
-app.post('/api/meta/sync-all-leads-capi', async (req, res) => {
+app.post('/api/meta/sync-all-leads-capi', requireAdmin, async (req, res) => {
   try {
     const leads = db.prepare("SELECT * FROM leads WHERE phone IS NOT NULL OR email IS NOT NULL LIMIT 200").all();
     let sentCount = 0;
@@ -9246,7 +9342,7 @@ app.post('/api/meta/sync-all-leads-capi', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-app.get('/api/meta/stats', (req, res) => {
+app.get('/api/meta/stats', requireAdmin, (req, res) => {
   const total = db.prepare("SELECT COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL").get().c;
   const byStatus = db.prepare("SELECT lead_status,COUNT(*) as c FROM leads WHERE meta_lead_id IS NOT NULL GROUP BY lead_status").all();
   const byCampaign = db.prepare("SELECT meta_campaign,COUNT(*) as c FROM leads WHERE meta_campaign IS NOT NULL GROUP BY meta_campaign ORDER BY c DESC").all();
@@ -9257,11 +9353,11 @@ app.get('/api/meta/stats', (req, res) => {
 // ─────────────────────────────────────────────────────────
 // WHATSAPP LINKED DEVICE (Baileys — scan QR, no Meta App)
 // ─────────────────────────────────────────────────────────
-app.get('/api/whatsapp-linked/status', (req, res) => {
+app.get('/api/whatsapp-linked/status', requireAdmin, (req, res) => {
   res.json(getWaLinkedStatus());
 });
 
-app.post('/api/whatsapp-linked/connect', async (req, res) => {
+app.post('/api/whatsapp-linked/connect', requireAdmin, async (req, res) => {
   try {
     const { id, label, consultant } = req.body || {};
     const s = await connectWaLinked({ id, label, consultant });
@@ -9272,7 +9368,7 @@ app.post('/api/whatsapp-linked/connect', async (req, res) => {
   }
 });
 
-app.post('/api/whatsapp-linked/logout', async (req, res) => {
+app.post('/api/whatsapp-linked/logout', requireAdmin, async (req, res) => {
   try {
     const { id, deleteChannel } = req.body || {};
     res.json(await logoutWaLinked(id, { deleteChannel: Boolean(deleteChannel) }));
@@ -9460,15 +9556,15 @@ app.delete('/api/routing-rules/:id', (req, res) => requireAdmin(req, res, () => 
 }));
 
 // Message Templates
-app.get('/api/templates', (req, res) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/templates', (req, res) => {
   const rows = db.prepare("SELECT * FROM message_templates ORDER BY category, usage_count DESC, id DESC").all();
   res.json(rows.map(r => {
     try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
     return r;
   }));
-}));
+});
 
-app.post('/api/templates', (req, res) => {
+app.post('/api/templates', (req, res) => requireManagerOrAdmin(req, res, () => {
   const { name, category, language, content, variables, approved } = req.body || {};
   if (!name || !content) return res.status(400).json({ error: 'name and content are required' });
   const info = db.prepare(`INSERT INTO message_templates (name, category, language, content, variables, approved)
@@ -9476,9 +9572,9 @@ app.post('/api/templates', (req, res) => {
   const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(info.lastInsertRowid);
   try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
   res.json(r);
-});
+}));
 
-app.put('/api/templates/:id', (req, res) => {
+app.put('/api/templates/:id', (req, res) => requireManagerOrAdmin(req, res, () => {
   const { name, category, language, content, variables, approved } = req.body || {};
   const cur = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Not found' });
@@ -9487,20 +9583,20 @@ app.put('/api/templates/:id', (req, res) => {
   const r = db.prepare("SELECT * FROM message_templates WHERE id=?").get(req.params.id);
   try { r.variables = r.variables ? JSON.parse(r.variables) : []; } catch (e) { r.variables = []; }
   res.json(r);
-});
+}));
 
-app.delete('/api/templates/:id', (req, res) => {
+app.delete('/api/templates/:id', (req, res) => requireManagerOrAdmin(req, res, () => {
   db.prepare("DELETE FROM message_templates WHERE id=?").run(req.params.id);
   res.json({ ok: true });
-});
+}));
 
 // Contact Tags
-app.get('/api/tags', (req, res) => requireManagerOrAdmin(req, res, () => {
+app.get('/api/tags', (req, res) => {
   const rows = db.prepare("SELECT * FROM contact_tags ORDER BY name").all();
   const counts = db.prepare("SELECT tag_id, COUNT(*) as c FROM contact_tag_assignments GROUP BY tag_id").all();
   const countMap = Object.fromEntries(counts.map(c => [c.tag_id, c.c]));
   res.json(rows.map(r => ({ ...r, contact_count: countMap[r.id] || 0 })));
-}));
+});
 
 app.post('/api/tags', (req, res) => requireAdmin(req, res, () => {
   const { name, color } = req.body || {};
@@ -9531,15 +9627,16 @@ app.get('/api/tags/:id/contacts', (req, res) => requireAdmin(req, res, () => {
 app.get('/api/conversations/:id/notes', (req, res) => {
   if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
   const rows = db.prepare("SELECT * FROM conversation_notes WHERE conversation_id=? ORDER BY id DESC").all(req.params.id);
-  res.json(rows);
+  res.json({ notes: rows });
 });
 
 app.post('/api/conversations/:id/notes', (req, res) => {
   if (!userHasAccessToConversation(req.user, req.params.id)) return res.status(403).json({ error: 'Access denied' });
-  const { note, is_internal } = req.body || {};
-  if (!note || !note.trim()) return res.status(400).json({ error: 'note is required' });
+  const { note, text, is_internal } = req.body || {};
+  const noteText = String(note || text || '').trim();
+  if (!noteText) return res.status(400).json({ error: 'note is required' });
   const info = db.prepare(`INSERT INTO conversation_notes (conversation_id, note, author_id, author_name, is_internal)
-    VALUES (?,?,?,?,?)`).run(req.params.id, note.trim(), req.user?.id || null, req.user?.name || null, is_internal == null ? 1 : (is_internal ? 1 : 0));
+    VALUES (?,?,?,?,?)`).run(req.params.id, noteText, req.user?.id || null, req.user?.name || null, is_internal == null ? 1 : (is_internal ? 1 : 0));
   res.json(db.prepare("SELECT * FROM conversation_notes WHERE id=?").get(info.lastInsertRowid));
 });
 
@@ -9777,7 +9874,23 @@ app.get('/api/settings', (req, res) => {
   } catch (e) {
     console.error("Could not fetch active employees for settings:", e);
   }
-  const combinedConsultants = Array.from(new Set(activeEmployees.map(e => e.name))).filter(Boolean).sort();
+  const consultantDirectory = new Map();
+  const addConsultantName = (name) => {
+    const normalized = normalizeOptionalText(name);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (!consultantDirectory.has(key)) consultantDirectory.set(key, normalized);
+  };
+  activeEmployees.forEach(e => addConsultantName(e.name));
+  try {
+    db.prepare("SELECT consultant_name FROM users WHERE consultant_name IS NOT NULL AND consultant_name != '' ORDER BY consultant_name").all()
+      .forEach(row => addConsultantName(row.consultant_name));
+  } catch {}
+  try {
+    db.prepare("SELECT DISTINCT assigned_consultant FROM leads WHERE assigned_consultant IS NOT NULL AND assigned_consultant != '' ORDER BY assigned_consultant").all()
+      .forEach(row => addConsultantName(row.assigned_consultant));
+  } catch {}
+  const combinedConsultants = Array.from(consultantDirectory.values()).sort((a, b) => a.localeCompare(b));
 
   // Document templates from settings (object keyed by destination)
   let docTemplates = DOC_TEMPLATES;
@@ -10258,16 +10371,21 @@ app.get('/api/marketing/publishing-queue/due', (req, res) => requireMarketing(re
 }));
 
 // ── LLM Settings ────────────────────────────────────────
-app.get('/api/marketing/llm-config', (req, res) => {
+app.get('/api/marketing/llm-config', requireMarketing, (req, res) => {
   try {
     const provider = db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || 'openai';
     const model = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || 'gpt-4o-mini';
-    const hasKey = !!(process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value);
+    const hasKey = !!(
+      process.env.OPENAI_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      process.env.OPENCODE_GO_API_KEY ||
+      db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value
+    );
     res.json({ provider, model, hasKey });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/marketing/llm-config', (req, res) => {
+app.post('/api/marketing/llm-config', requireAdmin, (req, res) => {
   try {
     const { provider, model, apiKey } = req.body || {};
     if (provider) db.prepare("INSERT OR REPLACE INTO meta_config (key, value, updated_at) VALUES ('llm_provider', ?, datetime('now'))").run(provider);
@@ -10278,25 +10396,14 @@ app.post('/api/marketing/llm-config', (req, res) => {
 });
 
 // ── LLM Test / Debug Endpoint ────────────────────────────────────────
-app.post('/api/marketing/llm-test', async (req, res) => {
+app.post('/api/marketing/llm-test', requireMarketing, async (req, res) => {
   try {
     const { provider, prompt } = req.body || {};
-    
-    const HARD_CODED_KEYS = [
-      { key:'sk-KF63PVImS4EsF2iaEvwTNHcFNqNVzEoIHJZ8K01poqEM97qZ8smo52DEye5g9KaL', provider:'opencode-go', model:'glm-5.1' }
-    ];
-    
+
     let llmProvider = provider || db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value || '';
     let llmModel = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value || '';
     let llmApiKey = db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENCODE_GO_API_KEY || '';
-    
-    if (!llmApiKey && HARD_CODED_KEYS.length > 0) {
-      const fallback = HARD_CODED_KEYS[0];
-      llmApiKey = fallback.key;
-      llmProvider = fallback.provider;
-      llmModel = fallback.model;
-    }
-    
+
     if (!llmApiKey) return res.status(400).json({ error: 'No LLM API key available' });
     if (!llmProvider) {
       if (llmApiKey.startsWith('AIza')) llmProvider = 'gemini';
@@ -10360,7 +10467,6 @@ app.post('/api/marketing/llm-test', async (req, res) => {
       provider: llmProvider,
       model: llmModel,
       hasKey: !!llmApiKey,
-      keyPrefix: llmApiKey.slice(0, 7) + '...',
       statusCode,
       error,
       rawResponse: rawResponse?.slice(0, 1000),
@@ -10373,14 +10479,11 @@ app.post('/api/marketing/llm-test', async (req, res) => {
 
 // ── AI Content Generator ────────────────────────────────────────
 // Calls LLM API to generate real content based on user inputs
-app.post('/api/marketing/generate', async (req, res) => {
+app.post('/api/marketing/generate', requireMarketing, async (req, res) => {
   try {
     const { page, pillar, format, language, tone, topic, hook, selectedUniversity, selectedScholarship, researchIntel } = req.body || {};
 
-    // Get LLM API config from meta_config or env or hardcoded fallback
-    const HARD_CODED_KEYS = [
-      { key:'sk-KF63PVImS4EsF2iaEvwTNHcFNqNVzEoIHJZ8K01poqEM97qZ8smo52DEye5g9KaL', provider:'opencode-go', model:'glm-5.1' }
-    ];
+    // Get LLM API config from meta_config or environment.
     const dbProvider = db.prepare("SELECT value FROM meta_config WHERE key='llm_provider'").get()?.value;
     const dbModel = db.prepare("SELECT value FROM meta_config WHERE key='llm_model'").get()?.value;
     const dbKey = db.prepare("SELECT value FROM meta_config WHERE key='llm_api_key'").get()?.value;
@@ -10389,14 +10492,6 @@ app.post('/api/marketing/generate', async (req, res) => {
     let llmProvider = dbProvider || process.env.LLM_PROVIDER || '';
     let llmModel = dbModel || process.env.LLM_MODEL || '';
     let llmApiKey = dbKey || envKey || '';
-    
-    // Auto-detect from hardcoded keys if nothing configured
-    if (!llmApiKey && HARD_CODED_KEYS.length > 0) {
-      const fallback = HARD_CODED_KEYS[0];
-      llmApiKey = fallback.key;
-      llmProvider = fallback.provider;
-      llmModel = fallback.model;
-    }
     
     // Auto-detect provider from key prefix if not set
     if (!llmProvider && llmApiKey) {
@@ -10483,7 +10578,7 @@ Write the complete post now. Return ONLY JSON.`;
       } catch (e) {
         const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) generatedContent = JSON.parse(jsonMatch[1]);
-        else throw new Error('Could not parse LLM response as JSON');
+        else throw new Error('Could not parse LLM response as JSON', { cause: e });
       }
     } else if (llmProvider === 'opencode-go') {
       // OpenCode AI — GLM models (OpenAI-compatible)
@@ -10505,7 +10600,7 @@ Write the complete post now. Return ONLY JSON.`;
         });
       } catch (netErr) {
         console.error('[generate] Network error calling opencode.ai:', netErr.message);
-        throw new Error(`Network error calling opencode.ai: ${netErr.message}. Check if the API endpoint is reachable.`);
+        throw new Error(`Network error calling opencode.ai: ${netErr.message}. Check if the API endpoint is reachable.`, { cause: netErr });
       }
       
       let openCodeData;
@@ -10514,7 +10609,7 @@ Write the complete post now. Return ONLY JSON.`;
       } catch (parseErr) {
         const rawText = await openCodeRes.text().catch(() => '');
         console.error('[generate] Failed to parse opencode-go response:', rawText.slice(0, 500));
-        throw new Error(`OpenCode GO returned non-JSON (HTTP ${openCodeRes.status}): ${rawText.slice(0, 200)}`);
+        throw new Error(`OpenCode GO returned non-JSON (HTTP ${openCodeRes.status}): ${rawText.slice(0, 200)}`, { cause: parseErr });
       }
       
       if (!openCodeRes.ok) {
@@ -10540,7 +10635,7 @@ Write the complete post now. Return ONLY JSON.`;
           if (objMatch) generatedContent = JSON.parse(objMatch[0]);
           else {
             console.error('[generate] Could not parse content as JSON:', content.slice(0, 500));
-            throw new Error('OpenCode GO returned non-JSON content. Raw: ' + content.slice(0, 200));
+            throw new Error('OpenCode GO returned non-JSON content. Raw: ' + content.slice(0, 200), { cause: e });
           }
         }
       }
@@ -10575,6 +10670,10 @@ app.post('/api/marketing/publish/:postId', (req, res) => requireMarketing(req, r
   const page = req.body.page || post.page || 'bd';
   const scheduledAt = req.body.scheduled_at || new Date().toISOString();
   const assetUrl = req.body.asset_url || post.asset_url || null;
+  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || '';
+  if (!n8nWebhook || !INTERNAL_API_KEY) {
+    return res.status(503).json({ error: 'Publishing integration is not configured.' });
+  }
 
   // Check for existing queued/published entry for this post on this platform
   const existing = db.prepare(`SELECT * FROM publishing_queue WHERE post_id=? AND platform=? AND status IN ('queued','published')`).get(postId, platform);
@@ -10588,7 +10687,6 @@ app.post('/api/marketing/publish/:postId', (req, res) => requireMarketing(req, r
   db.prepare(`UPDATE content_posts SET status='scheduled', updated_at=datetime('now') WHERE id=?`).run(postId);
 
   // Send to n8n webhook (fire-and-forget, n8n will callback)
-  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || 'https://vibeacademy.cloud/webhook/eduexpress-publish';
   const payload = {
     postId: postId,
     page: page,
@@ -10626,8 +10724,8 @@ app.post('/api/marketing/publish/:postId', (req, res) => requireMarketing(req, r
 // This is called by n8n with x-api-key header (handled by global middleware)
 app.post('/api/marketing/publish/webhook', (req, res) => {
   // Auth check: must be n8n or logged-in user
-  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
-  const isUser = req.user && req.user.id;
+  const isInternal = isInternalApiRequest(req);
+  const isUser = isFullAdmin(req.user) || userHasRole(req.user, 'marketing_manager');
   if (!isInternal && !isUser) return res.status(401).json({ error: 'Unauthorized' });
 
   const { postId, success, platformPostId, publishUrl, error, platform, page } = req.body || {};
@@ -10667,13 +10765,16 @@ app.post('/api/marketing/publish/retry/:queueId', (req, res) => requireMarketing
 
   const post = db.prepare(`SELECT * FROM content_posts WHERE id=?`).get(queue.post_id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
+  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || '';
+  if (!n8nWebhook || !INTERNAL_API_KEY) {
+    return res.status(503).json({ error: 'Publishing integration is not configured.' });
+  }
 
   // Reset queue to queued
   db.prepare(`UPDATE publishing_queue SET status='queued', error_message=NULL, scheduled_at=datetime('now') WHERE id=?`).run(queueId);
   db.prepare(`UPDATE content_posts SET status='scheduled', updated_at=datetime('now') WHERE id=?`).run(queue.post_id);
 
   // Re-send to n8n
-  const n8nWebhook = process.env.N8N_PUBLISH_WEBHOOK || 'https://vibeacademy.cloud/webhook/eduexpress-publish';
   const payload = {
     postId: queue.post_id,
     page: queue.page,
@@ -10721,9 +10822,8 @@ app.get('/api/marketing/publishing-queue/full', (req, res) => requireMarketing(r
 // ── n8n Config — raw tokens for publishing engine (n8n-only, x-api-key required) ──
 app.get('/api/marketing/publish/n8n-config', (req, res) => {
   // Only allow internal n8n service or super_admin
-  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
-  const isSuperAdmin = req.user && (req.user.role === 'super_admin' || req.user.roles?.includes('founder_ceo'));
-  if (!isInternal && !isSuperAdmin) return res.status(401).json({ error: 'Unauthorized' });
+  const isInternal = isInternalApiRequest(req);
+  if (!isInternal) return res.status(401).json({ error: 'Unauthorized' });
 
   // Get page IDs from Facebook/Messenger channels
   const channels = db.prepare("SELECT name, page_id, access_token FROM channels WHERE type IN ('facebook', 'messenger') AND active = 1 AND page_id IS NOT NULL").all();
@@ -10753,13 +10853,12 @@ app.get('/api/marketing/publish/config', (req, res) => requireMarketing(req, res
   const channels = db.prepare("SELECT name, page_id FROM channels WHERE type IN ('facebook', 'messenger') AND active = 1 AND page_id IS NOT NULL").all();
   const fbChina = channels.some(c => c.name.toLowerCase().includes('china') && c.page_id);
   const fbBD = channels.some(c => (c.name.toLowerCase().includes('bd') || c.name.toLowerCase().includes('bangladesh')) && c.page_id);
-  const n8nConfigured = true; // n8n workflow is hardcoded and active
+  const n8nWebhook = String(process.env.N8N_PUBLISH_WEBHOOK || '');
   res.json({
     facebook: { china: fbChina, bd: fbBD, token_exists: !!token },
     instagram: false, // v2 feature
     tiktok: false, // v2 feature
-    n8n: n8nConfigured,
-    n8nWebhook: 'https://vibeacademy.cloud/webhook/eduexpress-publish',
+    n8n: Boolean(n8nWebhook),
     crm_base: `${req.protocol}://${req.get('host')}`
   });
 }));
@@ -11091,12 +11190,12 @@ app.post('/api/marketing/best-times', (req, res) => requireMarketing(req, res, (
 // ── Publishing Schedule (auto-polling endpoint) ────────────────────
 app.get('/api/marketing/publishing-schedule/due', (req, res) => {
   // This is called by n8n to get posts that are due to publish
-  const isInternal = req.headers['x-api-key'] === INTERNAL_API_KEY;
+  const isInternal = isInternalApiRequest(req);
   if (!isInternal) return res.status(401).json({ error: 'Unauthorized' });
   
   const now = new Date().toISOString();
-  const due = db.prepare(`SELECT ps.*, cp.hook, cp.body, cp.hashtags, cp.cta, cp.asset_url, cp.brief FROM publishing_schedule ps LEFT JOIN content_posts cp ON ps.post_id = cp.id WHERE ps.status = 'pending' AND (ps.scheduled_date || 'T' || ps.scheduled_time) <= ? ORDER BY ps.scheduled_date, ps.scheduled_time LIMIT 10`).get(now);
-  res.json(due || []);
+  const due = db.prepare(`SELECT ps.*, cp.hook, cp.body, cp.hashtags, cp.cta, cp.asset_url, cp.brief FROM publishing_schedule ps LEFT JOIN content_posts cp ON ps.post_id = cp.id WHERE ps.status = 'pending' AND (ps.scheduled_date || 'T' || ps.scheduled_time) <= ? ORDER BY ps.scheduled_date, ps.scheduled_time LIMIT 10`).all(now);
+  res.json(due);
 });
 
 app.post('/api/marketing/publishing-schedule/:id/publish', (req, res) => requireMarketing(req, res, () => {
@@ -11131,19 +11230,16 @@ app.get('/api/marketing/dashboard', (req, res) => requireMarketing(req, res, () 
   res.json({ totalPosts, byStatus, publishedThisMonth, activeCampaigns, pendingAssets, queuedPosts });
 }));
 
-// --- TEMPORARY DB DOWNLOAD/UPLOAD ---
-app.get('/api/admin/download-db', (req, res) => {
+// Backward-compatible admin download. Restore uploads must use the validated
+// /api/health/restore endpoint above.
+app.get('/api/admin/download-db', requireAdmin, (req, res) => {
+  db.flush();
   res.download(DB_PATH);
 });
 
-const fs = require('fs');
-app.post('/api/admin/upload-db', express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
-  if (!req.body || req.body.length === 0) return res.status(400).send('No file');
-  fs.writeFileSync(DB_PATH, req.body);
-  res.json({ success: true, message: 'Database replaced successfully. Restarting...' });
-  setTimeout(() => process.exit(0), 1000); // Force PM2/Hostinger to restart
+app.post('/api/admin/upload-db', requireAdmin, (_req, res) => {
+  res.status(410).json({ error: 'Use POST /api/health/restore with an application/octet-stream database backup.' });
 });
-// ------------------------------------
 
 // Catch-all: serve React app for any non-API route (production)
 // Express v5 requires '/{*path}' instead of '*'
@@ -11186,25 +11282,12 @@ setInterval(() => {
     }
     
     // Create new backup
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = join(backupsDir, `crm_backup_${dateStr}.db`);
     db.flush();
     const data = db.export();
     writeFileSync(backupPath, Buffer.from(data));
     console.log(`[backup] Automated backup created: ${backupPath}`);
-    
-    // Cleanup backups older than 7 days
-    const files = readdirSync(backupsDir);
-    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    const fs = require('fs');
-    files.forEach(file => {
-      const filePath = join(backupsDir, file);
-      const stat = fs.statSync(filePath);
-      if (stat.mtimeMs < sevenDaysAgo && file.endsWith('.db')) {
-        fs.unlinkSync(filePath);
-        console.log(`[backup] Deleted old automated backup: ${file}`);
-      }
-    });
   } catch (err) {
     console.error('[backup] Automated backup failed:', err.message);
   }
@@ -11294,7 +11377,6 @@ function fixPageNames() {
     console.error('[Startup] Failed to fix page_name:', e.message);
   }
 }
-setTimeout(fixPageNames, 4000);
 
 // Retroactively fix page_name for Meta Lead Ads by looking up form_id from Facebook API
 async function backfillMetaLeadAds() {
@@ -11331,7 +11413,8 @@ async function backfillMetaLeadAds() {
     console.error('[Startup] Failed to backfill Meta Lead Ads:', e.message);
   }
 }
-setTimeout(backfillMetaLeadAds, 7000);
-
-// Run immediately after server starts
-setTimeout(scanOldChatsForLeads, 3000);
+if (RUN_DATA_BACKFILLS) {
+  setTimeout(fixPageNames, 4000);
+  setTimeout(backfillMetaLeadAds, 7000);
+  setTimeout(scanOldChatsForLeads, 3000);
+}
