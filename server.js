@@ -422,6 +422,7 @@ app.use((req, res, next) => {
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
   try {
+    if (!db) return res.status(503).json({ error: 'System is initializing database, please try again in a few seconds.' });
     const { email, password, lat, lng, ssid, device_id } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
     
