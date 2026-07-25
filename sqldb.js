@@ -5,7 +5,7 @@
  */
 
 import { createRequire } from 'module';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -15,10 +15,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let _SQL = null;
 let _db = null;
 let _dbPath = null;
-let _saveTimer = null;
 let _savePaused = false;   // when true, writes are NOT exported to disk (used during bulk sync)
 let _saveDirty = false;    // tracks whether a write happened while paused
 let _dead = false;         // set to true when sql.js WASM OOM's — process must restart
+let _transactionDepth = 0;
+let _transactionDirty = false;
 
 /*
    When sql.js hits Aborted(OOM), the WASM heap is unrecoverable: every
@@ -51,9 +52,13 @@ let _isSaving = false;
 
 // Atomic save: export to a temp file, then rename. A crash mid-write can never
 // leave a half-written (corrupt) crm.db on disk.
-// If atomic save fails (e.g. rename is restricted or throws ENOENT on some hosts),
-// we fall back to a direct write to guarantee that data is saved.
+// If the atomic rename fails, keep the last good database untouched. The
+// complete temporary file remains beside it for diagnosis/recovery.
 function doSave() {
+  if (_transactionDepth > 0) {
+    _transactionDirty = true;
+    return;
+  }
   if (_dead || !_db || _isSaving) return;
   _isSaving = true;
   try {
@@ -67,34 +72,17 @@ function doSave() {
       writeFileSync(tmp, Buffer.from(data));
       renameSync(tmp, _dbPath);
     } catch (err) {
-      console.warn(`[sqldb] Atomic save failed (${err.message}). Falling back to direct write.`);
-      writeFileSync(_dbPath, Buffer.from(data));
-      try {
-        if (existsSync(tmp)) {
-          unlinkSync(tmp);
-        }
-      } catch (unlinkErr) {
-        console.warn(`[sqldb] Failed to clean up temp file ${tmp}:`, unlinkErr.message);
-      }
+      console.error(`[sqldb] Atomic save failed; existing database was kept (${err.message}).`);
+      throw err;
     }
   } finally {
     _isSaving = false;
   }
 }
 
-// Debounced save — batches rapid writes into one disk write per 200ms
-function scheduleSave() {
-  if (_savePaused) { _saveDirty = true; return; }
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    try { doSave(); } catch (e) { console.error('[sqldb] save error:', e.message); }
-  }, 200);
-}
-
 function immediatelySave() {
   if (_savePaused) { _saveDirty = true; return; }
   try {
-    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
     doSave();
   } catch (e) {
     console.error('[sqldb] save error:', e.message);
@@ -182,7 +170,10 @@ function makeStatement(rawSql) {
         }
         changes = _db.getRowsModified();
         lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
-        if (write) immediatelySave();
+        if (write) {
+          if (_transactionDepth > 0) _transactionDirty = true;
+          else immediatelySave();
+        }
         return { changes, lastInsertRowid };
       } catch (e) {
         if (handleFatalError(e, `run ${sql.slice(0, 60)}`)) throw new Error('[sqldb] OOM — restarting', { cause: e });
@@ -218,15 +209,15 @@ export async function initDatabase(dbPath) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   // Use sql-wasm.js which has dynamic memory growth to prevent OOM
-  const initSqlJs = require(join(__dirname, 'node_modules/sql.js/dist/sql-wasm.js'));
-  const wasmBinary = readFileSync(join(__dirname, 'node_modules/sql.js/dist/sql-wasm.wasm'));
+  const sqlWasmPath = require.resolve('sql.js/dist/sql-wasm.js');
+  const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
+  const initSqlJs = require(sqlWasmPath);
+  const wasmBinary = readFileSync(wasmPath);
   _SQL = await initSqlJs({ wasmBinary });
 
-  // Load existing DB file or create new — with corruption recovery.
-  // Three integrity gates: (1) buffer loads, (2) sqlite_master readable,
-  // (3) PRAGMA integrity_check returns 'ok'. If any fail we back up the file
-  // and start fresh; the schema rebuilder in setupSchema() then recreates
-  // every required table.
+  // Load an existing DB or create a new one. Existing files are never replaced
+  // automatically: if integrity validation fails, startup stops and the exact
+  // file is kept in place for an explicit, reviewed restore.
   if (existsSync(dbPath)) {
     const buf = readFileSync(dbPath);
     try {
@@ -241,9 +232,9 @@ export async function initDatabase(dbPath) {
       catch (e2) { throw new Error(`master query failed: ${e2.message}`, { cause: e2 }); }
       console.log(`[sqldb] Loaded existing DB from ${dbPath}`);
     } catch (e) {
-      console.error(`[sqldb] ⚠️  DB corrupt (${e.message}). Backing up and recreating.`);
-      try { renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`); } catch {}
-      _db = new _SQL.Database();
+      try { _db?.close(); } catch {}
+      _db = null;
+      throw new Error(`[sqldb] Existing database failed integrity validation and was left untouched: ${e.message}`, { cause: e });
     }
   } else {
     _db = new _SQL.Database();
@@ -278,14 +269,29 @@ export async function initDatabase(dbPath) {
 
     transaction(fn) {
       return (...args) => {
-        _db.run('BEGIN');
+        const isOuterTransaction = _transactionDepth === 0;
+        if (isOuterTransaction) {
+          _db.run('BEGIN');
+          _transactionDirty = false;
+        }
+        _transactionDepth += 1;
         try {
           const result = fn(...args);
-          _db.run('COMMIT');
-          immediatelySave();
+          _transactionDepth -= 1;
+          if (isOuterTransaction) {
+            _db.run('COMMIT');
+            if (_transactionDirty) {
+              _transactionDirty = false;
+              immediatelySave();
+            }
+          }
           return result;
         } catch (e) {
-          try { _db.run('ROLLBACK'); } catch {}
+          _transactionDepth = Math.max(0, _transactionDepth - 1);
+          if (isOuterTransaction) {
+            try { _db.run('ROLLBACK'); } catch {}
+            _transactionDirty = false;
+          }
           throw e;
         }
       };
@@ -312,11 +318,33 @@ export async function initDatabase(dbPath) {
       } catch { return []; }
     },
 
-    close() { immediatelySave(); _db.close(); },
+    close() {
+      immediatelySave();
+      const database = _db;
+      _db = null;
+      database.close();
+    },
 
     // Export raw sql.js database (for backup/download)
     export() { return _db.export(); }
   };
+}
+
+export function validateDatabaseBuffer(buffer, requiredTables = []) {
+  if (!_SQL) throw new Error('Database engine is not initialized');
+  let candidate;
+  try {
+    candidate = new _SQL.Database(buffer);
+    const integrity = candidate.exec('PRAGMA integrity_check')?.[0]?.values?.[0]?.[0];
+    if (integrity !== 'ok') throw new Error(`Integrity check failed: ${integrity || 'unknown result'}`);
+    const rows = candidate.exec("SELECT name FROM sqlite_master WHERE type='table'")?.[0]?.values || [];
+    const tables = new Set(rows.map(row => row[0]));
+    const missing = requiredTables.filter(table => !tables.has(table));
+    if (missing.length) throw new Error(`Required tables missing: ${missing.join(', ')}`);
+    return { valid: true, tables: tables.size };
+  } finally {
+    if (candidate) candidate.close();
+  }
 }
 
 process.on('SIGTERM', () => {
