@@ -6892,6 +6892,10 @@ app.get('/api/students-list', requireFinance, (req, res) => {
     SELECT id, lead_id, client_name, phone, destination, university, application_stage, lead_status
     FROM leads
     WHERE client_name IS NOT NULL AND client_name != '' AND client_name != 'Messenger User' AND client_name != 'no name'
+      AND (
+        (application_stage IS NOT NULL AND application_stage != '' AND application_stage != 'none')
+        OR lead_status IN ('Enrolled','File Opened','Submitted','Processing','Admitted','Visa Approved','Visa Applied')
+      )
     ORDER BY client_name ASC
     LIMIT 500
   `).all();
