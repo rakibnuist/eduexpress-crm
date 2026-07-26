@@ -10,22 +10,43 @@ services:
       context: .
     image: eduexpress-crm:latest
     container_name: eduexpress-crm
+    init: true
     restart: unless-stopped
     environment:
       - NODE_ENV=production
       - PORT=3000
       - DB_PATH=/data/crm.db          # persisted on the crm-data volume
       - RESET_KEY=${RESET_KEY}        # set in .env — gates /api/auth/emergency-reset
+      - JWT_SECRET=${JWT_SECRET}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - WEBSITE_WEBHOOK_SECRET=${WEBSITE_WEBHOOK_SECRET}
+      - META_APP_SECRET=${META_APP_SECRET}
+      - META_WEBHOOK_VERIFY_TOKEN=${META_WEBHOOK_VERIFY_TOKEN}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - RUN_DATA_BACKFILLS=${RUN_DATA_BACKFILLS:-false}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - LLM_MODEL=${LLM_MODEL}
+      - N8N_PUBLISH_WEBHOOK=${N8N_PUBLISH_WEBHOOK}
+      - N8N_WELCOME_WEBHOOK=${N8N_WELCOME_WEBHOOK}
     volumes:
       - crm-data:/data                # SQLite DB + WhatsApp linked-device session (wa_auth)
       - crm-uploads:/app/uploads      # uploaded documents
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.crm.rule=Host(`crm.eduexpressint.com`)
-      - traefik.http.routers.crm.entrypoints=websecure
-      - traefik.http.routers.crm.tls=true
-      - traefik.http.routers.crm.tls.certresolver=letsencrypt
-      - traefik.http.services.crm.loadbalancer.server.port=3000
+      - "traefik.enable=true"
+      - "traefik.http.routers.crm.rule=Host(`crm.eduexpressint.com`)"
+      - "traefik.http.routers.crm.entrypoints=websecure"
+      - "traefik.http.routers.crm.tls=true"
+      - "traefik.http.routers.crm.tls.certresolver=letsencrypt"
+      - "traefik.http.services.crm.loadbalancer.server.port=3000"
       # www.crm → crm (optional redirect target already handled by DNS CNAME)
 
 volumes:
