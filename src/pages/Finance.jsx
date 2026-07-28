@@ -676,8 +676,10 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
   const [form, setForm] = useState(record ? {
     ...record,
     date: record.date || new Date().toISOString().slice(0, 10),
-    paid_to: record.paid_to || record.client_name || '',
-    student_name: record.student_name || record.client_name || '',
+    paid_to: record.paid_to || (type === 'expenses' ? record.client_name : '') || '',
+    client_name: record.client_name || record.paid_to || '',
+    student_name: record.student_name || (type === 'income' ? record.client_name : '') || '',
+    lead_id: record.lead_id || '',
     employee_id: record.employee_id || '',
   } : { date: new Date().toISOString().slice(0, 10) });
 
@@ -732,15 +734,16 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
     const val = e.target.value;
     if (!val) {
       set('student_name', '');
-      set('client_name', '');
       set('lead_id', '');
       return;
     }
     const sel = students.find(s => String(s.id) === String(val) || String(s.lead_id) === String(val));
     if (sel) {
       set('student_name', sel.client_name);
-      set('client_name', sel.client_name);
       set('lead_id', sel.lead_id || `L-${sel.id}`);
+      if (type === 'income' && !form.client_name) {
+        set('client_name', sel.client_name);
+      }
       if (type === 'expenses' && !form.paid_to && form.category) {
         set('paid_to', `${form.category} - ${sel.client_name}`);
       }
@@ -753,6 +756,8 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
       ...form,
       amount: Number(form.amount) || 0,
       employee_id: form.employee_id ? Number(form.employee_id) : null,
+      student_name: form.student_name || null,
+      lead_id: form.lead_id || null,
       ...(type === 'income' ? { client_name: form.client_name || form.student_name } : { paid_to: form.paid_to || form.client_name }),
     };
     try {
@@ -769,6 +774,15 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
       toast.error(err.message || 'Could not save entry');
     } finally { setSaving(false); }
   }
+
+  const selectedStudentId = useMemo(() => {
+    if (!students.length) return '';
+    const match = students.find(s =>
+      (form.student_name && (s.client_name || '').toLowerCase() === form.student_name.toLowerCase()) ||
+      (form.lead_id && (s.lead_id || '').toLowerCase() === form.lead_id.toLowerCase())
+    );
+    return match?.id || '';
+  }, [students, form.student_name, form.lead_id]);
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -817,7 +831,7 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
             placeholder="🔍 Search student name, LEAD-ID (e.g. 0441), or country..."
             value={studentQuery}
             onChange={e => setStudentQuery(e.target.value)}
-            className="w-full border border-slate-200 rounded-xl px-3 py-1.5 pl-8 pr-7 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
+            className="w-full border border-slate-200 rounded-xl px-3 py-1.5 pl-8 pr-7 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium text-slate-800"
           />
           <Search size={13} className="absolute left-2.5 top-2 text-slate-400 pointer-events-none" />
           {studentQuery && (
@@ -833,7 +847,7 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
 
         <select
           className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none mb-2 font-medium"
-          value={students.find(s => s.client_name === (form.student_name || form.client_name) || (s.lead_id && s.lead_id === form.lead_id))?.id || ''}
+          value={selectedStudentId}
           onChange={handleStudentSelect}>
           <option value="">
             {filteredStudents.length === 0
@@ -854,13 +868,10 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Student Name</label>
             <input
               type="text"
-              placeholder="e.g. Ilhan"
-              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
-              value={form.student_name || form.client_name || ''}
-              onChange={e => {
-                set('student_name', e.target.value);
-                set('client_name', e.target.value);
-              }}
+              placeholder="e.g. Mahjabin Islam"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium text-slate-800"
+              value={form.student_name || ''}
+              onChange={e => set('student_name', e.target.value)}
             />
           </div>
           <div>
@@ -868,7 +879,7 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
             <input
               type="text"
               placeholder="e.g. L-00042"
-              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium text-slate-800"
               value={form.lead_id || ''}
               onChange={e => set('lead_id', e.target.value)}
             />
