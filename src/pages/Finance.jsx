@@ -681,6 +681,7 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
     employee_id: record.employee_id || '',
   } : { date: new Date().toISOString().slice(0, 10) });
 
+  const [studentQuery, setStudentQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [students, setStudents] = useState([]);
   const [employees, setEmployees] = useState(propEmployees || []);
@@ -712,6 +713,17 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
         .catch(() => {});
     }
   }, [propEmployees]);
+
+  const filteredStudents = useMemo(() => {
+    if (!studentQuery.trim()) return students;
+    const q = studentQuery.toLowerCase();
+    return students.filter(s =>
+      (s.client_name || '').toLowerCase().includes(q) ||
+      (s.lead_id || '').toLowerCase().includes(q) ||
+      (s.destination || '').toLowerCase().includes(q) ||
+      (s.phone || '').includes(q)
+    );
+  }, [students, studentQuery]);
 
   const studentCategories = ['Visa', 'Visa Fee', 'Application Fee', 'App Fee', 'Air Ticket', 'Ticket', 'Medical', 'Service Charge', 'File Opening', 'Application Deposit', 'Tuition Fee', 'Student Referral', 'Referral'];
   const isStudentRelated = studentCategories.some(c => (form.category || '').toLowerCase().includes(c.toLowerCase()));
@@ -798,12 +810,39 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
           )}
         </div>
 
+        {/* Search Input for Students */}
+        <div className="relative mb-2">
+          <input
+            type="text"
+            placeholder="🔍 Search student name, LEAD-ID (e.g. 0441), or country..."
+            value={studentQuery}
+            onChange={e => setStudentQuery(e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-1.5 pl-8 pr-7 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
+          />
+          <Search size={13} className="absolute left-2.5 top-2 text-slate-400 pointer-events-none" />
+          {studentQuery && (
+            <button
+              type="button"
+              onClick={() => setStudentQuery('')}
+              className="absolute right-2.5 top-1.5 text-slate-400 hover:text-slate-600 p-0.5 rounded text-xs font-bold"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
         <select
           className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none mb-2 font-medium"
           value={students.find(s => s.client_name === (form.student_name || form.client_name) || (s.lead_id && s.lead_id === form.lead_id))?.id || ''}
           onChange={handleStudentSelect}>
-          <option value="">— Select Student / Application —</option>
-          {students.map(s => (
+          <option value="">
+            {filteredStudents.length === 0
+              ? `No student matches for "${studentQuery}"`
+              : studentQuery
+              ? `— ${filteredStudents.length} matching student(s) —`
+              : '— Select Student / Application —'}
+          </option>
+          {filteredStudents.map(s => (
             <option key={s.id} value={s.id}>
               {s.client_name} ({s.lead_id || `ID:${s.id}`}) {s.destination ? `• ${s.destination}` : ''}
             </option>
