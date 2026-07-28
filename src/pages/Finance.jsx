@@ -1063,7 +1063,7 @@ function CashflowTab({ onChanged, settings }) {
       )}
 
       {/* Set initial cash modal */}
-      {initOpen && <InitialCashModal current={opening} onClose={() => setInitOpen(false)} onSaved={() => { setInitOpen(false); load(); }} />}
+      {initOpen && <InitialCashModal current={opening} settings={settings} onClose={() => setInitOpen(false)} onSaved={() => { setInitOpen(false); load(); }} />}
     </div>
   );
 }
@@ -1257,8 +1257,8 @@ function CashflowEntryModal({ side, row, month, categories, employees, onClose, 
   );
 }
 
-function InitialCashModal({ current, onClose, onSaved }) {
-  const [val, setVal] = useState('');
+function InitialCashModal({ current, settings, onClose, onSaved }) {
+  const [val, setVal] = useState(settings?.cash_initial || '');
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   const submit = async (e) => {
@@ -1272,13 +1272,13 @@ function InitialCashModal({ current, onClose, onSaved }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/60 rounded-t-2xl">
-          <h3 className="font-bold text-slate-800">Set opening cash</h3>
-          <p className="text-xs text-slate-500 mt-0.5">The cash balance you started with, before any income or expenses were recorded.</p>
+          <h3 className="font-bold text-slate-800">Set baseline opening cash</h3>
+          <p className="text-xs text-slate-500 mt-0.5">The baseline cash balance you started with before any CRM income or expenses were recorded.</p>
         </div>
         <form onSubmit={submit} className="p-5 space-y-3">
-          <p className="text-xs text-slate-500">Current computed opening for this view: <strong>{cFmt(current)}</strong></p>
+          <p className="text-xs text-slate-500">Current view opening balance: <strong>{cFmt(current)}</strong></p>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Opening cash (৳)</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Baseline Opening Cash (৳)</label>
             <input type="number" required value={val} onChange={e => setVal(e.target.value)} autoFocus
               placeholder="0"
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-lg font-semibold tabular-nums bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none" />

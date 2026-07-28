@@ -2974,6 +2974,7 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN assigned_employee_id INTEGER`,
     `ALTER TABLE leads ADD COLUMN ctwa_clid TEXT`,
     `ALTER TABLE income ADD COLUMN employee_id INTEGER`,
+    `ALTER TABLE income ADD COLUMN student_name TEXT`,
     `ALTER TABLE expenses ADD COLUMN employee_id INTEGER`,
     `ALTER TABLE expenses ADD COLUMN student_name TEXT`,
     `ALTER TABLE expenses ADD COLUMN lead_id TEXT`,
@@ -6879,16 +6880,16 @@ app.get('/api/income', requireFinance, (req, res) => {
 });
 app.post('/api/income', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes,employee_id) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes,@employee_id)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null });
+  const info = db.prepare(`INSERT INTO income (date,month,category,lead_id,client_name,reference,amount,notes,employee_id,student_name) VALUES (@date,@month,@category,@lead_id,@client_name,@reference,@amount,@notes,@employee_id,@student_name)`).run({ ...d, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null });
   const row = db.prepare("SELECT * FROM income WHERE id=?").get(info.lastInsertRowid);
   // Try to attach to a real lead so this payment shows on the lead's timeline.
   const lead = row.lead_id ? db.prepare("SELECT * FROM leads WHERE lead_id=?").get(row.lead_id) : null;
-  logActivity({ type: 'payment_recorded', actor: req.user, lead, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference } });
+  logActivity({ type: 'payment_recorded', actor: req.user, lead, amount: row.amount, details: { client_name: row.client_name, lead_id: row.lead_id, category: row.category, reference: row.reference, student_name: row.student_name } });
   res.json(row);
 });
 app.put('/api/income/:id', requireFinanceManager, (req, res) => {
   const d = req.body; const month = d.date?.slice(0,7)||null;
-  db.prepare(`UPDATE income SET date=@date,month=@month,category=@category,lead_id=@lead_id,client_name=@client_name,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null });
+  db.prepare(`UPDATE income SET date=@date,month=@month,category=@category,lead_id=@lead_id,client_name=@client_name,reference=@reference,amount=@amount,notes=@notes,employee_id=@employee_id,student_name=@student_name WHERE id=@id`).run({ ...d, id: req.params.id, month, amount: d.amount||0, employee_id: d.employee_id || null, student_name: d.student_name || null });
   res.json(db.prepare("SELECT * FROM income WHERE id=?").get(req.params.id));
 });
 app.delete('/api/income/:id', requireFinanceManager, (req, res) => { db.prepare("DELETE FROM income WHERE id=?").run(req.params.id); res.json({ ok:true }); });
@@ -6960,8 +6961,8 @@ const EXPENSE_CATEGORIES = [
 function computeOpeningBalance(month) {
   const initial = parseFloat(getConfig('cash_initial')) || 0;
   if (!month) return initial;
-  const sumIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE month < ? AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(month).s;
-  const sumOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE month < ?").get(month).s;
+  const sumIn  = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income   WHERE (month < ? OR (month IS NULL AND substr(date,1,7) < ?)) AND (exclude_from_cash IS NULL OR exclude_from_cash = 0)").get(month, month).s;
+  const sumOut = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE (month < ? OR (month IS NULL AND substr(date,1,7) < ?))").get(month, month).s;
   return initial + sumIn - sumOut;
 }
 
@@ -6982,8 +6983,8 @@ app.put('/api/cashflow/initial', (req, res) => requireAdmin(req, res, () => {
 // Includes running balance per row so the table reads like a real cashflow.
 app.get('/api/cashflow', (req, res) => requireFinance(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
-  const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.student_name,i.lead_id,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE i.month=? AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month);
-  const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to,x.paid_to AS client_name,x.student_name,x.lead_id,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.month=? ORDER BY x.date, x.id`).all(month);
+  const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.student_name,i.lead_id,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE (i.month=? OR (i.month IS NULL AND substr(i.date,1,7)=?)) AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month, month);
+  const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to,x.paid_to AS client_name,x.student_name,x.lead_id,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE (x.month=? OR (x.month IS NULL AND substr(x.date,1,7)=?)) ORDER BY x.date, x.id`).all(month, month);
   const opening = computeOpeningBalance(month);
   const totalIn  = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
   const totalOut = expenseRows.reduce((s, r) => s + (r.amount || 0), 0);
