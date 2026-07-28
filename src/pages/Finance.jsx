@@ -683,6 +683,20 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
     employee_id: record.employee_id || '',
   } : { date: new Date().toISOString().slice(0, 10) });
 
+  useEffect(() => {
+    if (record) {
+      setForm({
+        ...record,
+        date: record.date || new Date().toISOString().slice(0, 10),
+        paid_to: record.paid_to || (type === 'expenses' ? record.client_name : '') || '',
+        client_name: record.client_name || record.paid_to || '',
+        student_name: record.student_name || (type === 'income' ? record.client_name : '') || '',
+        lead_id: record.lead_id || '',
+        employee_id: record.employee_id || '',
+      });
+    }
+  }, [record, type]);
+
   const [studentQuery, setStudentQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [students, setStudents] = useState([]);

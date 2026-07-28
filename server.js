@@ -6982,8 +6982,8 @@ app.put('/api/cashflow/initial', (req, res) => requireAdmin(req, res, () => {
 // Includes running balance per row so the table reads like a real cashflow.
 app.get('/api/cashflow', (req, res) => requireFinance(req, res, () => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
-  const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE i.month=? AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month);
-  const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to AS client_name,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.month=? ORDER BY x.date, x.id`).all(month);
+  const incomeRows  = db.prepare(`SELECT i.id,i.date,i.category,i.client_name,i.student_name,i.lead_id,i.reference,i.amount,i.notes,i.employee_id,e.name AS employee_name FROM income i LEFT JOIN employees e ON e.id = i.employee_id WHERE i.month=? AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0) ORDER BY i.date, i.id`).all(month);
+  const expenseRows = db.prepare(`SELECT x.id,x.date,x.category,x.paid_to,x.paid_to AS client_name,x.student_name,x.lead_id,x.reference,x.amount,x.notes,x.employee_id,e.name AS employee_name FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.month=? ORDER BY x.date, x.id`).all(month);
   const opening = computeOpeningBalance(month);
   const totalIn  = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
   const totalOut = expenseRows.reduce((s, r) => s + (r.amount || 0), 0);
