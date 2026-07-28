@@ -70,8 +70,17 @@ function doSave() {
     }
     const tmp = _dbPath + '.tmp';
     try {
-      writeFileSync(tmp, Buffer.from(data));
+      const buffer = Buffer.from(data);
+      writeFileSync(tmp, buffer);
       renameSync(tmp, _dbPath);
+
+      // Keep latest_auto_save.db inside backups directory updated on every save
+      const backupDir = join(dir, 'backups');
+      if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
+      const autoSavePath = join(backupDir, 'latest_auto_save.db');
+      const autoSaveTmp = autoSavePath + '.tmp';
+      writeFileSync(autoSaveTmp, buffer);
+      renameSync(autoSaveTmp, autoSavePath);
     } catch (err) {
       console.error(`[sqldb] Atomic save failed; existing database was kept (${err.message}).`);
       throw err;

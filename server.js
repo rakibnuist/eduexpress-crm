@@ -126,9 +126,8 @@ try {
       console.log('[database] Existing pre-upgrade snapshot already matches the database.');
     }
 
-  } else if (!fs.existsSync(DB_PATH)) {
-    // Only restore automatically when the database is truly missing. A small
-    // existing database may be valid and must never be overwritten implicitly.
+  } else if (!fs.existsSync(DB_PATH) || dbSize <= 100000) {
+    // Restore automatically when the database is missing or empty/skeleton after deployment.
     const allBackups = fs.readdirSync(backupDir)
       .filter(f => f.endsWith('.db'))
       .map(f => {
@@ -146,8 +145,6 @@ try {
         console.log(`[database] 🛡️ Auto-restored database from latest mtime snapshot: ${latestBackup.name} (mtime: ${new Date(latestBackup.mtime).toISOString()})`);
       }
     }
-  } else {
-    console.warn(`[database] Existing database is small (${dbSize} bytes); leaving it untouched.`);
   }
 } catch (err) {
   console.error('[database] Snapshot safeguard error:', err.message);

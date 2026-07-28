@@ -16,14 +16,19 @@ import {
 
 const cMonthLabel = (m) => {
   if (!m) return '';
-  const [y, mo] = m.split('-');
-  return new Date(parseInt(y), parseInt(mo) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const [y, mo] = m.split('-').map(Number);
+  if (!y || !mo) return m;
+  const d = new Date(y, mo - 1, 15);
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 };
 const cAddMonth = (m, delta) => {
   if (!m) return new Date().toISOString().slice(0, 7);
   const [y, mo] = m.split('-').map(Number);
-  const d = new Date(y, mo - 1 + delta, 1);
-  return d.toISOString().slice(0, 7);
+  if (!y || !mo) return new Date().toISOString().slice(0, 7);
+  const totalMonths = y * 12 + (mo - 1) + delta;
+  const newY = Math.floor(totalMonths / 12);
+  const newMo = (totalMonths % 12) + 1;
+  return `${newY}-${String(newMo).padStart(2, '0')}`;
 };
 
 export default function Finance() {
