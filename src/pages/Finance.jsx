@@ -605,7 +605,7 @@ export default function Finance() {
 
       {tab === 'cashflow' && <CashflowTab onChanged={load} settings={settings} />}
       {tab === 'year' && <YearTab />}
-      {tab === 'investors' && <InvestorsTab />}
+      {tab === 'investors' && <InvestorsTab onChanged={load} />}
 
       {modal && modal.type === 'initCash' && (
         <InitialCashModal current={liveBalance} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />
@@ -1339,7 +1339,7 @@ const PROFIT_SHARES = {
   'Sakib Al Jubaer': { pct: 25, short: 'Sakib', color: 'bg-amber-500', bar: 'bg-amber-500' }
 };
 
-function InvestorsTab() {
+function InvestorsTab({ onChanged }) {
   const [data, setData] = useState(null);
   const [showInvestModal, setShowInvestModal] = useState(false);
   const load = () => api.cashflowInvestors().then(setData).catch(() => setData({ total: 0, contributions: [], by_person: [] }));
@@ -1379,12 +1379,6 @@ function InvestorsTab() {
           <p className="text-3xl font-bold text-slate-800 mt-1 tabular-nums">{cFmt(data.total)}</p>
           <p className="text-xs text-slate-400 mt-0.5">From {data.by_person.length} {data.by_person.length === 1 ? 'person' : 'people'} · {data.contributions.length} entries</p>
         </div>
-        <button
-          onClick={() => setShowInvestModal(true)}
-          className="flex items-center gap-2 bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-violet-700 shadow-sm transition-colors"
-        >
-          <Plus size={16} /> Add Investment
-        </button>
       </div>
 
       {data.by_person.length === 0 ? (
@@ -1460,9 +1454,6 @@ function InvestorsTab() {
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
               <p className="font-semibold text-slate-700 text-sm">All contributions</p>
-              <button onClick={() => setShowInvestModal(true)} className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-xl transition-colors">
-                <Plus size={13} /> Add Investment
-              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1496,7 +1487,7 @@ function InvestorsTab() {
       {showInvestModal && (
         <Modal title="Record Investment" onClose={() => setShowInvestModal(false)}>
           <InvestmentForm
-            onSave={() => { setShowInvestModal(false); load(); }}
+            onSave={() => { setShowInvestModal(false); load(); onChanged?.(); }}
             onCancel={() => setShowInvestModal(false)}
           />
         </Modal>
