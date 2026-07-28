@@ -146,6 +146,7 @@ export const api = {
   cashflowYear:       (year)   => req('/cashflow/year?' + toQuery({ year })),
   cashflowCategories: ()       => req('/cashflow/categories'),
   cashflowInvestors:  ()       => req('/cashflow/investors'),
+  studentTransactions:(q)      => req('/finance/student-transactions?' + toQuery({ q })),
   setInitialCash:     (amount) => req('/cashflow/initial', { method: 'PUT', body: JSON.stringify({ amount }) }),
   studentsList:       ()       => req('/students-list'),
 

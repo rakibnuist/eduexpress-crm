@@ -6979,6 +6979,45 @@ app.put('/api/cashflow/initial', (req, res) => requireAdmin(req, res, () => {
   res.json({ ok: true, cash_initial: v });
 }));
 
+// Student financial ledger lookup endpoint — returns all income & expenses for a given student query
+app.get('/api/finance/student-transactions', requireFinance, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ student: null, transactions: [], totals: { income: 0, expense: 0, net: 0, count: 0 } });
+
+  const param = `%${q}%`;
+  const incomeRows = db.prepare(`
+    SELECT i.id, i.date, i.category, i.client_name, i.student_name, i.lead_id, i.reference, i.amount, i.notes, i.employee_id, 'income' AS kind, e.name AS employee_name
+    FROM income i LEFT JOIN employees e ON e.id = i.employee_id
+    WHERE (i.student_name LIKE ? OR i.client_name LIKE ? OR i.lead_id LIKE ? OR i.reference LIKE ?)
+    ORDER BY i.date DESC, i.id DESC
+  `).all(param, param, param, param);
+
+  const expenseRows = db.prepare(`
+    SELECT x.id, x.date, x.category, x.paid_to, x.paid_to AS client_name, x.student_name, x.lead_id, x.reference, x.amount, x.notes, x.employee_id, 'expense' AS kind, e.name AS employee_name
+    FROM expenses x LEFT JOIN employees e ON e.id = x.employee_id
+    WHERE (x.student_name LIKE ? OR x.paid_to LIKE ? OR x.lead_id LIKE ? OR x.reference LIKE ?)
+    ORDER BY x.date DESC, x.id DESC
+  `).all(param, param, param, param);
+
+  const student = db.prepare(`
+    SELECT id, lead_id, client_name, phone, destination, program, service_fee, paid, balance
+    FROM leads
+    WHERE client_name LIKE ? OR lead_id LIKE ? OR phone LIKE ?
+    LIMIT 1
+  `).get(param, param, param);
+
+  const transactions = [...incomeRows, ...expenseRows].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const totalIn = incomeRows.reduce((s, r) => s + (r.amount || 0), 0);
+  const totalOut = expenseRows.reduce((s, r) => s + (r.amount || 0), 0);
+
+  res.json({
+    student: student || null,
+    transactions,
+    totals: { income: totalIn, expense: totalOut, net: totalIn - totalOut, count: transactions.length }
+  });
+});
+
 // Monthly ledger — what the Excel shows for one month, side by side.
 // Includes running balance per row so the table reads like a real cashflow.
 app.get('/api/cashflow', (req, res) => requireFinance(req, res, () => {

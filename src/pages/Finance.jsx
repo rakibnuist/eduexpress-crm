@@ -244,6 +244,7 @@ export default function Finance() {
         {[
           ['overview', 'LayoutDashboard', 'Overview'],
           ['cashflow', 'Receipt', 'Cashflow'],
+          ['student', 'GraduationCap', 'Student Search'],
           ['income', 'ArrowDownCircle', 'Income Ledger'],
           ['expenses', 'ArrowUpCircle', 'Expense Ledger'],
           ['year', 'Calendar', 'Year View'],
@@ -609,6 +610,7 @@ export default function Finance() {
       )}
 
       {tab === 'cashflow' && <CashflowTab onChanged={load} settings={settings} />}
+      {tab === 'student' && <StudentSearchTab settings={settings} onChanged={load} />}
       {tab === 'year' && <YearTab />}
       {tab === 'investors' && <InvestorsTab onChanged={load} />}
 
@@ -668,6 +670,258 @@ function EmptyFinance({ onAdd }) {
       <button onClick={onAdd} className="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 shadow-sm transition-colors">
         Add First Entry
       </button>
+    </div>
+  );
+}
+
+/* ───────────────────────── STUDENT SEARCH TAB ───────────────────────── */
+function StudentSearchTab({ settings, onChanged }) {
+  const [query, setQuery] = useState('');
+  const [students, setStudents] = useState([]);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [cats, setCats] = useState({ income: [], expense: [] });
+
+  useEffect(() => {
+    api.studentsList().then(res => setStudents(res || [])).catch(() => {});
+    api.cashflowCategories().then(setCats).catch(() => {});
+  }, []);
+
+  const search = useCallback(async (qStr) => {
+    const q = (qStr !== undefined ? qStr : query).trim();
+    if (!q) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.studentTransactions(q);
+      setData(res);
+    } catch (err) {
+      console.error('Student search error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
+
+  const handleSaved = () => {
+    setEditing(null);
+    search();
+    onChanged?.();
+  };
+
+  const filteredStudents = useMemo(() => {
+    if (!query.trim()) return students.slice(0, 10);
+    const q = query.toLowerCase();
+    return students.filter(s =>
+      (s.client_name || '').toLowerCase().includes(q) ||
+      (s.lead_id || '').toLowerCase().includes(q) ||
+      (s.destination || '').toLowerCase().includes(q) ||
+      (s.phone || '').includes(q)
+    ).slice(0, 10);
+  }, [students, query]);
+
+  return (
+    <div className="space-y-4">
+      {/* Search Header Banner */}
+      <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative z-10 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-500/20 rounded-xl backdrop-blur-sm border border-blue-400/20 text-blue-400">
+              <GraduationCap size={22} />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">Student Financial History</h1>
+              <p className="text-xs text-slate-400 mt-0.5">Lookup all income, fees, expenses & referrals for any student</p>
+            </div>
+          </div>
+
+          {/* Search Box */}
+          <div className="relative max-w-2xl mt-2">
+            <input
+              type="text"
+              placeholder="🔍 Search by student name, Lead ID (e.g. L-00441), destination, or phone..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') search(); }}
+              className="w-full bg-white text-slate-900 rounded-xl pl-10 pr-24 py-3 text-sm font-medium shadow-lg outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-slate-400"
+            />
+            <Search size={18} className="absolute left-3.5 top-3.5 text-slate-400 pointer-events-none" />
+            {query && (
+              <button
+                onClick={() => { setQuery(''); setData(null); }}
+                className="absolute right-20 top-3 text-slate-400 hover:text-slate-600 p-1 text-xs font-bold"
+              >
+                <X size={16} />
+              </button>
+            )}
+            <button
+              onClick={() => search()}
+              disabled={loading}
+              className="absolute right-2 top-2 bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+
+          {/* Quick Select Student Chips */}
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Quick Students:</span>
+            {filteredStudents.map(s => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  setQuery(s.client_name);
+                  search(s.client_name);
+                }}
+                className="text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 border border-white/10 font-medium transition-all"
+              >
+                {s.client_name} {s.lead_id ? `(${s.lead_id})` : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Results Display */}
+      {data ? (
+        <div className="space-y-4">
+          {/* Student Profile Card (if found) */}
+          {data.student && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-base border border-blue-100">
+                  {data.student.client_name?.charAt(0) || 'S'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-800 text-base">{data.student.client_name}</h3>
+                    {data.student.lead_id && (
+                      <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                        {data.student.lead_id}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {data.student.destination ? `Dest: ${data.student.destination}` : ''} {data.student.program ? `• ${data.student.program}` : ''} {data.student.phone ? `• 📞 ${data.student.phone}` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-medium border-l border-slate-100 pl-4">
+                <div>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Agreed Fee</p>
+                  <p className="text-sm font-bold text-slate-800 tabular-nums">{cFmt(data.student.service_fee)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Paid to Date</p>
+                  <p className="text-sm font-bold text-emerald-600 tabular-nums">{cFmt(data.student.paid)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">Due Balance</p>
+                  <p className="text-sm font-bold text-rose-600 tabular-nums">{cFmt(data.student.balance)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Student Financial KPI Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <KpiPill icon={<ArrowDownCircle size={18} />} label="Total Income Collected" value={cFmt(data.totals.income)} color="emerald" sub={`${data.transactions.filter(t => t.kind === 'income').length} payment(s)`} />
+            <KpiPill icon={<ArrowUpCircle size={18} />} label="Total Expenses / Spent" value={cFmt(data.totals.expense)} color="rose" sub={`${data.transactions.filter(t => t.kind === 'expense').length} spend(s)`} />
+            <KpiPill icon={<Wallet size={18} />} label="Net Student Cashflow" value={cFmt(data.totals.net)} color={data.totals.net >= 0 ? 'emerald' : 'rose'} sub={`${data.totals.count} total transactions`} />
+          </div>
+
+          {/* Unified Transactions Table */}
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <Receipt size={16} className="text-blue-600" />
+                All Financial Transactions ({data.totals.count})
+              </h3>
+            </div>
+            {data.transactions.length === 0 ? (
+              <div className="text-center text-slate-400 py-12 italic text-xs">
+                No financial transactions found matching "{query}"
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50/60 text-[10px] uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-bold">Date</th>
+                      <th className="text-left px-3 py-2 font-bold">Type / Kind</th>
+                      <th className="text-left px-3 py-2 font-bold">Category</th>
+                      <th className="text-left px-3 py-2 font-bold">Client / Paid To</th>
+                      <th className="text-left px-3 py-2 font-bold">Ref / ID</th>
+                      <th className="text-left px-3 py-2 font-bold">Handled By</th>
+                      <th className="text-right px-3 py-2 font-bold">Amount</th>
+                      <th className="text-center px-3 py-2 font-bold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {data.transactions.map(t => (
+                      <tr key={`${t.kind}-${t.id}`} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-3 py-2 text-slate-600 font-medium whitespace-nowrap text-xs">{t.date}</td>
+                        <td className="px-3 py-2 text-xs">
+                          <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-full text-[10px] border ${t.kind === 'income' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                            {t.kind === 'income' ? <ArrowDownCircle size={10} /> : <ArrowUpCircle size={10} />}
+                            {t.kind === 'income' ? 'INCOME' : 'EXPENSE'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-800 font-semibold text-xs">{t.category || '—'}</td>
+                        <td className="px-3 py-2 text-slate-700 text-xs max-w-[180px] truncate">{t.client_name || t.paid_to || '—'}</td>
+                        <td className="px-3 py-2 text-slate-500 text-xs max-w-[140px] truncate">{t.reference || t.lead_id || '—'}</td>
+                        <td className="px-3 py-2 text-slate-600 text-xs">
+                          {t.employee_name ? (
+                            <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium text-[11px]">
+                              <Users size={10} /> {t.employee_name}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td className={`px-3 py-2 text-right font-bold tabular-nums text-xs ${t.kind === 'income' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {t.kind === 'income' ? '+' : '-'}{cFmt(t.amount)}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            onClick={() => setEditing({ side: t.kind === 'income' ? 'in' : 'out', row: t })}
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Edit transaction"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm">
+          <Search size={36} className="text-slate-300 mx-auto mb-2" />
+          <p className="text-slate-700 font-semibold">Search Student Financial Ledger</p>
+          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+            Type any student name, lead ID, or click a recent student chip above to see every single income receipt and spend transaction for that student.
+          </p>
+        </div>
+      )}
+
+      {/* Editor Modal */}
+      {editing && (
+        <CashflowEntryModal
+          side={editing.side}
+          row={editing.row}
+          month={editing.row?.date?.slice(0, 7)}
+          categories={editing.side === 'in' ? cats.income : cats.expense}
+          employees={settings?.employees || []}
+          onClose={() => setEditing(null)}
+          onSaved={handleSaved}
+        />
+      )}
     </div>
   );
 }
