@@ -468,7 +468,8 @@ export function canAccessConversation(user, conversation) {
     const channelType = conversation?.channel_type || 'whatsapp';
     if (channelType === 'whatsapp' || channelType === 'waba') {
       // Only their own WhatsApp account (matched by channel consultant name or assigned_to)
-      return conversation?.assigned_to === user.id ||
+      return Number(conversation?.assigned_to_id) === Number(user.id) ||
+             Number(conversation?.assigned_to) === Number(user.id) ||
              conversation?.channel_consultant === user.consultant_name ||
              conversation?.consultant === user.consultant_name;
     }

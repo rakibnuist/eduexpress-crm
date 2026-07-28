@@ -1,8 +1,0 @@
-[build]
-builder = "nixpacks"
-buildCommand = "npm run build"
-
-[deploy]
-startCommand = "NODE_ENV=production DB_PATH=/data/crm.db node server.js"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3

@@ -92,6 +92,7 @@ export default function Conversations({ user }) {
   const [selectedConv, setSelectedConv] = useState(null);
   const [messages, setMessages] = useState([]);
   const [channels, setChannels] = useState([]);
+  const [settings, setSettings] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [quickReplies, setQuickReplies] = useState([]);
   const [showQuickReplyPicker, setShowQuickReplyPicker] = useState(false);
@@ -265,7 +266,7 @@ export default function Conversations({ user }) {
       return (toDate(b.last_message_at) || new Date(0)) - (toDate(a.last_message_at) || new Date(0));
     });
     return list;
-  }, [conversations, channelTab, search, statusFilter, user?.id, isFullAccess, channels, isMyWhatsApp]);
+  }, [conversations, channelTab, search, statusFilter, user?.consultant_name, user?.name, isFullAccess, channels, isMyWhatsApp]);
 
   const loadMessages = useCallback(async (conv) => {
     if (!conv) return;
@@ -397,11 +398,11 @@ export default function Conversations({ user }) {
     try {
       const [notesRes, tagsRes] = await Promise.all([
         api.conversationNotes(conv.id),
-        api.tags().catch(() => ({ tags: [] }))
+        api.tags().catch(() => [])
       ]);
       setContactNotes(notesRes.notes || []);
       setContactTags(conv.tags || []);
-      setAllTags(tagsRes.tags || []);
+      setAllTags(Array.isArray(tagsRes) ? tagsRes : (tagsRes.tags || []));
     } catch (err) { console.warn('Failed to load contact details:', err); }
   }, []);
 
@@ -412,6 +413,7 @@ export default function Conversations({ user }) {
     api.templates().then(setTemplates).catch(() => {});
     api.quickReplies().then(setQuickReplies).catch(() => {});
     api.employees().then(setEmployees).catch(() => {});
+    api.settings().then(setSettings).catch(() => {});
   }, []);
   useEffect(() => { loadConversations(); }, [loadConversations]);
   const selectedConvIdRef = useRef(null);
@@ -746,7 +748,13 @@ export default function Conversations({ user }) {
   const handleAssignToMe = async () => {
     if (!selectedConv) return;
     setUpdatingConv(true);
-    try { await api.assignConversation(selectedConv.id, { user_id: user.id }); toast.success('Assigned to you'); const updated = { ...selectedConv, assigned_to: user.name, assigned_to_id: user.id }; setSelectedConv(updated); setConversations(prev => prev.map(c => c.id === selectedConv.id ? updated : c)); }
+    try {
+      const assigned = await api.assignConversation(selectedConv.id, { user_id: user.id });
+      toast.success('Assigned to you');
+      const updated = { ...selectedConv, ...assigned };
+      setSelectedConv(updated);
+      setConversations(prev => prev.map(c => c.id === selectedConv.id ? updated : c));
+    }
     catch (err) { toast.error('Failed: ' + err.message); } finally { setUpdatingConv(false); }
   };
 
@@ -847,7 +855,7 @@ export default function Conversations({ user }) {
       const englishAllText = banglaToEnglish(allText);
       const englishInboundText = banglaToEnglish(inboundText);
 
-      const phoneRegex = /(?:(?:\+|00)?880?[\s\-]?)?(?:0[\s\-]?)?1[\s\-]?[3-9](?:[\s\-]*\d){8}/g;
+      const phoneRegex = /(?:(?:\+|00)?880?[\s-]?)?(?:0[\s-]?)?1[\s-]?[3-9](?:[\s-]*\d){8}/g;
       let phones = englishInboundText.match(phoneRegex);
       if (!phones || phones.length === 0) {
         phones = englishAllText.match(phoneRegex);
@@ -859,7 +867,7 @@ export default function Conversations({ user }) {
         return;
       }
       
-      const extractedPhone = phones[0].replace(/[\s\-]/g, '');
+      const extractedPhone = phones[0].replace(/[\s-]/g, '');
       
       const adMatch = allText.match(/ad_id=(\d+)/i) || allText.match(/campaign_id=(\d+)/i);
       const adDetails = adMatch ? `Found Ad/Campaign ID: ${adMatch[1]}` : 'No obvious ad details found';

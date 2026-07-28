@@ -1,101 +1,105 @@
-# 🚀 EduExpress CRM — Railway Deployment Guide
+# EduExpress CRM — Hostinger VPS deployment
 
-## Quick Deploy (One-Time Setup)
+Production URL: [crm.eduexpressint.com](https://crm.eduexpressint.com)
 
-### Step 1: Connect Railway to GitHub
-1. Go to [Railway Dashboard](https://railway.app/dashboard)
-2. Click **New Project** → **Deploy from GitHub repo**
-3. Select `rakibnuist/eduexpress-crm`
-4. Railway will auto-detect `nixpacks.toml` and build
+The application runs with Docker Compose behind the existing Traefik reverse
+proxy on the Hostinger VPS. Traefik handles HTTPS and routes the production
+domain to the CRM container.
 
-### Step 2: Set Environment Variables
-In Railway Dashboard → Project → Variables, add:
+## Data-safety rules
 
-```env
-NODE_ENV=production
-PORT=3000
-# Database auto-created by Railway, no need for DB_PATH
+The Compose volumes `crm-data` and `crm-uploads` contain production data. Their
+installed Docker names include the Compose project name. Code deployments must
+preserve both volumes.
 
-# Meta / Facebook
-FB_PAGE_ACCESS_TOKEN=your_long_lived_page_token_here
-FB_PAGE_CHINA_ID=your_china_page_id
-FB_PAGE_BD_ID=your_bd_page_id
+- Never run `docker compose down -v`.
+- Never delete or recreate either named volume.
+- Never replace `/data/crm.db` during a normal code deployment.
+- Keep `RUN_DATA_BACKFILLS=false` unless a reviewed migration is intentional.
+- Download and verify a current database backup before any restore operation.
 
-# n8n (your n8n instance URL)
-N8N_PUBLISH_WEBHOOK=https://vibeacademy.cloud/webhook/eduexpress-publish
+Running `docker compose up -d --build` replaces only the application container
+and image; it preserves the named volumes.
 
-# Internal key (keep secret, n8n uses this)
-INTERNAL_API_KEY=eduexpress-n8n-2024
+## First deployment
 
-# Emergency admin-reset key (REQUIRED for /api/auth/emergency-reset to work).
-# Without it the reset endpoint is disabled (returns 404). Use a long random string.
-RESET_KEY=change-me-to-a-long-random-secret
-```
-
-### Emergency admin password reset
-If you're locked out, visit (with your RESET_KEY):
-
-```
-https://crm.eduexpressint.com/api/auth/emergency-reset?key=YOUR_RESET_KEY
-```
-
-It returns a new random password for `admin@eduexpressint.com`. Log in, then
-change it in Settings. Optionally set your own: `&password=YourNewPass123`.
-If `RESET_KEY` is not configured, the endpoint stays disabled for security.
-
-### Step 3: Add Custom Domain
-Railway Dashboard → Settings → Domains → Add `crm.eduexpressint.com`
-
-Update your DNS A record to point to Railway's provided IP.
-
-### Step 4: Verify Deploy
 ```bash
-curl https://crm.eduexpressint.com/api/auth/me
-curl -H "x-api-key: eduexpress-n8n-2024" https://crm.eduexpressint.com/api/marketing/publish/n8n-config
+ssh root@srv1774770.hstgr.cloud
+mkdir -p /docker
+cd /docker
+git clone https://github.com/rakibnuist/eduexpress-crm.git crm
+cd crm
+cp .env.example .env
+chmod 600 .env
+nano .env
+docker compose config
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 crm
 ```
 
----
+Fill every required secret in `.env` before starting the container. Generate
+different long random values for `JWT_SECRET`, `RESET_KEY`,
+`INTERNAL_API_KEY`, and `WEBSITE_WEBHOOK_SECRET`. Keep
+`RUN_DATA_BACKFILLS=false`.
 
-## GitHub Actions Auto-Deploy (Optional)
+The deployment is ready when the container is healthy and the following returns
+`"status":"ready"`:
 
-### 1. Get Railway Token
-Railway Dashboard → Account → Tokens → Generate Token
+```bash
+curl --fail https://crm.eduexpressint.com/health
+```
 
-### 2. Add to GitHub Secrets
-GitHub Repo → Settings → Secrets and variables → Actions → New repository secret
-- Name: `RAILWAY_TOKEN`
-- Value: paste the token from Railway
+## Routine code deployment
 
-### 3. Push to main triggers deploy
-Every push to `main` will auto-deploy via `.github/workflows/railway-deploy.yml`
+```bash
+ssh root@srv1774770.hstgr.cloud
+cd /docker/crm
+git pull --ff-only
+docker compose config
+docker compose up -d --build
+docker compose ps
+curl --fail https://crm.eduexpressint.com/health
+```
 
----
+This procedure does not import, overwrite, or delete CRM records.
 
-## Files Added for Deployment
+## Operations
 
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | Container build (fallback if Nixpacks fails) |
-| `nixpacks.toml` | Railway-native build + start config |
-| `.github/workflows/railway-deploy.yml` | GitHub Actions auto-deploy |
-| `DEPLOY.md` | This guide |
+```bash
+docker compose ps
+docker compose logs --tail=200 crm
+docker compose logs -f crm
+docker compose restart crm
+docker volume ls --filter label=com.docker.compose.project
+```
 
----
+Use `docker compose down` only when a full stop is necessary. It preserves data
+as long as the `-v` option is not used.
+
+## Emergency admin reset
+
+The reset endpoint is disabled when `RESET_KEY` is blank. When required, send a
+POST request using the secret stored on the VPS:
+
+```bash
+curl -X POST https://crm.eduexpressint.com/api/auth/emergency-reset \
+  -H 'Content-Type: application/json' \
+  -H 'x-reset-key: YOUR_RESET_KEY' \
+  --data '{"password":"A-new-strong-password"}'
+```
+
+## Webhook checks
+
+- Meta callback: `https://crm.eduexpressint.com/webhook/meta`
+- The Meta app secret must match `META_APP_SECRET`.
+- The verification token must match the CRM integration setting or
+  `META_WEBHOOK_VERIFY_TOKEN`.
+- Website lead requests must include the configured shared secret.
 
 ## Troubleshooting
 
-### "No such column" errors after deploy
-Railway uses a fresh SQLite file. Run the seed script once:
-```bash
-railway run -- node seed_social_engine.js
-```
-
-### Webhook not receiving events
-1. Check Meta Developer Console → Webhooks → callback URL is `https://crm.eduexpressint.com/webhook/meta`
-2. Verify token matches: `eduexpress_verify_2024`
-3. Ensure Page is subscribed to the app
-
-### Build fails
-Check Railway logs. Common issues:
-- Missing `npm run build` step (fixed by `nixpacks.toml`)
-- `vite` not found (needs `npm ci` before `npm run build`)
+If the health check fails, inspect `docker compose logs --tail=200 crm` and
+confirm the environment file is present. If database initialization fails, stop
+and investigate the existing volume—do not replace the database with an empty
+file.

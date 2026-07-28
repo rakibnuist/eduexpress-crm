@@ -7,12 +7,16 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
+node_modules/
+dist/
+coverage/
 
 *.local
 
 # Environment secrets (RESET_KEY etc.) — never commit
 .env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -25,7 +29,7 @@ node_modules
 *.sln
 *.sw?
 
-# SQLite DB — lives on Railway Volume, not in git
+# SQLite database files — production data lives on the Hostinger Docker volume
 crm.db
 crm.db-shm
 crm.db-wal
@@ -61,6 +65,7 @@ scanChats.*
 wa_auth/
 
 # DB backups / dumps / archives
+backups/
 *_backup_*.db
 *.bak
 *.bak2

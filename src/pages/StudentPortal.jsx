@@ -5,7 +5,7 @@
    - Shows the document checklist.
    - QR Code for sharing.
    - No hardcoded branding (White-label). */
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import {
@@ -47,7 +47,7 @@ export default function StudentPortal() {
   const [refreshing, setRefreshing] = useState(false);
   const [showQR, setShowQR] = useState(false);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
     try {
       const [d, t] = await Promise.all([
@@ -58,13 +58,13 @@ export default function StudentPortal() {
     }
     catch (e) { setError(e.message || 'This portal link is no longer active.'); }
     if (!silent) setRefreshing(false);
-  };
+  }, [token]);
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) load(true); }, 60000);
     return () => clearInterval(t);
-  }, [token]);
+  }, [load]);
 
   useEffect(() => {
     if (data?.student?.client_name) {
@@ -496,7 +496,7 @@ function RequestedDoc({ doc, token, onUpdated }) {
     if (!url || done) return;
     setSaving(true);
     try {
-      await api.studentSubmitDoc(token, doc.id, url);
+      await api.studentUploadDoc(token, doc.id, url);
       onUpdated(true);
     } catch (e) {
       alert(e.message);
@@ -532,7 +532,7 @@ function ThreadInput({ token, onSent }) {
     if (!msg.trim()) return;
     setSending(true);
     try {
-      await api.studentSendMessage(token, msg);
+      await api.studentMessage(token, msg);
       setMsg('');
       onSent(true);
     } catch (err) {

@@ -29,7 +29,7 @@ const TABS = [
 const TRIGGER_TYPES = [
   { id: 'keyword',            label: 'Keyword',            desc: 'When a message contains certain words' },
   { id: 'new_conversation',   label: 'New Conversation',   desc: 'When a new conversation starts' },
-  { id: 'no_response',        label: 'No Response',        desc: 'When no agent replies within a delay' },
+  { id: 'no_response',        label: 'No Response',        desc: 'After an inbound message waits without an agent reply' },
   { id: 'lead_status_change', label: 'Lead Status Change', desc: 'When a lead status is updated' },
   { id: 'time_based',         label: 'Time-based',         desc: 'Trigger at a scheduled time' },
 ];

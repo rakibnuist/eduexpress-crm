@@ -198,7 +198,10 @@ function DangerZone() {
     if (!sure) return;
     setBusy(true);
     try {
-      const res = await api.wipeLeads(withConversations ? { conversations: true } : {});
+      const res = await api.wipeLeads({
+        confirmation: 'WIPE_ALL_LEADS',
+        ...(withConversations ? { conversations: true } : {}),
+      });
       toast.success(`Deleted ${res.deleted} lead(s) and all associated records${res.conversationsWiped ? ' + all conversations' : ''}.`);
     } catch (e) {
       toast.error(e.message || 'Wipe failed');
@@ -513,7 +516,7 @@ function UserManagement({ consultants }) {
             </div>
           )}
           <p className="text-xs text-slate-400 mt-3">
-            💡 The <strong>Consultant Name</strong> on a user must match the <em>Assigned Consultant</em> field on a lead for it to appear in their inbox. Multi-role users get combined permissions from all assigned roles.
+            💡 If you link a consultant employee, the user’s consultant name is auto-synced from that employee and related lead/channel assignments are kept aligned. Multi-role users get combined permissions from all assigned roles.
           </p>
         </div>
       </div>
@@ -647,7 +650,7 @@ function UserModal({ modal, consultants, onClose, onSaved }) {
 
           {form.roles.includes('consultant') && (
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant name <span className="text-slate-400 font-normal">(must match leads' assigned consultant)</span></label>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">Consultant name <span className="text-slate-400 font-normal">(auto-syncs from linked consultant when selected)</span></label>
               <input list="consultants-list" value={form.consultant_name}
                 onChange={e => setForm(f => ({ ...f, consultant_name: e.target.value }))}
                 placeholder="e.g. Shazid Hasan"
@@ -1105,7 +1108,7 @@ function MetaIntegrationSettings() {
     capi_token: '',
     pixel_id: '',
     app_secret: '',
-    verify_token: 'eduexpress_verify_2024',
+    verify_token: '',
     test_event_code: '',
     meta_ads_access_token: '',
     meta_ad_account_id: '',
@@ -1129,7 +1132,7 @@ function MetaIntegrationSettings() {
         capi_token: cfg.capi_token || '',
         pixel_id: cfg.pixel_id || '',
         app_secret: cfg.app_secret || '',
-        verify_token: cfg.verify_token || 'eduexpress_verify_2024',
+        verify_token: cfg.verify_token || '',
         test_event_code: cfg.test_event_code || '',
         meta_ads_access_token: cfg.meta_ads_access_token || '',
         meta_ad_account_id: cfg.meta_ad_account_id || '',
@@ -1230,7 +1233,7 @@ function MetaIntegrationSettings() {
     });
     es.onerror = (err) => { console.error('SSE error:', err); };
     return () => { es.close(); if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current); };
-  }, []);
+  }, [toast]);
 
   return (
     <div className="space-y-5">
@@ -1355,7 +1358,7 @@ function MetaIntegrationSettings() {
                 type="text"
                 value={config.verify_token}
                 onChange={e => setConfig(c => ({ ...c, verify_token: e.target.value }))}
-                placeholder="eduexpress_verify_2024"
+                placeholder="Enter a long random verify token"
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700"
               />
               <p className="text-[10px] text-slate-400 mt-1">Match this in the Facebook Developer App Webhook setup.</p>
@@ -1660,7 +1663,7 @@ function ChannelModal({ onClose, onSaved, verifyToken }) {
     ig_account_id: '',
     tiktok_account_id: '',
     access_token: '',
-    webhook_verify_token: verifyToken || 'eduexpress_verify_2024',
+    webhook_verify_token: verifyToken || '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1853,7 +1856,7 @@ function DocTemplateManager({ destinations, templates, onSaved }) {
       base[dest] = templates[dest] || [];
     }
     setData(base);
-    if (destinations.length > 0 && !activeDest) setActiveDest(destinations[0]);
+    setActiveDest(current => destinations.includes(current) ? current : (destinations[0] || ''));
   }, [destinations, templates]);
 
   const addDoc = () => {

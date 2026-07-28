@@ -351,11 +351,16 @@ function hashPassword(password) {
   return `${salt}:${hash}`;
 }
 function verifyPassword(password, stored) {
-  if (!stored || !stored.includes(':')) return false;
-  const [salt, hash] = stored.split(':');
-  const test = crypto.scryptSync(String(password), salt, 64).toString('hex');
-  try { return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex')); }
-  catch { return false; }
+  try {
+    if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
+    const [salt, hash] = stored.split(':');
+    if (!salt || !hash) return false;
+    const test = crypto.scryptSync(String(password), salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'));
+  } catch (e) {
+    console.error('[verifyPassword]', e.message);
+    return false;
+  }
 }
 function signToken(payload) {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Math.floor(Date.now()/1000) + SESSION_DAYS*86400 })).toString('base64url');
@@ -422,33 +427,39 @@ app.use((req, res, next) => {
 // ─── AUTH ENDPOINTS (must precede the auth-required middleware) ─────────────
 app.post('/api/auth/login', (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: 'System is initializing database, please try again in a few seconds.' });
+    if (!dbReady || !db) return res.status(503).json({ error: 'System is initializing database, please try again in a few seconds.' });
     const { email, password, lat, lng, ssid, device_id } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Username/Email and password required' });
     
     const queryVal = String(email).trim().toLowerCase();
     // Find user matching email, name, consultant_name, or emp_id (case-insensitive lookup)
-    const user = db.prepare(`
-      SELECT * FROM users 
-      WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(COALESCE(consultant_name, '')) = ? OR LOWER(COALESCE(emp_id, '')) = ?) 
-        AND active = 1
-    `).get(queryVal, queryVal, queryVal, queryVal);
+    let user = null;
+    try {
+      user = db.prepare(`
+        SELECT * FROM users 
+        WHERE (LOWER(email) = ? OR LOWER(name) = ? OR LOWER(COALESCE(consultant_name, '')) = ? OR LOWER(COALESCE(emp_id, '')) = ?) 
+          AND active = 1
+      `).get(queryVal, queryVal, queryVal, queryVal);
+    } catch (e) {
+      console.warn('[login] Fallback user query due to:', e.message);
+      user = db.prepare(`
+        SELECT * FROM users 
+        WHERE (LOWER(email) = ? OR LOWER(name) = ?) 
+          AND active = 1
+      `).get(queryVal, queryVal);
+    }
 
     if (!user || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid username/email or password' });
     }
 
     // ── Network & Location enforcement ────────────────────────────────────────
-    // Login is only permitted from the office network and/or office location.
-    // • SSID check  — enforced when client sends an SSID value AND allowed list is configured.
-    //                 (Browsers cannot detect SSID, so this only fires from a native/PWA app.)
-    // • Geo check   — enforced when office lat/lng are stored in config.
-    //                 All browsers that grant location permission are gated by this.
-    // If neither config is set the check is skipped (safe for initial setup).
-    // Admins may log in from anywhere — they are exempt from the office network
-    // and geofence gates (their password has already been verified above).
-    // Load multi-roles for token and enforcement
-    const userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+    let userRoles = [];
+    try {
+      userRoles = db.prepare("SELECT role FROM user_roles WHERE user_id=?").all(user.id).map(r => r.role);
+    } catch (e) {
+      console.warn('[login] user_roles lookup skipped:', e.message);
+    }
     if (userRoles.length === 0) {
       const roleMap = { admin: 'founder_ceo', manager: 'application_manager', consultant: 'consultant' };
       userRoles.push(roleMap[user.role] || user.role || 'consultant');
@@ -502,8 +513,12 @@ app.post('/api/auth/login', (req, res) => {
     }
     // ── End enforcement ────────────────────────────────────────────────────────
 
-    db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
-    // Roles are loaded above
+    try {
+      db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id);
+    } catch (e) {
+      console.warn('[login] Failed to update last_login:', e.message);
+    }
+
     const token = signToken({ id: user.id, role: user.role, roles: userRoles, email: user.email, name: user.name, consultant_name: user.consultant_name, emp_id: user.emp_id });
     setAuthCookie(res, token);
 
@@ -520,7 +535,7 @@ app.post('/api/auth/login', (req, res) => {
 
     res.json({
       id: user.id, email: user.email, name: user.name, role: user.role, roles: userRoles,
-      consultant_name: user.consultant_name, emp_id: user.emp_id, agency_id: user.agency_id,
+      consultant_name: user.consultant_name || null, emp_id: user.emp_id || null, agency_id: user.agency_id || null,
       attendance, // { ok, created/alreadyIn/reason, time, status }
     });
   } catch (err) {

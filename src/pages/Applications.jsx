@@ -844,16 +844,16 @@ function EmptyState() {
 
 
 /* ───────────────────────────── TABLE ───────────────────────────── */
+function SortIcon({ col, sortConfig }) {
+  if (sortConfig.key !== col) return <ArrowUpDown size={10} className="text-slate-300 ml-1" />;
+  return <ArrowUpDown size={10} className={sortConfig.dir === 'asc' ? 'text-blue-600 ml-1' : 'text-blue-600 ml-1 rotate-180'} />;
+}
+
 function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, sortConfig, setSortConfig }) {
   const stageLabel = (key) => stages.find(s => s.key === key)?.label || '—';
   const toggleSort = (key) => {
     setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }));
   };
-  const SortIcon = ({ col }) => {
-    if (sortConfig.key !== col) return <ArrowUpDown size={10} className="text-slate-300 ml-1" />;
-    return <ArrowUpDown size={10} className={sortConfig.dir === 'asc' ? 'text-blue-600 ml-1' : 'text-blue-600 ml-1 rotate-180'} />;
-  };
-
   const [page, setPage] = useState(1);
   useEffect(() => { setPage(1); }, [rows]);
   
@@ -871,15 +871,15 @@ function TableView({ rows, onPick, stages, selectedIds, setSelectedIds, user, so
               <Th><input type="checkbox" checked={rows.length > 0 && rows.every(r => selectedIds.includes(r.id))}
                 onChange={(e) => { if (e.target.checked) { setSelectedIds(prev => Array.from(new Set([...prev, ...rows.map(r => r.id)]))); } else { setSelectedIds(prev => prev.filter(id => !rows.map(r => r.id).includes(id))); } }}
                 onClick={e => e.stopPropagation()} className="rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer" /></Th>
-              <Th onClick={() => toggleSort('client_name')}>Name <SortIcon col="client_name" /></Th>
+              <Th onClick={() => toggleSort('client_name')}>Name <SortIcon col="client_name" sortConfig={sortConfig} /></Th>
               <Th>Market / Type / Channel</Th>
-              <Th onClick={() => toggleSort('destination')}>Destination <SortIcon col="destination" /></Th>
-              <Th onClick={() => toggleSort('nationality')}>Nationality <SortIcon col="nationality" /></Th>
+              <Th onClick={() => toggleSort('destination')}>Destination <SortIcon col="destination" sortConfig={sortConfig} /></Th>
+              <Th onClick={() => toggleSort('nationality')}>Nationality <SortIcon col="nationality" sortConfig={sortConfig} /></Th>
               <Th>Passport</Th>
               <Th>Intake</Th>
               <Th>Degree</Th>
               <Th>Major</Th>
-              <Th onClick={() => toggleSort('application_stage')}>Stage <SortIcon col="application_stage" /></Th>
+              <Th onClick={() => toggleSort('application_stage')}>Stage <SortIcon col="application_stage" sortConfig={sortConfig} /></Th>
               <Th>Universities</Th>
               <Th>Consultant</Th>
               <Th>Deposit</Th>
@@ -1554,6 +1554,7 @@ function ShareCard({ lead, onChanged }) {
 
   useEffect(() => { setToken(lead.public_token); setEnabled(!!lead.public_enabled); }, [lead.public_token, lead.public_enabled]);
   const url = token ? `${window.location.origin}/s/${token}` : null;
+  const canUsePortal = !!token && enabled;
 
   const generateCompositeQR = () => {
     return new Promise((resolve, reject) => {
@@ -1648,22 +1649,38 @@ function ShareCard({ lead, onChanged }) {
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-2 flex items-center gap-2">
             <code className="text-[11px] flex-1 truncate text-slate-600 font-mono">{url}</code>
-            <button onClick={copy} title="Copy" aria-label="Copy" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+            <button onClick={copy} title="Copy" aria-label="Copy" disabled={!canUsePortal} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               {copied ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
             </button>
           </div>
+          {!enabled && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+              This link is currently disabled. Enable it before opening, copying, or sharing the QR code.
+            </p>
+          )}
           <div className="flex gap-1.5">
-            <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-xs font-semibold text-center text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all">
+            <a
+              href={canUsePortal ? url : undefined}
+              target={canUsePortal ? "_blank" : undefined}
+              rel={canUsePortal ? "noreferrer" : undefined}
+              aria-disabled={!canUsePortal}
+              onClick={(e) => { if (!canUsePortal) e.preventDefault(); }}
+              className={`flex-1 text-xs font-semibold text-center px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                canUsePortal
+                  ? 'text-blue-700 bg-blue-50 hover:bg-blue-100'
+                  : 'text-slate-400 bg-slate-100 cursor-not-allowed pointer-events-none'
+              }`}
+            >
               <ExternalLink size={12} /> Open
             </a>
-            <button onClick={() => setShowQR(s => !s)} className="flex-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+            <button onClick={() => setShowQR(s => !s)} disabled={!canUsePortal} className="flex-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
               <QrCode size={12} /> {showQR ? 'Hide QR' : 'Show QR'}
             </button>
             <button onClick={generate} disabled={busy} title="Regenerate (invalidates old link)" aria-label="Regenerate link" className="text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer">
               <RotateCw size={12} />
             </button>
           </div>
-          {showQR && (
+          {showQR && canUsePortal && (
             <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center mt-2 shadow-sm">
               <img src={api.qrUrl(lead.id)} alt="Student portal QR" width={200} height={200} className="rounded" loading="lazy" />
               <p className="text-[10px] text-slate-400 mt-2 text-center">Student scans → opens portal · works without login</p>

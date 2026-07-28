@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { Plus, Edit2, Trash2, Globe, FileText, Check, X, ExternalLink } from 'lucide-react';
 import { useToast } from '../components/Toast';
@@ -25,11 +25,7 @@ export default function Destinations() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  useEffect(() => {
-    loadDestinations();
-  }, []);
-
-  const loadDestinations = async () => {
+  const loadDestinations = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch('/api/destinations');
@@ -41,7 +37,11 @@ export default function Destinations() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadDestinations();
+  }, [loadDestinations]);
 
   const handleEdit = (dest) => {
     setFormData({

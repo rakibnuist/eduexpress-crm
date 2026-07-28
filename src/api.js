@@ -3,6 +3,7 @@ const BASE = '/api';
 // Auto-retry on 503 (server restarting) so a transient OOM recovery is
 // invisible to the user. Up to 3 retries with exponential backoff.
 async function req(path, opts = {}, attempt = 1) {
+  const method = String(opts.method || 'GET').toUpperCase();
   const r = await fetch(BASE + path, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -15,7 +16,7 @@ async function req(path, opts = {}, attempt = 1) {
     throw new Error('Unauthorized');
   }
   // Server is restarting, warming up, or under temporary proxy load — wait and retry transparently.
-  if ([500, 502, 503, 504].includes(r.status) && attempt <= 3) {
+  if ((method === 'GET' || method === 'HEAD') && [502, 503, 504].includes(r.status) && attempt <= 3) {
     await new Promise(res => setTimeout(res, 1000 * attempt));
     return req(path, opts, attempt + 1);
   }
@@ -402,7 +403,7 @@ export const api = {
   conversationNotes: (id) => req(`/conversations/${id}/notes`),
   addConversationNote: (id, d) => req(`/conversations/${id}/notes`, { method: 'POST', body: JSON.stringify(d) }),
   addConversationTag: (id, d) => req(`/conversations/${id}/tags`, { method: 'POST', body: JSON.stringify(d) }),
-  removeConversationTag: (id, tagId) => req(`/conversations/${id}/tags/${tagId}`, { method: 'DELETE' }),
+  removeConversationTag: (id, tagId) => req(`/conversations/${id}/tags`, { method: 'DELETE', body: JSON.stringify({ tag_id: tagId }) }),
   assignConversation: (id, d) => req(`/conversations/${id}/assign`, { method: 'PUT', body: JSON.stringify(d) }),
 
   // Convert conversation to lead

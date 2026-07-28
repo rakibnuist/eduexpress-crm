@@ -11,7 +11,7 @@ import {
   Heart, MessageCircle, Send, Eye, Hash, Target, Palette, PenTool, Upload, Trash2, Edit3, Move,
   ArrowRight, ArrowLeft, ThumbsUp, ThumbsDown, MessageSquare, FileText, ExternalLink, Download,
   Globe, Camera, Play, Video, Layers, Sliders, MoreHorizontal, User, Calendar, MapPin, Flag, GripVertical,
-  LayoutTemplate, CalendarClock, Megaphone, ChevronDown, Copy, ChevronLeft
+  LayoutTemplate, CalendarClock, Megaphone, ChevronDown, Copy, ChevronLeft, Share2
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════
@@ -31,6 +31,9 @@ const STATUS_CONFIG = {
   published:     { label: 'Published',      color: 'bg-green-50 border-green-200 text-green-700',     icon: Rocket, desc: 'Live' },
   archived:      { label: 'Archived',       color: 'bg-gray-50 border-gray-200 text-gray-500',        icon: FolderKanban, desc: 'Done' },
 };
+
+const BANNED_CRITICAL = ['guaranteed visa','100% visa success','100% admission','guaranteed admission','visa confirmed','no rejection','zero rejection','government registered','licensed by government','official representative','authorized agent','best consultancy','no. 1 consultancy','100% scholarship guaranteed','free education','no cost at all'];
+const BANNED_HIGH = ['csc scholarship','gks scholarship','stipendium hungaricum','turkiye burslari','no ielts','payment after visa','free counselling','5000+ students','99% visa success','$5m revenue'];
 
 const PILLAR_COLORS = {
   scholarship: '#10B981', trust: '#3B82F6', career: '#8B5CF6', urgency: '#F59E0B',
@@ -777,7 +780,7 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
 
   useEffect(() => {
     if (post) {
-      setForm({ ...form, ...post });
+      setForm(current => ({ ...current, ...post }));
       try { setQualityChecks(JSON.parse(post.quality_checks || '{}')); } catch {}
       api.marketing.postComments(post.id).then(c => setComments(c)).catch(() => {});
       api.marketing.assets({ post_id: post.id }).then(a => setAssets(a)).catch(() => {});
@@ -786,10 +789,7 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
     api.marketing.llmConfig().catch(() => null).then(c => setLlmConfig(c));
   }, [post]);
 
-  const BANNED_CRITICAL = ['guaranteed visa','100% visa success','100% admission','guaranteed admission','visa confirmed','no rejection','zero rejection','government registered','licensed by government','official representative','authorized agent','best consultancy','no. 1 consultancy','100% scholarship guaranteed','free education','no cost at all'];
-  const BANNED_HIGH = ['csc scholarship','gks scholarship','stipendium hungaricum','turkiye burslari','no ielts','payment after visa','free counselling','5000+ students','99% visa success','$5m revenue'];
-
-  const runQualityCheck = (h, b, tags) => {
+  const runQualityCheck = useCallback((h, b, tags) => {
     const fullText = `${h} ${b} ${tags}`.toLowerCase();
     const bannedFound = []; const severity = [];
     BANNED_CRITICAL.forEach(w => { if (fullText.includes(w)) { bannedFound.push(w); severity.push('critical'); }});
@@ -800,13 +800,13 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
     const toneOk = form.language === 'bangla' ? !/[a-zA-Z]{20,}/.test(b) : true;
     const score = Math.max(0, 100 - severity.filter(s => s === 'critical').length * 50 - severity.filter(s => s === 'high').length * 15 - (factCheck ? 0 : 15) - (figureVerified === 'verified' ? 0 : figureVerified === 'unverified' ? 10 : 5) - (toneOk ? 0 : 10));
     return { score, checks: { fact_check: factCheck, banned_words: bannedFound, tone_ok: toneOk, figure_verified: figureVerified, severity } };
-  };
+  }, [form.language]);
 
   useEffect(() => {
     const result = runQualityCheck(form.hook, form.body, form.hashtags);
     setQualityChecks(result.checks);
     setForm(f => ({ ...f, quality_score: result.score }));
-  }, [form.hook, form.body, form.hashtags, form.language]);
+  }, [form.hook, form.body, form.hashtags, runQualityCheck]);
 
   const generateWithAI = async () => {
     if (!form.page || !form.pillar) { toast.error('Select Page and Pillar'); return; }
@@ -948,7 +948,7 @@ function ContentEditorModal({ post, campaigns, onClose, onSaved }) {
                 <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-100 text-slate-500">
                   <span className="text-xs flex items-center gap-1"><ThumbsUp size={12} /> Like</span>
                   <span className="text-xs flex items-center gap-1"><MessageCircle size={12} /> Comment</span>
-                  <span className="text-xs flex items-center gap-1"><Share size={12} /> Share</span>
+                  <span className="text-xs flex items-center gap-1"><Share2 size={12} /> Share</span>
                 </div>
               </div>
             </div>
