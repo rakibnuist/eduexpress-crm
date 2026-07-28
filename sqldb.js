@@ -17,6 +17,7 @@ let _db = null;
 let _dbPath = null;
 let _savePaused = false;   // when true, writes are NOT exported to disk (used during bulk sync)
 let _saveDirty = false;    // tracks whether a write happened while paused
+let _pauseTimer = null;    // safety timer to prevent pauseSave from staying true forever
 let _dead = false;         // set to true when sql.js WASM OOM's — process must restart
 let _transactionDepth = 0;
 let _transactionDirty = false;
@@ -110,8 +111,21 @@ function convertParams(params) {
 }
 
 function isWriteSQL(sql) {
-  return /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|BEGIN|COMMIT|ROLLBACK)/i.test(sql);
+  const clean = String(sql || '').replace(/\/\*[\s\S]*?\*\/|--.*$/gm, '').trim();
+  return /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|BEGIN|COMMIT|ROLLBACK|WITH)/i.test(clean);
 }
+
+// Background auto-flush: ensures any dirty in-memory WASM writes are persisted to disk every 3s
+setInterval(() => {
+  if (!_savePaused && _saveDirty && _transactionDepth === 0 && !_dead && _db && !_isSaving) {
+    _saveDirty = false;
+    try {
+      doSave();
+    } catch (e) {
+      console.error('[sqldb] Periodic save flush failed:', e.message);
+    }
+  }
+}, 3000);
 
 function makeStatement(rawSql) {
   const sql = convertSQL(rawSql);
@@ -301,11 +315,24 @@ export async function initDatabase(dbPath) {
     flush() { immediatelySave(); },
 
     // Suspend disk writes during bulk work (sync) to avoid export-thrashing OOM.
-    // Writes still happen in-memory; nothing is persisted until resumeSave().
-    pauseSave() { _savePaused = true; _saveDirty = false; },
+    // Writes still happen in-memory; auto-resumes after timeoutMs (default 15s) as a safety net.
+    pauseSave(timeoutMs = 15000) {
+      _savePaused = true;
+      _saveDirty = false;
+      if (_pauseTimer) clearTimeout(_pauseTimer);
+      _pauseTimer = setTimeout(() => {
+        if (_savePaused) {
+          console.warn(`[sqldb] pauseSave timed out after ${timeoutMs}ms — auto-resuming disk saves`);
+          _savePaused = false;
+          _pauseTimer = null;
+          if (_saveDirty) { _saveDirty = false; try { doSave(); } catch (e) { console.error('[sqldb] save error:', e.message); } }
+        }
+      }, timeoutMs);
+    },
 
     // Resume disk writes and persist once if anything changed while paused.
     resumeSave() {
+      if (_pauseTimer) { clearTimeout(_pauseTimer); _pauseTimer = null; }
       _savePaused = false;
       if (_saveDirty) { _saveDirty = false; try { doSave(); } catch (e) { console.error('[sqldb] save error:', e.message); } }
     },

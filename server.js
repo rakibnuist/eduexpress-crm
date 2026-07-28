@@ -95,10 +95,23 @@ try {
   if (dbSize > 100000) {
     // DB has valid data: take an automated snapshot before initializing, but
     // avoid creating another full copy when the latest snapshot is identical.
-    const snapshots = fs.readdirSync(backupDir)
-      .filter(file => file.startsWith('crm_upgrade_snapshot_') && file.endsWith('.db'))
-      .sort();
-    const latestSnapshot = snapshots.length ? join(backupDir, snapshots.at(-1)) : null;
+    const getBackupsSortedByMtime = (patternFn) => {
+      if (!fs.existsSync(backupDir)) return [];
+      return fs.readdirSync(backupDir)
+        .filter(patternFn)
+        .map(f => {
+          const p = join(backupDir, f);
+          try { return { name: f, path: p, mtime: fs.statSync(p).mtimeMs }; }
+          catch { return null; }
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.mtime - b.mtime); // ascending: last element is newest
+    };
+
+    const snapshots = getBackupsSortedByMtime(file => file.startsWith('crm_upgrade_snapshot_') && file.endsWith('.db'));
+    const latestSnapshotObj = snapshots.length ? snapshots.at(-1) : null;
+    const latestSnapshot = latestSnapshotObj ? latestSnapshotObj.path : null;
+
     const databaseHash = crypto.createHash('sha256').update(fs.readFileSync(DB_PATH)).digest('hex');
     const latestHash = latestSnapshot && fs.existsSync(latestSnapshot)
       ? crypto.createHash('sha256').update(fs.readFileSync(latestSnapshot)).digest('hex')
@@ -116,13 +129,21 @@ try {
   } else if (!fs.existsSync(DB_PATH)) {
     // Only restore automatically when the database is truly missing. A small
     // existing database may be valid and must never be overwritten implicitly.
-    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort();
-    if (files.length > 0) {
-      const latest = files.pop();
-      const latestPath = join(backupDir, latest);
-      if (fs.existsSync(latestPath) && fs.statSync(latestPath).size > 100000) {
-        fs.copyFileSync(latestPath, DB_PATH);
-        console.log(`[database] 🛡️ Auto-restored database from latest snapshot: ${latest}`);
+    const allBackups = fs.readdirSync(backupDir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const p = join(backupDir, f);
+        try { return { name: f, path: p, mtime: fs.statSync(p).mtimeMs, size: fs.statSync(p).size }; }
+        catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.mtime - b.mtime);
+
+    if (allBackups.length > 0) {
+      const latestBackup = allBackups.pop();
+      if (latestBackup && latestBackup.size > 100000) {
+        fs.copyFileSync(latestBackup.path, DB_PATH);
+        console.log(`[database] 🛡️ Auto-restored database from latest mtime snapshot: ${latestBackup.name} (mtime: ${new Date(latestBackup.mtime).toISOString()})`);
       }
     }
   } else {
