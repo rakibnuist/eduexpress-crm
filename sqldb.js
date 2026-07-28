@@ -90,8 +90,8 @@ function doSave() {
   }
 }
 
-function immediatelySave() {
-  if (_savePaused) { _saveDirty = true; return; }
+function immediatelySave(force = false) {
+  if (_savePaused && !force) { _saveDirty = true; return; }
   try {
     doSave();
   } catch (e) {
@@ -195,7 +195,7 @@ function makeStatement(rawSql) {
         lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
         if (write) {
           if (_transactionDepth > 0) _transactionDirty = true;
-          else immediatelySave();
+          else immediatelySave(true);
         }
         return { changes, lastInsertRowid };
       } catch (e) {
@@ -283,7 +283,7 @@ export async function initDatabase(dbPath) {
           }
         }
       }
-      immediatelySave();
+      immediatelySave(true);
     },
 
     prepare(sql) {
@@ -305,7 +305,7 @@ export async function initDatabase(dbPath) {
             _db.run('COMMIT');
             if (_transactionDirty) {
               _transactionDirty = false;
-              immediatelySave();
+              immediatelySave(true);
             }
           }
           return result;
@@ -321,7 +321,7 @@ export async function initDatabase(dbPath) {
     },
 
     // Flush any pending save immediately (call before process exit)
-    flush() { immediatelySave(); },
+    flush() { immediatelySave(true); },
 
     // Suspend disk writes during bulk work (sync) to avoid export-thrashing OOM.
     // Writes still happen in-memory; auto-resumes after timeoutMs (default 15s) as a safety net.
