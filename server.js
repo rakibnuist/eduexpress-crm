@@ -6956,7 +6956,7 @@ const EXPENSE_CATEGORIES = [
   'Salary', 'Office Rent', 'Air Ticket', 'Medical', 'App Fee',
   'Meta Marketing', 'Marketing', 'Client Hospitality', 'Visa Fee',
   'Translation Fee', 'Office Supplies', 'Utilities', 'Travel',
-  'Mata Support', 'Refund Out', 'Other Expense',
+  'Mata Support', 'Refund Out', 'Student Referral', 'Other Expense',
 ];
 
 // Helper — opening balance for a given month = initial cash + all prior in/out.

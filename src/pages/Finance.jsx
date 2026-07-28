@@ -667,20 +667,48 @@ function EmptyFinance({ onAdd }) {
   );
 }
 
-function FinanceForm({ type, record, settings, onSave }) {
-  const [form, setForm] = useState(record || { date: new Date().toISOString().slice(0, 10) });
+function FinanceForm({ type, record, settings, categories, employees: propEmployees, onSave, onDelete }) {
+  const [form, setForm] = useState(record ? {
+    ...record,
+    date: record.date || new Date().toISOString().slice(0, 10),
+    paid_to: record.paid_to || record.client_name || '',
+    student_name: record.student_name || record.client_name || '',
+    employee_id: record.employee_id || '',
+  } : { date: new Date().toISOString().slice(0, 10) });
+
   const [saving, setSaving] = useState(false);
   const [students, setStudents] = useState([]);
-  const cats = type === 'income' ? settings?.incomeCategories || [] : settings?.expenseCategories || [];
+  const [employees, setEmployees] = useState(propEmployees || []);
+  const toast = useToast();
+
+  const defaultExpenseCats = [
+    'Student Referral', 'Salary', 'Office Rent', 'Air Ticket', 'Medical', 'App Fee',
+    'Meta Marketing', 'Marketing', 'Client Hospitality', 'Visa Fee',
+    'Translation Fee', 'Office Supplies', 'Utilities', 'Travel', 'Other Expense'
+  ];
+  const defaultIncomeCats = [
+    'Service Charge', 'File Opening', 'Application Deposit', 'Investment',
+    'Marketing', 'Refund', 'Previous Cash', 'Other Income'
+  ];
+
+  const baseCats = categories || (type === 'income' ? (settings?.incomeCategories || defaultIncomeCats) : (settings?.expenseCategories || defaultExpenseCats));
+  const cats = Array.from(new Set(type === 'income' ? baseCats : ['Student Referral', ...baseCats]));
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
     api.studentsList()
       .then(data => setStudents(data || []))
       .catch(() => {});
-  }, []);
 
-  const studentCategories = ['Visa', 'Visa Fee', 'Application Fee', 'App Fee', 'Air Ticket', 'Ticket', 'Medical', 'Service Charge', 'File Opening', 'Application Deposit', 'Tuition Fee'];
+    if (!propEmployees || propEmployees.length === 0) {
+      api.employeesActive()
+        .then(data => setEmployees(data || []))
+        .catch(() => {});
+    }
+  }, [propEmployees]);
+
+  const studentCategories = ['Visa', 'Visa Fee', 'Application Fee', 'App Fee', 'Air Ticket', 'Ticket', 'Medical', 'Service Charge', 'File Opening', 'Application Deposit', 'Tuition Fee', 'Student Referral', 'Referral'];
   const isStudentRelated = studentCategories.some(c => (form.category || '').toLowerCase().includes(c.toLowerCase()));
 
   const handleStudentSelect = (e) => {
@@ -704,15 +732,24 @@ function FinanceForm({ type, record, settings, onSave }) {
 
   async function submit(e) {
     e.preventDefault(); setSaving(true);
+    const payload = {
+      ...form,
+      amount: Number(form.amount) || 0,
+      employee_id: form.employee_id ? Number(form.employee_id) : null,
+      ...(type === 'income' ? { client_name: form.client_name || form.student_name } : { paid_to: form.paid_to || form.client_name }),
+    };
     try {
-      if (record) {
-        if (type === 'income') await api.updateIncome(record.id, form);
-        else await api.updateExpense(record.id, form);
+      if (record?.id) {
+        if (type === 'income') await api.updateIncome(record.id, payload);
+        else await api.updateExpense(record.id, payload);
       } else {
-        if (type === 'income') await api.createIncome(form);
-        else await api.createExpense(form);
+        if (type === 'income') await api.createIncome(payload);
+        else await api.createExpense(payload);
       }
+      toast.success(record?.id ? 'Entry updated' : `${type === 'income' ? 'Income' : 'Spend'} added`);
       onSave(form.date ? form.date.slice(0, 7) : null);
+    } catch (err) {
+      toast.error(err.message || 'Could not save entry');
     } finally { setSaving(false); }
   }
 
@@ -722,24 +759,24 @@ function FinanceForm({ type, record, settings, onSave }) {
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Date *</label>
           <input type="date" required
-            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
             value={form.date || ''} onChange={e => set('date', e.target.value)} />
         </div>
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Amount (BDT) *</label>
           <input type="number" step="any" required
-            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none tabular-nums"
+            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none tabular-nums font-semibold"
             value={form.amount || ''} onChange={e => set('amount', e.target.value)} />
         </div>
       </div>
 
       <div>
-        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Category</label>
+        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Category / Type</label>
         <select
-          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
           value={form.category || ''} onChange={e => set('category', e.target.value)}>
-          <option value="">— select —</option>
-          {cats.map(c => <option key={c}>{c}</option>)}
+          <option value="">— Select Category —</option>
+          {cats.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
@@ -757,7 +794,7 @@ function FinanceForm({ type, record, settings, onSave }) {
         </div>
 
         <select
-          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none mb-2"
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none mb-2 font-medium"
           value={students.find(s => s.client_name === (form.student_name || form.client_name) || (s.lead_id && s.lead_id === form.lead_id))?.id || ''}
           onChange={handleStudentSelect}>
           <option value="">— Select Student / Application —</option>
@@ -774,7 +811,7 @@ function FinanceForm({ type, record, settings, onSave }) {
             <input
               type="text"
               placeholder="e.g. Ilhan"
-              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
               value={form.student_name || form.client_name || ''}
               onChange={e => {
                 set('student_name', e.target.value);
@@ -787,7 +824,7 @@ function FinanceForm({ type, record, settings, onSave }) {
             <input
               type="text"
               placeholder="e.g. L-00042"
-              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
               value={form.lead_id || ''}
               onChange={e => set('lead_id', e.target.value)}
             />
@@ -795,30 +832,63 @@ function FinanceForm({ type, record, settings, onSave }) {
         </div>
       </div>
 
-      {type === 'expenses' && (
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Paid To</label>
-          <input
-            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
-            value={form.paid_to || ''} onChange={e => set('paid_to', e.target.value)} placeholder="e.g. Chinese VISA Center" />
-        </div>
-      )}
+      <div>
+        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+          {type === 'expenses' ? 'Paid To' : 'Client / Source'}
+        </label>
+        <input
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
+          value={form.paid_to || form.client_name || ''}
+          onChange={e => {
+            set('paid_to', e.target.value);
+            set('client_name', e.target.value);
+          }}
+          placeholder={type === 'expenses' ? 'e.g. Chinese VISA Center or Student Referral' : 'e.g. MD SAIFUL HAQUE'}
+        />
+      </div>
+
       <div>
         <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Reference</label>
         <input
-          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
-          value={form.reference || ''} onChange={e => set('reference', e.target.value)} />
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none font-medium"
+          value={form.reference || ''}
+          onChange={e => set('reference', e.target.value)}
+          placeholder="e.g. Mukta (Rakib), Bank, Cash"
+        />
       </div>
+
+      <div>
+        <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Handled By</label>
+        <select
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none cursor-pointer font-medium"
+          value={form.employee_id || ''}
+          onChange={e => set('employee_id', e.target.value)}>
+          <option value="">— Unassigned —</option>
+          {employees.map(e => (
+            <option key={e.id} value={String(e.id)}>
+              {e.name} {e.role ? `· ${e.role}` : ''} {e.emp_id ? `(EMP:${e.emp_id})` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div>
         <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Notes</label>
         <textarea rows={2}
-          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none resize-none"
+          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none resize-none font-medium"
           value={form.notes || ''} onChange={e => set('notes', e.target.value)} />
       </div>
-      <div className="flex justify-end pt-1">
+
+      <div className="flex items-center justify-between pt-2">
+        {record?.id && onDelete ? (
+          <button type="button" onClick={() => onDelete(record.id)}
+            className="text-xs text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors font-medium">
+            <Trash2 size={13} /> Delete Entry
+          </button>
+        ) : <span />}
         <button type="submit" disabled={saving}
-          className="bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-60 shadow-sm transition-colors">
-          {saving ? 'Saving…' : 'Save'}
+          className="bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-60 shadow-sm transition-colors flex items-center gap-2">
+          <Save size={14} /> {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </form>
@@ -1082,135 +1152,39 @@ function BreakdownPanel({ title, rows, color }) {
 }
 
 function CashflowEntryModal({ side, row, month, categories, employees, onClose, onSaved }) {
-  const editing = !!row;
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const defaultDate = row?.date || (month ? `${month}-${String(new Date().getDate()).padStart(2, '0')}` : todayStr);
-  const [form, setForm] = useState({
-    date: defaultDate,
-    category: row?.category || '',
-    client_name: row?.client_name || '',
-    reference: row?.reference || '',
-    amount: row?.amount || '',
-    notes: row?.notes || '',
-    employee_id: row?.employee_id || '',
-  });
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
   const confirm = useConfirm();
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    const payload = {
-      date: form.date,
-      category: form.category || null,
-      amount: Number(form.amount) || 0,
-      reference: form.reference || null,
-      notes: form.notes || null,
-      employee_id: form.employee_id ? Number(form.employee_id) : null,
-      ...(side === 'in' ? { client_name: form.client_name } : { paid_to: form.client_name }),
-    };
-    try {
-      if (side === 'in') {
-        if (editing) await api.updateIncome(row.id, payload);
-        else await api.createIncome(payload);
-      } else {
-        if (editing) await api.updateExpense(row.id, payload);
-        else await api.createExpense(payload);
-      }
-      onSaved(form.date ? form.date.slice(0, 7) : null);
-      toast.success(editing ? 'Entry updated' : `${side === 'in' ? 'Income' : 'Spend'} added`);
-    } catch (err) { toast.error(err.message || 'Could not save'); }
-    setSaving(false);
-  };
-
-  const del = async () => {
-    const ok = await confirm({ title: 'Delete this entry?', tone: 'danger', confirmLabel: 'Delete' });
-    if (!ok) return;
-    try {
-      if (side === 'in') await api.deleteIncome(row.id);
-      else await api.deleteExpense(row.id);
-      onSaved();
-      toast.info('Entry deleted');
-    } catch (e) { toast.error(e.message); }
-  };
-
+  const toast = useToast();
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 rounded-t-2xl">
-          <h3 className="font-bold text-slate-800">{editing ? 'Edit' : 'New'} {side === 'in' ? 'income' : 'spend'}</h3>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors">✕</button>
-        </div>
-        <form onSubmit={submit} className="p-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Date</label>
-              <input type="date" required value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none" />
-            </div>
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Type</label>
-              <input list="cf-cats" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                placeholder={side === 'in' ? 'Service Charge' : 'Salary'}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none" />
-              <datalist id="cf-cats">{categories.map(c => <option key={c} value={c} />)}</datalist>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">{side === 'in' ? 'Client / source' : 'Paid to'}</label>
-            <input value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))}
-              placeholder={side === 'in' ? 'MD SAIFUL HAQUE' : 'Office Rent'}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Reference</label>
-              <input value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))}
-                placeholder="e.g. Mukta (Rakib), Bank, Cash"
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none" />
-            </div>
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Amount (৳)</label>
-              <input type="number" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none tabular-nums" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Handled by</label>
-            <select value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none cursor-pointer">
-              <option value="">— Unassigned —</option>
-              {employees.map(e => (
-                <option key={e.id} value={String(e.id)}>{e.name} · {e.role || 'No role'} · EMP:{e.emp_id || '-'}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 block">Notes</label>
-            <textarea rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none resize-none" />
-          </div>
-          <div className="flex items-center justify-between pt-2">
-            {editing ? (
-              <button type="button" onClick={del}
-                className="text-xs text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors">
-                <Trash2 size={12} /> Delete
-              </button>
-            ) : <span />}
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose}
-                className="text-sm px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-              <button type="submit" disabled={saving}
-                className={`text-sm px-4 py-2 rounded-xl text-white disabled:opacity-60 flex items-center gap-2 shadow-sm transition-colors
-                  ${side === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>
-                <Save size={13} /> {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </div>
+    <Modal
+      title={`${row ? 'Edit' : 'New'} ${side === 'in' ? 'Income' : 'Spend'}`}
+      onClose={onClose}
+    >
+      <FinanceForm
+        type={side === 'in' ? 'income' : 'expenses'}
+        record={row ? {
+          ...row,
+          client_name: row.client_name || row.paid_to || '',
+          paid_to: row.paid_to || row.client_name || '',
+        } : { date: month ? `${month}-${String(new Date().getDate()).padStart(2, '0')}` : new Date().toISOString().slice(0, 10) }}
+        categories={categories}
+        employees={employees}
+        onSave={(m) => {
+          onClose();
+          onSaved(m);
+        }}
+        onDelete={async (rowId) => {
+          const ok = await confirm({ title: 'Delete this entry?', tone: 'danger', confirmLabel: 'Delete' });
+          if (!ok) return;
+          try {
+            if (side === 'in') await api.deleteIncome(rowId);
+            else await api.deleteExpense(rowId);
+            onClose();
+            onSaved();
+            toast.info('Entry deleted');
+          } catch (e) { toast.error(e.message); }
+        }}
+      />
+    </Modal>
   );
 }
 
