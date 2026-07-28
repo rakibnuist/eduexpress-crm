@@ -193,9 +193,10 @@ function makeStatement(rawSql) {
         }
         changes = _db.getRowsModified();
         lastInsertRowid = _db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? 0;
-        if (write) {
-          if (_transactionDepth > 0) _transactionDirty = true;
-          else immediatelySave(true);
+        if (_transactionDepth > 0) {
+          _transactionDirty = true;
+        } else {
+          immediatelySave(true);
         }
         return { changes, lastInsertRowid };
       } catch (e) {
