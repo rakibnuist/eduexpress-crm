@@ -36,26 +36,30 @@ const LOCAL_DB_PATH = join(__dirname, 'crm.db');
 let DB_PATH = process.env.DB_PATH;
 
 if (!DB_PATH) {
-  if (process.platform === 'linux' && existsSync(PERSISTENT_HOME)) {
-    const persistentDir = join(PERSISTENT_HOME, 'crm-data');
-    let persistentOk = false;
-    try {
-      if (!existsSync(persistentDir)) {
-        mkdirSync(persistentDir, { recursive: true });
-      }
-      persistentOk = true;
-    } catch (err) {
-      console.error(`[database] Cannot create ${persistentDir}, falling back to app dir:`, err.message);
-    }
+  const candidateDirs = [
+    join(__dirname, '..', 'crm-persistent-data'),
+    join(PERSISTENT_HOME, 'crm-persistent-data'),
+    join(PERSISTENT_HOME, 'crm-data'),
+  ];
 
-    if (persistentOk) {
-      DB_PATH = join(persistentDir, 'crm.db');
-    } else {
-      // Hostinger denied write access to /home/u898266115 root — use app directory
-      DB_PATH = LOCAL_DB_PATH;
-    }
+  let selectedDir = null;
+  for (const dir of candidateDirs) {
+    try {
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const testFile = join(dir, `.perm_test_${Date.now()}`);
+      writeFileSync(testFile, 'ok');
+      unlinkSync(testFile);
+      selectedDir = dir;
+      break;
+    } catch {}
+  }
+
+  if (selectedDir) {
+    DB_PATH = join(selectedDir, 'crm.db');
+    console.log(`[database] Using persistent isolated storage outside git repository: ${DB_PATH}`);
   } else {
     DB_PATH = LOCAL_DB_PATH;
+    console.warn(`[database] ⚠️ Could not create isolated storage outside app dir, using: ${DB_PATH}`);
   }
 }
 
