@@ -37,26 +37,42 @@ let DB_PATH = process.env.DB_PATH;
 
 if (!DB_PATH) {
   const candidateDirs = [
-    join(__dirname, '..', 'crm-persistent-data'),
-    join(PERSISTENT_HOME, 'crm-persistent-data'),
     join(PERSISTENT_HOME, 'crm-data'),
+    join(PERSISTENT_HOME, 'crm-persistent-data'),
+    join(__dirname, '..', 'crm-persistent-data'),
   ];
 
-  let selectedDir = null;
+  // 1. First priority: look for a candidate directory that ALREADY contains a non-skeleton crm.db (> 100KB)
+  let foundDir = null;
   for (const dir of candidateDirs) {
-    try {
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      const testFile = join(dir, `.perm_test_${Date.now()}`);
-      writeFileSync(testFile, 'ok');
-      unlinkSync(testFile);
-      selectedDir = dir;
-      break;
-    } catch {}
+    const candidateFile = join(dir, 'crm.db');
+    if (existsSync(candidateFile)) {
+      try {
+        if (statSync(candidateFile).size > 100000) {
+          foundDir = dir;
+          break;
+        }
+      } catch {}
+    }
   }
 
-  if (selectedDir) {
-    DB_PATH = join(selectedDir, 'crm.db');
-    console.log(`[database] Using persistent isolated storage outside git repository: ${DB_PATH}`);
+  // 2. Second priority: if no populated DB found yet, pick the first writable candidate directory
+  if (!foundDir) {
+    for (const dir of candidateDirs) {
+      try {
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        const testFile = join(dir, `.perm_test_${Date.now()}`);
+        writeFileSync(testFile, 'ok');
+        unlinkSync(testFile);
+        foundDir = dir;
+        break;
+      } catch {}
+    }
+  }
+
+  if (foundDir) {
+    DB_PATH = join(foundDir, 'crm.db');
+    console.log(`[database] Using persistent isolated storage: ${DB_PATH}`);
   } else {
     DB_PATH = LOCAL_DB_PATH;
     console.warn(`[database] ⚠️ Could not create isolated storage outside app dir, using: ${DB_PATH}`);
@@ -65,6 +81,41 @@ if (!DB_PATH) {
 
 const DB_DIR = dirname(DB_PATH);
 const restoreDbPath = join(DB_DIR, 'restore.db');
+
+// If selected DB_PATH is missing or skeleton (<= 100KB), check all potential locations for a valid larger crm.db or backup
+const currentSize = existsSync(DB_PATH) ? statSync(DB_PATH).size : 0;
+if (currentSize <= 100000) {
+  const searchLocations = [
+    join(PERSISTENT_HOME, 'crm-data', 'crm.db'),
+    join(PERSISTENT_HOME, 'crm-persistent-data', 'crm.db'),
+    join(__dirname, '..', 'crm-persistent-data', 'crm.db'),
+    LOCAL_DB_PATH,
+  ];
+
+  let bestSource = null;
+  let bestSize = 0;
+  for (const loc of searchLocations) {
+    if (loc !== DB_PATH && existsSync(loc)) {
+      try {
+        const sz = statSync(loc).size;
+        if (sz > 100000 && sz > bestSize) {
+          bestSource = loc;
+          bestSize = sz;
+        }
+      } catch {}
+    }
+  }
+
+  if (bestSource) {
+    try {
+      copyFileSync(bestSource, DB_PATH);
+      console.log(`[database] 🛡️ Auto-restored populated database (${bestSize} bytes) from ${bestSource} -> ${DB_PATH}`);
+    } catch (e) {
+      console.error('[database] Failed copying bestSource DB:', e.message);
+    }
+  }
+}
+
 if (existsSync(restoreDbPath)) {
   try {
     const backupDir = join(DB_DIR, 'backups');
@@ -81,11 +132,6 @@ if (existsSync(restoreDbPath)) {
   } catch (err) {
     console.error('[database] Restore failed; existing database was kept:', err.message);
   }
-} else if (!existsSync(DB_PATH) && existsSync(LOCAL_DB_PATH) && DB_PATH !== LOCAL_DB_PATH) {
-    try {
-      copyFileSync(LOCAL_DB_PATH, DB_PATH);
-      console.log(`[database] Copied bundled database to ${DB_PATH}`);
-    } catch (err) {}
 }
 
 // ── Automated Pre-Upgrade Snapshot & Auto-Recovery Protection ──
