@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
-import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, copyFileSync, renameSync, unlinkSync } from 'fs';
+import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, copyFileSync, renameSync, unlinkSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, extname, join } from 'path';
 import { createRequire } from 'module';
