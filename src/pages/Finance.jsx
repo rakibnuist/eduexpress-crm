@@ -935,7 +935,18 @@ function FinanceForm({ type, record, settings, categories, employees: propEmploy
     student_name: record.student_name || (type === 'income' ? record.client_name : '') || '',
     lead_id: record.lead_id || '',
     employee_id: record.employee_id || '',
-  } : { date: new Date().toISOString().slice(0, 10) });
+  } : {
+    date: new Date().toISOString().slice(0, 10),
+    category: '',
+    amount: '',
+    client_name: '',
+    paid_to: '',
+    reference: '',
+    notes: '',
+    student_name: '',
+    lead_id: '',
+    employee_id: '',
+  });
 
   useEffect(() => {
     if (record) {

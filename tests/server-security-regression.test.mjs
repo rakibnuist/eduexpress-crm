@@ -124,6 +124,13 @@ test('database restore keeps validation and staged file flow', () => {
   );
 });
 
+test('unexpected route errors return JSON instead of an HTML error page', () => {
+  assert.match(
+    serverSource,
+    /app\.use\(\(error,\s*req,\s*res,\s*next\)\s*=>\s*\{[\s\S]*?res\.status\(status\)\.json\(\{ error: message \}\);[\s\S]*?\}\);/s,
+  );
+});
+
 test('office config only exposes full geofence settings to admins', () => {
   assert.match(
     serverSource,

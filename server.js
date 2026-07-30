@@ -11562,3 +11562,21 @@ if (RUN_DATA_BACKFILLS) {
   setTimeout(backfillMetaLeadAds, 7000);
   setTimeout(scanOldChatsForLeads, 3000);
 }
+
+// Keep unexpected API failures machine-readable. Express otherwise returns an
+// HTML error page, which obscures the real failure behind "Server HTML Error"
+// in the CRM and makes safe client-side recovery impossible.
+app.use((error, req, res, next) => {
+  console.error(`[request] ${req.method} ${req.originalUrl}:`, error);
+  if (res.headersSent) return next(error);
+
+  const requestedStatus = Number(error?.status || error?.statusCode);
+  const status = requestedStatus >= 400 && requestedStatus < 600
+    ? requestedStatus
+    : 500;
+  const message = status >= 500 && process.env.NODE_ENV === 'production'
+    ? 'The server could not complete this request. Please try again.'
+    : (error?.message || 'Request failed');
+
+  return res.status(status).json({ error: message });
+});

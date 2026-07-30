@@ -92,3 +92,42 @@ test('each successful write is immediately visible on disk and survives reopen',
     rmSync(testDir, { recursive: true, force: true });
   }
 });
+
+test('omitted named form fields retain legacy NULL binding behavior', async () => {
+  const testDir = mkdtempSync(join(tmpdir(), 'crm-sqldb-bindings-test-'));
+  const dbPath = join(testDir, 'test.db');
+  const db = await initDatabase(dbPath);
+
+  try {
+    db.exec(`
+      CREATE TABLE form_items (
+        id INTEGER PRIMARY KEY,
+        required_value TEXT NOT NULL,
+        optional_note TEXT,
+        optional_reference TEXT
+      )
+    `);
+
+    const inserted = db.prepare(`
+      INSERT INTO form_items (required_value, optional_note, optional_reference)
+      VALUES (@required_value, @optional_note, @optional_reference)
+    `).run({ required_value: 'saved immediately' });
+
+    assert.equal(inserted.changes, 1);
+    assert.deepEqual(
+      db.prepare(`
+        SELECT required_value, optional_note, optional_reference
+        FROM form_items
+        WHERE id = @id AND optional_reference IS @optional_reference
+      `).get({ id: inserted.lastInsertRowid }),
+      {
+        required_value: 'saved immediately',
+        optional_note: null,
+        optional_reference: null,
+      },
+    );
+  } finally {
+    db.close();
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});

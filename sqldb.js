@@ -46,19 +46,60 @@ function normalizeRunResult(result) {
   };
 }
 
+function isNamedBindingObject(args) {
+  if (args.length !== 1) return false;
+  const value = args[0];
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && !Buffer.isBuffer(value);
+}
+
+function executeWithLegacyNamedBindingCompatibility(statement, method, args) {
+  if (!isNamedBindingObject(args)) {
+    return statement[method](...args);
+  }
+
+  // sql.js treated omitted named bindings as NULL. better-sqlite3 deliberately
+  // throws instead, which made older forms fail whenever an optional empty
+  // field (for example Finance notes) was not included in the JSON payload.
+  // Add only the parameters the driver reports as missing so positional
+  // bindings and genuine SQLite constraint/type errors retain their behavior.
+  let bindings = args[0];
+  let normalizedBindings = null;
+
+  while (true) {
+    try {
+      return statement[method](normalizedBindings || bindings);
+    } catch (error) {
+      const missing = error instanceof RangeError
+        ? /^Missing named parameter "([^"]+)"$/.exec(error.message)
+        : null;
+      if (!missing) throw error;
+
+      normalizedBindings ||= { ...bindings };
+      const parameter = missing[1];
+      if (Object.hasOwn(normalizedBindings, parameter)) throw error;
+      normalizedBindings[parameter] = null;
+    }
+  }
+}
+
 function wrapStatement(statement) {
   return {
     get(...args) {
-      return statement.get(...args);
+      return executeWithLegacyNamedBindingCompatibility(statement, 'get', args);
     },
     all(...args) {
-      return statement.all(...args);
+      return executeWithLegacyNamedBindingCompatibility(statement, 'all', args);
     },
     run(...args) {
-      return normalizeRunResult(statement.run(...args));
+      return normalizeRunResult(
+        executeWithLegacyNamedBindingCompatibility(statement, 'run', args),
+      );
     },
     iterate(...args) {
-      return statement.iterate(...args);
+      return executeWithLegacyNamedBindingCompatibility(statement, 'iterate', args);
     },
   };
 }
