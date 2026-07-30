@@ -9,8 +9,9 @@ domain to the CRM container.
 ## Data-safety rules
 
 The Compose volumes `crm-data` and `crm-uploads` contain production data. Their
-installed Docker names include the Compose project name. Code deployments must
-preserve both volumes.
+explicit Docker names are `eduexpress-crm_crm-data` and
+`eduexpress-crm_crm-uploads`, so changing the checkout directory cannot silently
+create empty replacement volumes.
 
 - Never run `docker compose down -v`.
 - Never delete or recreate either named volume.
@@ -38,7 +39,8 @@ docker compose ps
 docker compose logs --tail=100 crm
 ```
 
-Fill every required secret in `.env` before starting the container. Generate
+Fill every required secret in `.env` before starting the container. Compose now
+refuses to start when a required value is missing. Generate
 different long random values for `JWT_SECRET`, `RESET_KEY`,
 `INTERNAL_API_KEY`, and `WEBSITE_WEBHOOK_SECRET`. Keep
 `RUN_DATA_BACKFILLS=false`.
@@ -63,6 +65,27 @@ curl --fail https://crm.eduexpressint.com/health
 ```
 
 This procedure does not import, overwrite, or delete CRM records.
+
+## GitHub release workflow
+
+The **Deploy to Hostinger VPS** workflow provides the repeatable production
+release path. Configure these GitHub production-environment secrets once:
+
+- `HOSTINGER_SSH_PRIVATE_KEY`: the private half of the VPS deployment key.
+- `HOSTINGER_SSH_KNOWN_HOSTS`: the verified `known_hosts` line for the VPS.
+
+Run the workflow with the reviewed branch, tag, or commit. It:
+
+1. reruns lint, regression tests, and the production build;
+2. uploads application files without touching `.env`, databases, uploads, or
+   linked-device sessions;
+3. builds the replacement image while the current application remains live;
+4. stops the old container cleanly and creates a timestamped database backup;
+5. starts the new container and verifies both Docker and public HTTPS health;
+6. automatically restores the previous application image if health fails.
+
+The obsolete Railway deployment workflow has been removed. Production releases
+must target this Hostinger VPS only.
 
 ## Operations
 
@@ -100,6 +123,6 @@ curl -X POST https://crm.eduexpressint.com/api/auth/emergency-reset \
 ## Troubleshooting
 
 If the health check fails, inspect `docker compose logs --tail=200 crm` and
-confirm the environment file is present. If database initialization fails, stop
-and investigate the existing volume—do not replace the database with an empty
-file.
+confirm the environment file is present and all four required secrets are
+non-empty. If database initialization fails, stop and investigate the existing
+volume—do not replace the database with an empty file.

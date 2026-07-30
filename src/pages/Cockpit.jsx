@@ -6,7 +6,7 @@
    - 7-day trend chart
    - Yesterday's recap card */
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { api } from '../api';
 import {
   Activity, Users, AlertTriangle, Clock, DollarSign, TrendingUp,

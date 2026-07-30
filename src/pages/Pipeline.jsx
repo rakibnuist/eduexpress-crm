@@ -3,7 +3,7 @@
    server-side with optimistic UI + toast. KPI strip on top shows
    overall pipeline health at a glance. */
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { api } from '../api';
 import Modal from '../components/Modal';
 import LeadForm from './LeadForm';

@@ -1,7 +1,7 @@
 /* LeadDetail — Professional CRM Layout with inline "Click-to-Edit".
    All fields are instantly editable, matching the schema of LeadForm. */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import { useToast } from '../components/Toast';

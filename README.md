@@ -1,7 +1,7 @@
 # EduExpress CRM
 
 [![Quality checks](https://github.com/rakibnuist/eduexpress-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/rakibnuist/eduexpress-crm/actions/workflows/ci.yml)
-[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111827)](https://react.dev/)
 [![Production](https://img.shields.io/badge/production-crm.eduexpressint.com-0F766E)](https://crm.eduexpressint.com)
 
@@ -43,16 +43,17 @@ flowchart LR
 
 The frontend is built with React and Vite. The Express server serves the
 production build, API, webhooks, uploaded media, and real-time events. CRM data
-is stored in a SQLite-compatible database through `sql.js`, with atomic
-persistence and validated backup/restore handling.
+is stored directly in SQLite through `better-sqlite3`. WAL transactions make
+each successful API write durable before the response is returned, without
+rewriting the full database. Backup and restore files are integrity-validated.
 
 ## Technology
 
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, Vite 8, Tailwind CSS 4, Lucide React |
-| Backend | Node.js 22, Express 5 |
-| Database | SQLite-compatible persistence with `sql.js` |
+| Backend | Node.js 24, Express 5 |
+| Database | SQLite WAL persistence with `better-sqlite3` |
 | Real-time | Server-Sent Events and WebSocket integrations |
 | Messaging | Meta Graph API and Baileys linked-device support |
 | Charts and reporting | Recharts and SheetJS |
@@ -85,7 +86,7 @@ WhatsApp sessions are intentionally excluded from Git and Docker build context.
 
 ### Requirements
 
-- Node.js 22.13 or newer
+- Node.js 22.22 or newer (Node.js 24 LTS recommended)
 - npm
 
 ### Setup
@@ -163,7 +164,8 @@ does not use fallback production secrets.
 - Public lead and portal endpoints are rate-limited and input-constrained.
 - Uploads use type, content, size, name, and access validation.
 - Sensitive integration values are masked in API responses.
-- Database writes are persisted atomically and transaction rollback is tested.
+- Database writes commit directly to durable SQLite WAL storage and transaction
+  rollback/reopen behavior is tested.
 - Historical data backfills are disabled unless explicitly enabled.
 
 Production database files, backups, uploaded documents, restore files, logs,

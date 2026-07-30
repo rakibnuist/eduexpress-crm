@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useSearchParams, Link, useNavigate } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router';
 import { api } from '../api';
 import Modal from '../components/Modal';
 import LeadDetailsModal from './LeadDetailsModal';

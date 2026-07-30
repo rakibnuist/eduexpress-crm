@@ -3,9 +3,10 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
 import { initDatabase, validateDatabaseBuffer } from '../sqldb.js';
 
-test('transactions commit once, roll back on failure, and support nesting', async () => {
+test('transactions commit, roll back on failure, and support nesting', async () => {
   const testDir = mkdtempSync(join(tmpdir(), 'crm-sqldb-test-'));
   const dbPath = join(testDir, 'test.db');
   const db = await initDatabase(dbPath);
@@ -49,6 +50,43 @@ test('transactions commit once, roll back on failure, and support nesting', asyn
       () => validateDatabaseBuffer(Buffer.from('not a sqlite database')),
       /file is not a database|not a database/i,
     );
+  } finally {
+    db.close();
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test('each successful write is immediately visible on disk and survives reopen', async () => {
+  const testDir = mkdtempSync(join(tmpdir(), 'crm-sqldb-durability-test-'));
+  const dbPath = join(testDir, 'test.db');
+  const db = await initDatabase(dbPath);
+
+  try {
+    db.exec('CREATE TABLE durable_items (id INTEGER PRIMARY KEY, name TEXT)');
+    db.prepare('INSERT INTO durable_items (name) VALUES (?)').run('committed');
+
+    const reader = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      assert.equal(
+        reader.prepare('SELECT name FROM durable_items WHERE id = 1').get()?.name,
+        'committed',
+      );
+    } finally {
+      reader.close();
+    }
+
+    db.close();
+
+    const reopened = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      assert.equal(reopened.prepare('PRAGMA integrity_check').pluck().get(), 'ok');
+      assert.deepEqual(
+        reopened.prepare('SELECT name FROM durable_items ORDER BY id').all(),
+        [{ name: 'committed' }],
+      );
+    } finally {
+      reopened.close();
+    }
   } finally {
     db.close();
     rmSync(testDir, { recursive: true, force: true });

@@ -391,8 +391,14 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
 }));
 
 // ─── AUTH primitives ───────────────────────────────────────────────────────
-// Get or create persistent stable JWT_SECRET if process.env.JWT_SECRET is not set
-let JWT_SECRET = process.env.JWT_SECRET;
+// Production sessions must use an explicit stable secret. Starting with a
+// blank/dynamic value would invalidate every login after a container restart.
+let JWT_SECRET = String(process.env.JWT_SECRET || '').trim();
+if (process.env.NODE_ENV === 'production' && JWT_SECRET.length < 32) {
+  throw new Error('[startup] JWT_SECRET must be configured with at least 32 characters in production');
+}
+
+// Local development may generate a persistent secret automatically.
 if (!JWT_SECRET) {
   const secretPath = join(DB_DIR, '.jwt_secret');
   try {
@@ -454,7 +460,14 @@ function getCookie(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 function setAuthCookie(res, token) {
-  const parts = [`${AUTH_COOKIE}=${encodeURIComponent(token)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${SESSION_DAYS*86400}`];
+  const parts = [
+    `${AUTH_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Priority=High',
+    `Max-Age=${SESSION_DAYS*86400}`,
+  ];
   if (process.env.NODE_ENV === 'production') parts.push('Secure');
   res.setHeader('Set-Cookie', parts.join('; '));
 }
@@ -474,16 +487,19 @@ let dbReady = false;
 
 // Health check — always responds (lets Hostinger know we're alive)
 app.get('/health', (_req, res) => {
-  if (isDead()) return res.status(503).json({ status: 'restarting', reason: 'DB OOM — process is being recycled' });
-  res.json({ status: dbReady ? 'ready' : 'starting' });
+  if (isDead()) return res.status(503).json({ status: 'unavailable', reason: 'database is not available' });
+  res.json({
+    status: dbReady ? 'ready' : 'starting',
+    database: dbReady ? 'sqlite-wal' : 'initializing',
+    persistence: dbReady ? 'durable' : 'pending',
+  });
 });
 
-// Block all API calls until DB is ready, and return 503 cleanly if the WASM
-// instance died from OOM (the process is restarting itself in the background).
+// Block API calls until the durable database is ready.
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) {
     if (isDead()) {
-      return res.status(503).json({ error: 'Server is restarting — please retry in a few seconds.' });
+      return res.status(503).json({ error: 'Database is unavailable. Please retry in a few seconds.' });
     }
     if (!dbReady) {
       return res.status(503).json({ error: 'Server is starting up, please retry in a few seconds.' });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router';
 import { GraduationCap, MapPin, CheckCircle2, ChevronRight, FileText, Banknote, Briefcase, GraduationCap as Cap } from 'lucide-react';
 
 export default function DestinationPublic() {

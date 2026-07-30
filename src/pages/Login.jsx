@@ -16,25 +16,17 @@ export default function Login({ onSuccess }) {
     setLoading(true);
 
     let loc = null;
-    let geoError = null;
     if (navigator.geolocation) {
       const getPosition = (opts) => new Promise((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, opts);
       });
       try {
-        // Fast 2.5s timeout for high accuracy so login is fast
-        const pos = await getPosition({ timeout: 2500, maximumAge: 60000, enableHighAccuracy: true });
+        // Location is used only for best-effort attendance. Use a cached or
+        // low-power fix and never hold login for more than 2.5 seconds.
+        const pos = await getPosition({ timeout: 2500, maximumAge: 300000, enableHighAccuracy: false });
         loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       } catch (err) {
-        console.warn('[geolocation] High accuracy failed/timed out, trying low accuracy:', err.message || err);
-        try {
-          // Fast 2s fallback timeout
-          const pos = await getPosition({ timeout: 2000, maximumAge: 60000, enableHighAccuracy: false });
-          loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        } catch (err2) {
-          console.warn('[geolocation] Low accuracy fallback failed:', err2.message || err2);
-          geoError = err2;
-        }
+        console.warn('[geolocation] Location unavailable; continuing login:', err.message || err);
       }
     }
 
@@ -107,7 +99,7 @@ export default function Login({ onSuccess }) {
           </form>
 
           <p className="text-center text-[11px] text-slate-400 mt-6">
-            Login requires office Wi-Fi (EduExpress / HTA) and location access.
+            Location access is optional and is used only for automatic attendance.
           </p>
         </div>
 

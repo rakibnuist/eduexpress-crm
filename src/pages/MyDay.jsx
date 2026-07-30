@@ -4,7 +4,7 @@
    Also surfaces a quick auto-summary of what the activity feed already
    noticed they did (so they're not starting from a blank page). */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { isFullAdmin } from '../lib/roles';

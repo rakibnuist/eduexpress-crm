@@ -4,7 +4,7 @@
    - ↑↓ to navigate, Enter to go.
 */
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { api } from '../api';
 import {
   Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Users,

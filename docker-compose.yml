@@ -12,30 +12,37 @@ services:
     container_name: eduexpress-crm
     init: true
     restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DB_PATH=/data/crm.db          # persisted on the crm-data volume
-      - RESET_KEY=${RESET_KEY}        # set in .env — gates /api/auth/emergency-reset
-      - JWT_SECRET=${JWT_SECRET}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
-      - WEBSITE_WEBHOOK_SECRET=${WEBSITE_WEBHOOK_SECRET}
-      - META_APP_SECRET=${META_APP_SECRET}
-      - META_WEBHOOK_VERIFY_TOKEN=${META_WEBHOOK_VERIFY_TOKEN}
-      - CORS_ORIGINS=${CORS_ORIGINS}
-      - RUN_DATA_BACKFILLS=${RUN_DATA_BACKFILLS:-false}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENCODE_GO_API_KEY=${OPENCODE_GO_API_KEY}
-      - LLM_PROVIDER=${LLM_PROVIDER}
-      - LLM_MODEL=${LLM_MODEL}
-      - N8N_PUBLISH_WEBHOOK=${N8N_PUBLISH_WEBHOOK}
-      - N8N_WELCOME_WEBHOOK=${N8N_WELCOME_WEBHOOK}
+      NODE_ENV: production
+      PORT: "3000"
+      DB_PATH: /data/crm.db
+      RESET_KEY: ${RESET_KEY:?RESET_KEY must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      WEBSITE_WEBHOOK_SECRET: ${WEBSITE_WEBHOOK_SECRET:?WEBSITE_WEBHOOK_SECRET must be set}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      RUN_DATA_BACKFILLS: ${RUN_DATA_BACKFILLS:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      N8N_PUBLISH_WEBHOOK: ${N8N_PUBLISH_WEBHOOK:-}
+      N8N_WELCOME_WEBHOOK: ${N8N_WELCOME_WEBHOOK:-}
     volumes:
       - crm-data:/data                # SQLite DB + WhatsApp linked-device session (wa_auth)
       - crm-uploads:/app/uploads      # uploaded documents
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -51,4 +58,6 @@ services:
 
 volumes:
   crm-data:
+    name: eduexpress-crm_crm-data
   crm-uploads:
+    name: eduexpress-crm_crm-uploads
