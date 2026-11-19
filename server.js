@@ -279,9 +279,10 @@ const uploadLimiter = rateLimit({
 });
 const websiteWebhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => Boolean(req.headers['x-webhook-secret'] || isInternalApiRequest(req)),
   message: { error: 'Too many lead submissions, please try again later.' },
 });
 const portalWriteLimiter = rateLimit({
