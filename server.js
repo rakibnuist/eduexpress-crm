@@ -9563,7 +9563,10 @@ app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) =>
     } else if (process.env.NODE_ENV === 'production') {
       return res.status(503).json({ error: 'Website webhook is not configured.' });
     }
-    const { name, phone, email, destination, source, referrer, message, page_url } = req.body || {};
+    const {
+      name, phone, email, destination, source, referrer, message, page_url,
+      program, major, last_education, gpa, english_score, intake_term, notes: extraNotes
+    } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
     const lead_id = nextLeadId();
     let assigned_consultant = null;
@@ -9571,12 +9574,14 @@ app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) =>
     let actualSource = source || null;
     let actualDestination = destination || null;
 
-    const route = routeLeadByText(`${source || ''} ${destination || ''}`);
+    const route = routeLeadByText(`${source || ''} ${destination || ''} ${program || ''}`);
     if (route) {
       assigned_consultant = route.assigned_consultant;
       actualDestination = actualDestination || route.destination;
       if (route.rule_key !== 'china') actualSource = actualSource || route.source;
     }
+
+    const combinedNotes = [extraNotes, message].filter(Boolean).join(' | ') || null;
 
     const params = leadParams({
       client_name: name,
@@ -9587,7 +9592,13 @@ app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) =>
       source: actualSource,
       referrer: referrer || null,
       assigned_consultant,
-      notes: message || null,
+      program: program || major || null,
+      major: major || program || null,
+      last_education: last_education || null,
+      gpa: gpa || null,
+      english_score: english_score || null,
+      intake_term: intake_term || null,
+      notes: combinedNotes,
       event_source_url: page_url || null,
     }, lead_id, 0);
 
