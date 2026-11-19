@@ -1,0 +1,103 @@
+name: Deploy to Hostinger VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git branch, tag, or commit to deploy
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eduexpress-crm-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify release
+        run: |
+          npm ci
+          npm run check
+
+      - name: Configure SSH
+        env:
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOSTINGER_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Upload release files
+        run: |
+          rsync -az \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude 'node_modules' \
+            --exclude 'dist' \
+            --exclude 'backups' \
+            --exclude 'uploads' \
+            ./ root@147.93.107.210:/docker/eduexpress-crm/
+
+      - name: Build, back up, and release
+        run: |
+          ssh root@147.93.107.210 'bash -se' <<'DEPLOY'
+          set -Eeuo pipefail
+          cd /docker/eduexpress-crm
+
+          test -s .env
+          docker compose config --quiet
+
+          current_image="$(docker inspect eduexpress-crm --format '{{.Image}}')"
+          docker image tag "$current_image" eduexpress-crm:rollback
+          docker compose build --pull crm
+
+          rollback() {
+            echo "Deployment failed; restoring previous application image."
+            docker compose stop crm || true
+            docker image tag eduexpress-crm:rollback eduexpress-crm:latest
+            docker compose up -d --no-deps --force-recreate crm
+          }
+          trap rollback ERR
+
+          docker compose stop crm
+          backup_name="predeploy_$(date -u +%Y-%m-%dT%H-%M-%SZ).db"
+          docker run --rm \
+            --entrypoint sh \
+            -v eduexpress-crm_crm-data:/data \
+            eduexpress-crm:latest \
+            -c "test -s /data/crm.db && mkdir -p /data/backups && cp /data/crm.db /data/backups/$backup_name"
+
+          docker compose up -d --no-deps --force-recreate crm
+
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect eduexpress-crm --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
+            if [ "$health" = "healthy" ]; then
+              curl --fail --silent --show-error https://crm.eduexpressint.com/health
+              trap - ERR
+              docker image rm eduexpress-crm:rollback || true
+              echo "Production deployment completed."
+              exit 0
+            fi
+            sleep 3
+          done
+
+          docker compose logs --tail=200 crm
+          exit 1
+          DEPLOY
