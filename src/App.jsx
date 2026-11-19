@@ -20,6 +20,7 @@ const Dashboard     = lazy(() => import('./pages/Dashboard'));
 const Cockpit       = lazy(() => import('./pages/Cockpit'));
 const Applications  = lazy(() => import('./pages/Applications'));
 const Leads         = lazy(() => import('./pages/Leads'));
+const Pipeline      = lazy(() => import('./pages/Pipeline'));
 const LeadDetail    = lazy(() => import('./pages/LeadDetail'));
 const MyDay         = lazy(() => import('./pages/MyDay'));
 const Reports       = lazy(() => import('./pages/Reports'));
@@ -94,7 +95,7 @@ export default function App() {
                         <Route path="/leads" element={<Leads user={user} />} />
                         <Route path="/leads/:id" element={<LeadDetail user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_MY_DAY) && <Route path="/my-day" element={<MyDay user={user} />} />}
-                        <Route path="/pipeline" element={<Navigate to="/leads?view=table" replace />} />
+                        <Route path="/pipeline" element={<Pipeline user={user} />} />
                         <Route path="/applications" element={<Applications user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_CHAT_INBOX) && <Route path="/conversations" element={<Conversations user={user} />} />}
                         {canManageMarketing(user) && <Route path="/marketing" element={<Marketing />} />}

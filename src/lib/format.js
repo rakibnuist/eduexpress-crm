@@ -46,6 +46,11 @@ export function getDhakaDateParts(date) {
   };
 }
 
+export function bdtToday() {
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatter.format(new Date());
+}
+
 // Common date formats — forced to GMT+6 (Dhaka) timezone
 export function fmtDate(iso, fmt = 'long') {
   const d = toDate(iso);
