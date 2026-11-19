@@ -685,6 +685,7 @@ const AUTH_FREE = new Set([
   '/api/auth/logout',
   '/api/auth/me',
   '/api/webhook/website-lead',
+  '/api/webhook/scholarship-notice',
   '/api/auth/emergency-reset',
 ]);
 const LEGACY_BLOCKED_PATHS = new Set([
@@ -9612,6 +9613,81 @@ app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) =>
     res.json({ success: true, lead_id: lead.id });
   } catch (e) {
     console.error('[website-lead] webhook error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// SCHOLARSHIP NOTICE INGESTION WEBHOOK (from n8n / Crawl4AI scraper)
+// ─────────────────────────────────────────────────────────
+app.post('/api/webhook/scholarship-notice', websiteWebhookLimiter, async (req, res) => {
+  try {
+    if (WEBSITE_WEBHOOK_SECRET) {
+      if (!safeSecretEqual(req.headers['x-webhook-secret'], WEBSITE_WEBHOOK_SECRET)) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    const {
+      university_name,
+      scholarship_types,
+      target_degrees,
+      application_deadline,
+      stipend_coverage,
+      language_requirements,
+      source_url,
+      summary,
+      raw_json
+    } = req.body || {};
+
+    if (!university_name || !source_url) {
+      return res.status(400).json({ error: 'university_name and source_url are required' });
+    }
+
+    const sType = Array.isArray(scholarship_types) ? scholarship_types.join(', ') : (scholarship_types || 'Scholarship');
+    const name = `${university_name} - ${sType}`;
+    const coverage = stipend_coverage || 'Tuition waiver / Stipend';
+    const eligibility = `${Array.isArray(target_degrees) ? target_degrees.join(', ') : (target_degrees || '')} | Language: ${language_requirements || 'N/A'}`;
+    const deadline = application_deadline || 'Unspecified';
+    const notes = summary || (typeof raw_json === 'string' ? raw_json : JSON.stringify(raw_json || {}));
+    const last_verified = new Date().toISOString().slice(0, 10);
+
+    const existing = db.prepare('SELECT id FROM kb_scholarships WHERE source_url = ?').get(source_url);
+    let scholarshipId;
+    if (existing) {
+      db.prepare(`
+        UPDATE kb_scholarships 
+        SET name = ?, coverage = ?, eligibility = ?, deadline = ?, status = 'Open', last_verified = ?, notes = ?
+        WHERE id = ?
+      `).run(name, coverage, eligibility, deadline, last_verified, notes, existing.id);
+      scholarshipId = existing.id;
+    } else {
+      const ins = db.prepare(`
+        INSERT INTO kb_scholarships (name, country, type, coverage, eligibility, deadline, source_url, status, last_verified, notes)
+        VALUES (?, 'China', ?, ?, ?, ?, ?, 'Open', ?, ?)
+      `).run(
+        name,
+        Array.isArray(scholarship_types) && scholarship_types.length ? scholarship_types[0] : (scholarship_types || 'Government/University'),
+        coverage,
+        eligibility,
+        deadline,
+        source_url,
+        last_verified,
+        notes
+      );
+      scholarshipId = ins.lastInsertRowid;
+    }
+
+    logActivity({
+      type: 'scholarship_notice_synced',
+      actor: { name: 'Scholarship Scraper' },
+      details: { scholarship_id: scholarshipId, university_name, deadline, source_url }
+    });
+    broadcast('new_scholarship_notice', { id: scholarshipId, university_name, deadline, source_url });
+
+    res.json({ success: true, scholarship_id: scholarshipId, action: existing ? 'updated' : 'created' });
+  } catch (e) {
+    console.error('[scholarship-notice] webhook error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
