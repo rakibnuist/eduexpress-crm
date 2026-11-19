@@ -9569,6 +9569,18 @@ app.post('/api/webhook/website-lead', websiteWebhookLimiter, async (req, res) =>
       program, major, last_education, gpa, english_score, intake_term, notes: extraNotes
     } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
+
+    // Deduplicate by last 10 digits of phone number
+    if (phone) {
+      const digits = String(phone).replace(/\D/g, '').slice(-10);
+      if (digits.length >= 8) {
+        const existing = db.prepare("SELECT id, lead_id FROM leads WHERE phone LIKE ?").get(`%${digits}`);
+        if (existing) {
+          return res.json({ success: true, lead_id: existing.id, deduplicated: true, message: 'Lead already exists in CRM' });
+        }
+      }
+    }
+
     const lead_id = nextLeadId();
     let assigned_consultant = null;
     let leadSource = 'Website';
