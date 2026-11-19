@@ -49,6 +49,11 @@ export const WA_TEMPLATES = {
   office_visit: (lead) => {
     const name = lead?.client_name || lead?.name || 'শিক্ষার্থী';
     return `আসসালামু আলাইকুম ${name}, এডুএক্সপ্রেস ইন্টারন্যাশনাল অফিসে আপনাকে স্বাগতম! আপনার প্রোফাইল মূল্যায়ন ও ভিসা প্রসেসিং নিয়ে সরাসরি অভিজ্ঞ কাউন্সেলরের সাথে পরামর্শ করতে আমাদের ধানমন্ডি অফিসে আমন্ত্রণ জানাচ্ছি। ঠিকানা: এডুএক্সপ্রেস ইন্টারন্যাশনাল, ধানমন্ডি, ঢাকা।`;
+  },
+  portal_invite: (lead, portalUrl) => {
+    const name = lead?.client_name || lead?.name || 'শিক্ষার্থী';
+    const dest = lead?.destination || 'চায়না';
+    return `আসসালামু আলাইকুম ${name}, এডুএক্সপ্রেস ইন্টারন্যাশনাল-এ আপনার ${dest} উচ্চশিক্ষা ও স্কলারশিপ ফাইল প্রসেসিং শুরু হয়েছে। আপনার ফাইলের লাইভ অগ্রগতি (Application Submitted ➔ University Review ➔ Admission Notice ➔ JW202/DQ Permit ➔ Embassy Visa ➔ Flight) ঘরে বসেই ট্র্যাক করতে এই সিকিউর পোর্টালটি ব্যবহার করুন:\n\n🔗 ${portalUrl}\n\nযেকোনো তথ্যের জন্য আমাদের কাউন্সেলিং টিম সর্বদা আপনার পাশে রয়েছে। ধন্যবাদ!`;
   }
 };
 

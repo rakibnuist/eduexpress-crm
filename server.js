@@ -6949,6 +6949,16 @@ app.get('/api/public/student/:token', (req, res) => {
                            WHERE lead_id=?
                            ORDER BY requested_by_student DESC, id ASC`).all(lead.id);
 
+  let consultantPhone = null;
+  let consultantRole = 'Admissions Specialist';
+  if (lead.assigned_consultant) {
+    const emp = db.prepare("SELECT phone, role FROM employees WHERE name=? OR emp_id=?").get(lead.assigned_consultant, lead.assigned_consultant);
+    if (emp) {
+      if (emp.phone) consultantPhone = emp.phone;
+      if (emp.role) consultantRole = emp.role;
+    }
+  }
+
   res.json({
     student: {
       ref_id: lead.lead_id,
@@ -6963,12 +6973,21 @@ app.get('/api/public/student/:token', (req, res) => {
       visa_deadline: lead.visa_deadline,
       departure_date: lead.departure_date,
       assigned_consultant: lead.assigned_consultant,
+      consultant_phone: consultantPhone || '+8801886932822',
+      consultant_role: consultantRole,
       drive_link: lead.drive_link,
       blood_group: lead.blood_group,
       email: lead.email,
       phone: lead.phone,
       date_of_birth: lead.date_of_birth,
       passport: lead.passport,
+      agency: {
+        name: 'EduExpress International',
+        office: 'Dhanmondi, Dhaka, Bangladesh',
+        helpline: '+880 1886-932822',
+        email: 'info@eduexpressint.com',
+        website: 'https://eduexpressint.com'
+      }
     },
     stages: getApplicationStages(),
     universities: uniApps,
