@@ -11,7 +11,7 @@ import { isFullAdmin } from '../lib/roles';
 import {
   Sun, Send, Clock, CheckCircle2, AlertCircle, ChevronRight, Loader2,
   Calendar, History, Sparkles, Pencil, PhoneCall, Building2, FolderOpen, XCircle, Wifi, LogIn, LogOut,
-  Flame, Heart, Target, Coffee, Sunrise, Star, Zap, UserPlus, ArrowRight
+  Flame, Heart, Target, Coffee, Sunrise, Star, Zap, UserPlus, ArrowRight, ListChecks
 } from 'lucide-react';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -30,6 +30,7 @@ export default function MyDay({ user }) {
   const [saving, setSaving]       = useState(false);
   const [saved, setSaved]         = useState(false);
   const [attnLog, setAttnLog]     = useState(null);
+  const [directives, setDirectives] = useState([]);
   const [metrics, setMetrics]     = useState({ contacted: 0, followup: 0, positive: 0, negative: 0, visited: 0, opened: 0 });
   const [linking, setLinking]     = useState(false);
   const toast = useToast();
@@ -75,6 +76,27 @@ export default function MyDay({ user }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [user]);
   useEffect(() => { api.dailyLogs({}).then(rs => setHistory((rs || []).slice(0, 14))).catch(() => {}); }, []);
+
+  // CEO/manager-assigned directives that belong to this person.
+  useEffect(() => {
+    api.tasks({ limit: 100 })
+      .then(d => {
+        const mine = (d.rows || []).filter(t =>
+          Number(t.assigned_user_id) === Number(user?.id) ||
+          String(t.assigned_to || '').toLowerCase() === String(user?.name || '').toLowerCase()
+        ).filter(t => t.status !== 'done' && t.status !== 'cancelled');
+        setDirectives(mine.slice(0, 5));
+      })
+      .catch(() => setDirectives([]));
+  }, [user]);
+
+  const completeDirective = async (task) => {
+    try {
+      await api.updateTask(task.id, { status: 'done' });
+      setDirectives(prev => prev.filter(t => t.id !== task.id));
+      toast.success('Directive completed');
+    } catch (e) { toast.error(e.message || 'Could not update directive'); }
+  };
 
   useEffect(() => {
     const localStart = new Date();
@@ -528,6 +550,38 @@ export default function MyDay({ user }) {
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-slate-100 bg-violet-50/50 flex items-center justify-between gap-2">
+              <p className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                <ListChecks size={14} className="text-violet-500" /> Directives
+              </p>
+              <Link to="/tasks" className="text-[10px] font-bold text-violet-600 hover:text-violet-700">Open tasks →</Link>
+            </div>
+            {directives.length === 0 ? (
+              <p className="text-xs text-slate-400 italic p-4">No open directives assigned to you.</p>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {directives.map(t => {
+                  const overdue = t.due_date && t.due_date < todayISO();
+                  return (
+                    <div key={t.id} className="px-4 py-3 flex items-start gap-2.5">
+                      <button onClick={() => completeDirective(t)} title="Mark complete" aria-label={`Mark ${t.title} complete`}
+                        className="mt-0.5 w-4 h-4 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 flex-shrink-0 transition-colors" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-800 leading-snug">{t.title}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {t.priority === 'urgent' || t.priority === 'high' ? <span className="font-bold text-rose-500 uppercase mr-1">{t.priority}</span> : null}
+                          {t.due_date ? <span className={overdue ? 'text-amber-600 font-semibold' : ''}>{overdue ? 'overdue ' : 'due '}{t.due_date}</span> : 'No due date'}
+                          {t.assigned_by ? ` · by ${t.assigned_by}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">

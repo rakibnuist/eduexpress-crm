@@ -118,15 +118,8 @@ export default function Reports() {
 /* ─── In-app rendering ─── */
 function ReportBody({ data }) {
   const h = data.headline;
-  const trendData = data.trend || [
-    { day: 'Mon', leads: 5, revenue: 120 },
-    { day: 'Tue', leads: 8, revenue: 180 },
-    { day: 'Wed', leads: 12, revenue: 250 },
-    { day: 'Thu', leads: 7, revenue: 160 },
-    { day: 'Fri', leads: 15, revenue: 320 },
-    { day: 'Sat', leads: 9, revenue: 210 },
-    { day: 'Sun', leads: 11, revenue: 280 },
-  ];
+  const trendData = Array.isArray(data.trend) ? data.trend : [];
+  const hasTrendActivity = trendData.some(d => Number(d.leads) > 0 || Number(d.revenue) > 0);
 
   const sourceColors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
   const sourcePie = (data.leads.by_source || []).map((s, i) => ({
@@ -151,19 +144,29 @@ function ReportBody({ data }) {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="font-bold text-slate-800">Performance Trend</h3>
-              <p className="text-xs text-slate-400 mt-0.5">New leads vs revenue collection</p>
+              <p className="text-xs text-slate-400 mt-0.5">Daily new leads recorded in this period</p>
             </div>
             <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full">This period</span>
           </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={trendData} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-              <Tooltip contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 24px rgba(0,0,0,.1)', fontSize: 12 }} />
-              <Bar dataKey="leads" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={36} />
-            </BarChart>
-          </ResponsiveContainer>
+          {hasTrendActivity ? (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={trendData} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 24px rgba(0,0,0,.1)', fontSize: 12 }}
+                  formatter={(value, name) => [name === 'leads' ? value : fmt(value), name === 'leads' ? 'New leads' : 'Revenue']}
+                />
+                <Bar dataKey="leads" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={36} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-[240px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-slate-200 bg-slate-50/60">
+              <p className="text-sm font-semibold text-slate-500">No activity in this period</p>
+              <p className="text-xs text-slate-400">New leads will appear here once recorded.</p>
+            </div>
+          )}
         </div>
 
         {/* Source Distribution */}

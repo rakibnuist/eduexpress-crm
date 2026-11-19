@@ -97,6 +97,18 @@ export const api = {
   settings:  () => req('/settings'),
   saveSettings: (key, value) => req('/settings', { method: 'POST', body: JSON.stringify({ key, value }) }),
 
+  // CEO remote command layer
+  ceoBadges:   () => req('/ceo/badges'),
+  ceoCommand:  () => req('/ceo/command'),
+  approvals:   (p = {}) => req('/approvals?' + toQuery(p)),
+  approval:    (id) => req(`/approvals/${id}`),
+  createApproval: (d) => req('/approvals', { method: 'POST', body: JSON.stringify(d) }),
+  decideApproval: (id, d) => req(`/approvals/${id}`, { method: 'PATCH', body: JSON.stringify(d) }),
+  tasks:       (p = {}) => req('/tasks?' + toQuery(p)),
+  createTask:  (d) => req('/tasks', { method: 'POST', body: JSON.stringify(d) }),
+  updateTask:  (id, d) => req(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(d) }),
+  deleteTask:  (id) => req(`/tasks/${id}`, { method: 'DELETE' }),
+
   // Leads
   leads:        (p = {}) => req('/leads?' + toQuery(p)),
   getLead:      (id)     => req(`/leads/${id}`),

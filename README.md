@@ -1,14 +1,18 @@
-# EduExpress CRM
+# EduExpress Command
 
 [![Quality checks](https://github.com/rakibnuist/eduexpress-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/rakibnuist/eduexpress-crm/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111827)](https://react.dev/)
 [![Production](https://img.shields.io/badge/production-crm.eduexpressint.com-0F766E)](https://crm.eduexpressint.com)
 
-EduExpress CRM is the internal consultancy operations and client lifecycle
-platform for **EduExpress International**. It brings lead management,
-application processing, omnichannel communication, student services, finance,
-HR, marketing, and operational reporting into one secured workspace.
+EduExpress Command is the remote operations and client lifecycle platform for
+**EduExpress International**. It combines a CEO command centre, approval and
+directive workflows, lead and application management, omnichannel
+communication, student services, finance, HR, marketing, and operational
+reporting in one secured workspace.
+
+The operating model and product rationale are documented in
+[CEO-REMOTE-OPERATIONS.md](CEO-REMOTE-OPERATIONS.md).
 
 **Production:** [crm.eduexpressint.com](https://crm.eduexpressint.com)
 
@@ -16,6 +20,9 @@ HR, marketing, and operational reporting into one secured workspace.
 
 | Area | Capabilities |
 |---|---|
+| CEO command centre | One daily screen: cash, pipeline, approvals waiting, open risks, a combined attention list, and team check-in/log status |
+| Approvals | Expense, refund, fee-waiver, document-release, and other decisions with a required reason and an append-only audit trail |
+| Tasks and directives | Task, owner, due date, priority, status, overdue detection, and completion tracking; assigned tasks also appear on the Daily Workspace |
 | Leads and pipeline | Kanban and table views, lead scoring, assignment, routing, tags, follow-ups, duplicate handling, and bulk import |
 | Applications | Admission-stage tracking, document checklists, intake management, university details, and withdrawal workflows |
 | Conversations | Unified WhatsApp, Messenger, and Instagram inbox with media, notes, assignment, priority, tags, and SLA controls |
@@ -67,9 +74,10 @@ persistence and validated backup/restore handling.
 │   ├── components/         Shared interface components
 │   ├── hooks/              Reusable React hooks
 │   ├── lib/                Formatting, phone, and role helpers
-│   └── pages/              CRM modules and public pages
+│   └── pages/              CRM modules, CEO command centre, approvals, tasks, and public pages
 ├── public/                 Static assets
 ├── tests/                  Automated database safety tests
+├── CEO-REMOTE-OPERATIONS.md  Research, operating model, gap analysis and roadmap
 ├── server.js               Express API, webhooks, jobs, and integrations
 ├── sqldb.js                Database compatibility and persistence layer
 ├── wa-linked.js            WhatsApp linked-device manager
@@ -103,19 +111,35 @@ secrets or production databases in the repository.
 Run the frontend and API together:
 
 ```bash
-npm start
+npm run dev
 ```
 
-The Vite development server proxies API, upload, and webhook requests to the
-local Express server.
+The API listens on `http://localhost:3001`; the Vite UI opens on
+`http://localhost:5173` and proxies API, upload, and webhook requests to the API.
+
+### First local sign-in
+
+Local databases are excluded from Git. If no users exist yet, set `RESET_KEY`
+in `.env`, start the app, and create the first administrator once:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/emergency-reset \
+  -H "Content-Type: application/json" \
+  -H "x-reset-key: $RESET_KEY" \
+  -d '{"password":"choose-a-strong-password"}'
+```
+
+Then sign in with `admin@eduexpressint.com`. Remove or rotate `RESET_KEY` when
+you no longer need the reset endpoint.
 
 ### Available commands
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start the Vite frontend |
-| `npm run server` | Start the Express API |
-| `npm start` | Start frontend and API together |
+| `npm run dev` | Start the Vite frontend and Express API together |
+| `npm run client` | Start the Vite frontend only |
+| `npm run server` | Start the Express API only (loads `.env` when present) |
+| `npm start` | Start the Express API (production/Docker entrypoint) |
 | `npm run lint` | Run static code checks |
 | `npm test` | Run automated database tests |
 | `npm run build` | Create the production frontend build |

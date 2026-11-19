@@ -124,8 +124,9 @@ function isWriteSQL(sql) {
   return /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|BEGIN|COMMIT|ROLLBACK|WITH)/i.test(clean);
 }
 
-// Background auto-flush: ensures any dirty in-memory WASM writes are persisted to disk every 3s
-setInterval(() => {
+// Background auto-flush: ensures any dirty in-memory WASM writes are persisted to disk every 3s.
+// unref() keeps this housekeeping timer from holding the process/test runner open.
+const _autoSaveTimer = setInterval(() => {
   if (!_savePaused && _saveDirty && _transactionDepth === 0 && !_dead && _db && !_isSaving) {
     _saveDirty = false;
     try {
@@ -135,6 +136,7 @@ setInterval(() => {
     }
   }
 }, 3000);
+_autoSaveTimer.unref?.();
 
 function makeStatement(rawSql) {
   const sql = convertSQL(rawSql);
@@ -357,6 +359,7 @@ export async function initDatabase(dbPath) {
 
     close() {
       immediatelySave();
+      clearInterval(_autoSaveTimer);
       const database = _db;
       _db = null;
       database.close();

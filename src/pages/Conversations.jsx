@@ -28,6 +28,13 @@ const getCountryEmoji = (dest) => {
   return COUNTRY_EMOJIS[dest.toLowerCase().trim()] || '';
 };
 
+// Remote Meta CDN avatars expire; swap in the local brand mark instead of a
+// broken-image icon when that happens.
+const handleAvatarError = (e) => {
+  e.currentTarget.onerror = null;
+  e.currentTarget.src = '/favicon.svg';
+};
+
 
 const fmtMsgTime = (iso) => {
   const d = toDate(iso);
@@ -1123,7 +1130,7 @@ export default function Conversations({ user }) {
                     className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12px] transition-all ${isActive ? 'bg-[#e7f3ff] text-[#1877f2] font-semibold' : 'text-[#606770] hover:bg-[#f0f2f5]'}`}>
                     <div className="relative flex-shrink-0">
                       {ch.avatar_url
-                        ? <img src={ch.avatar_url} alt={ch.name} className="w-[28px] h-[28px] rounded-full object-cover" />
+                        ? <img src={ch.avatar_url} alt={ch.name} onError={handleAvatarError} className="w-[28px] h-[28px] rounded-full object-cover" />
                         : <div className={`w-[28px] h-[28px] rounded-full flex items-center justify-center text-white font-bold text-[10px] ${chMeta.bg}`}>{chMeta.icon}</div>
                       }
                     </div>
@@ -1216,8 +1223,15 @@ export default function Conversations({ user }) {
                 const isUnread = Number(conv.unread_count || 0) > 0;
                 const countryFlag = getCountryEmoji(conv.lead_destination);
                 return (
-                  <button key={conv.id} onClick={() => handleSelectConv(conv)}
-                    className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative ${
+                  <div key={conv.id} role="button" tabIndex={0}
+                    onClick={() => handleSelectConv(conv)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleSelectConv(conv);
+                      }
+                    }}
+                    className={`group w-full px-4 py-3 flex items-start gap-3 text-left transition-colors relative cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1877f2] ${
                       isSel ? 'bg-[#e7f3ff]'
                       : isUnread ? 'bg-[#e3f0ff] hover:bg-[#d8ebff] shadow-[inset_0_0_0_1px_rgba(24,119,242,0.1)]' // Stronger highlight for unread
                       : 'hover:bg-[#f0f2f5]'
@@ -1229,7 +1243,7 @@ export default function Conversations({ user }) {
                     {/* Avatar */}
                     <div className="relative flex-shrink-0 mt-0.5">
                       {conv.contact_avatar
-                        ? <img src={conv.contact_avatar} alt={conv.contact_name || 'C'} className="w-[46px] h-[46px] rounded-full object-cover" />
+                        ? <img src={conv.contact_avatar} alt={conv.contact_name || 'C'} onError={handleAvatarError} className="w-[46px] h-[46px] rounded-full object-cover" />
                         : <div className={`w-[46px] h-[46px] rounded-full flex items-center justify-center text-white font-bold text-[15px] bg-gradient-to-br ${getNameGradient(conv.contact_name)}`}>{initials(conv.contact_name || 'C')}</div>
                       }
                       {/* Channel icon badge */}
@@ -1284,7 +1298,7 @@ export default function Conversations({ user }) {
                         : <button onClick={e => handleMarkAsUnread(e, conv)} title="Mark unread" className="p-1 hover:bg-[#f0f2f5] rounded text-[#8a8d91] hover:text-[#1877f2] transition-colors"><MessageSquare size={13} /></button>}
                       <button onClick={e => handleToggleArchiveItem(e, conv)} title={conv.status === 'archived' ? 'Reopen' : 'Archive'} className="p-1 hover:bg-[#f0f2f5] rounded text-[#8a8d91] hover:text-[#606770] transition-colors"><Archive size={13} /></button>
                     </div>
-                  </button>
+                  </div>
                 );
               })
             )}
@@ -1304,7 +1318,7 @@ export default function Conversations({ user }) {
                   </button>
                   <div className="relative flex-shrink-0">
                     {selectedConv.contact_avatar
-                      ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-[38px] h-[38px] rounded-full object-cover" />
+                      ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} onError={handleAvatarError} className="w-[38px] h-[38px] rounded-full object-cover" />
                       : <div className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>{initials(selectedConv.contact_name || 'C')}</div>
                     }
                     <span className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border-[1.5px] border-white text-[7px] font-black text-white ${getChannelMeta(selectedConv.channel_type).bg}`}>
@@ -1411,7 +1425,7 @@ export default function Conversations({ user }) {
                             <div key={msg.id || item.key} className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-0.5 group`}>
                               {!isOut && (
                                 selectedConv.contact_avatar
-                                  ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end mb-1 mr-1.5" />
+                                  ? <img src={selectedConv.contact_avatar} alt={selectedConv.contact_name || 'C'} onError={handleAvatarError} className="w-7 h-7 rounded-full object-cover flex-shrink-0 self-end mb-1 mr-1.5" />
                                   : <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0 self-end mb-1 mr-1.5 bg-gradient-to-br ${getNameGradient(selectedConv.contact_name)}`}>{initials(selectedConv.contact_name || 'C')}</div>
                               )}
                               

@@ -1,18 +1,19 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, DollarSign,
-  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone, Zap, Moon, PlusCircle, Globe, MousePointerClick
+  UserCheck, Settings, Menu, X, GraduationCap, LogOut, Eye, Plane, Sun, FileBarChart, Search, Wifi, WifiOff, MessageSquare, Megaphone, Zap, PlusCircle, Globe, MousePointerClick,
+  Command, ClipboardCheck, ListChecks
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { api } from '../api';
 import { useToast } from './Toast';
-import { useDarkMode } from '../hooks/useDarkMode';
 import NotificationBell from './NotificationBell';
-import { getNavForUser, getPrimaryRoleLabel, getPrimaryRoleBadgeClass } from '../lib/roles';
+import { getNavForUser, getPrimaryRoleLabel, getPrimaryRoleBadgeClass, NAV_GROUPS, isFullAdmin } from '../lib/roles';
 
 // Icon map for dynamic nav generation
 const ICON_MAP = {
   LayoutDashboard,
+  Command,
   Eye,
   FileBarChart,
   Sun,
@@ -27,13 +28,14 @@ const ICON_MAP = {
   Settings,
   Globe,
   MousePointerClick,
+  ClipboardCheck,
+  ListChecks,
 };
 
 export default function Layout({ children, user, onLogout }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { isDark, toggle } = useDarkMode();
 
   // Generate navigation dynamically from user's roles (exclude action-only items)
   const nav = getNavForUser(user)
@@ -43,7 +45,22 @@ export default function Layout({ children, user, onLogout }) {
       icon: ICON_MAP[item.icon] || LayoutDashboard,
     }));
 
-  const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'Core';
+  const pageTitle = nav.find(n => location.pathname === n.to || (n.to !== '/' && location.pathname.startsWith(n.to)))?.label || 'EduExpress Command';
+
+  // Grouped navigation keeps daily work, growth, control and admin separate.
+  const groupedNav = NAV_GROUPS
+    .map(group => ({ group, items: nav.filter(item => item.group === group) }))
+    .filter(g => g.items.length > 0);
+
+  const [badges, setBadges] = useState({ approvals: 0, tasks: 0, overdueTasks: 0 });
+  useEffect(() => {
+    if (!isFullAdmin(user)) return;
+    let alive = true;
+    api.ceoBadges()
+      .then(b => { if (alive) setBadges(b || { approvals: 0, tasks: 0, overdueTasks: 0 }); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [user, location.pathname]);
 
   const logout = async () => {
     try { await api.logout(); } catch {}
@@ -78,22 +95,37 @@ export default function Layout({ children, user, onLogout }) {
         const isSimulated = localStorage.getItem('simulated_wifi') !== 'false';
         if (isSimulated) {
           setWifiSSID(ssid);
-          
-          const todayStr = new Date().toISOString().slice(0, 10);
-          const timeStr = new Date().toTimeString().slice(0, 5);
-          
-          api.checkIn({
-            emp_id: user.emp_id,
-            date: todayStr,
-            time: timeStr,
-            ssid: ssid,
-            source: 'wifi'
-          }).then(res => {
-            toast.success(`⚡ Auto Wi-Fi Attendance: Checked in via "${ssid}"`);
-            setAttMsg(`✓ Automatically checked in via Office Wi-Fi: "${ssid}" at ${res.check_in} (${res.status})`);
-          }).catch(err => {
-            console.log('[Auto-WiFi] Status:', err.message);
-          });
+
+          const now = new Date();
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          const timeStr = now.toTimeString().slice(0, 5);
+          const checkinKey = `wifi_checkin_${user.emp_id}_${todayStr}`;
+
+          // Only try once per browser session and never when the login flow
+          // already produced an attendance message. This keeps page reloads
+          // from firing a duplicate check-in request (and a 409) each time.
+          if (sessionStorage.getItem(checkinKey)) return;
+          sessionStorage.setItem(checkinKey, '1');
+          if (sessionStorage.getItem('att_msg')) return;
+
+          api.attendance({ date: todayStr, emp_id: user.emp_id })
+            .then(rows => {
+              if (Array.isArray(rows) && rows.length > 0) return; // already checked in today
+              return api.checkIn({
+                emp_id: user.emp_id,
+                date: todayStr,
+                time: timeStr,
+                ssid: ssid,
+                source: 'wifi'
+              }).then(res => {
+                setAttMsg(`✓ Automatically checked in via Office Wi-Fi: "${ssid}" at ${res.check_in} (${res.status})`);
+              });
+            })
+            .catch(err => {
+              if (!/already checked in/i.test(err.message || '')) {
+                console.warn('[Auto-WiFi] Check-in skipped:', err.message);
+              }
+            });
         }
       }
     }).catch(err => console.error('Failed to load office config:', err));
@@ -143,24 +175,51 @@ export default function Layout({ children, user, onLogout }) {
           </div>
           <div className="min-w-0 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">
             <p className="font-bold text-slate-800 text-sm leading-tight">EduExpress</p>
-            <p className="text-xs text-slate-400 truncate">International Core</p>
+            <p className="text-xs text-slate-400 truncate">Remote Command</p>
           </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto lg:px-2 lg:group-hover:px-3 transition-all duration-300">
-          {nav.map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to} end={to === '/'}
-              onClick={() => setOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all lg:px-2.5 lg:group-hover:px-3
-                ${isActive
-                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`
-              }>
-              <Icon size={17} className="flex-shrink-0" />
-              <span className="flex-1 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">{label}</span>
-            </NavLink>
+        <nav className="flex-1 py-3 px-3 overflow-y-auto lg:px-2 lg:group-hover:px-3 transition-all duration-300">
+          {groupedNav.map(({ group, items }, gi) => (
+            <div key={group} className={gi > 0 ? 'mt-2.5' : ''}>
+              <p className="px-3 pt-2 pb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400 whitespace-nowrap
+                transition-all duration-300 lg:px-2.5 lg:group-hover:px-3 lg:opacity-0 lg:h-0 lg:pt-0 lg:pb-0 lg:overflow-hidden
+                lg:group-hover:opacity-100 lg:group-hover:h-auto lg:group-hover:pt-2 lg:group-hover:pb-1">
+                {group}
+              </p>
+              <div className="space-y-0.5">
+                {items.map(({ to, icon: Icon, label, badgeKey }) => {
+                  const badge = badgeKey ? Number(badges[badgeKey] || 0) : 0;
+                  return (
+                    <NavLink key={to + label} to={to} end={to === '/'}
+                      onClick={() => setOpen(false)}
+                      title={label}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all lg:px-2.5 lg:group-hover:px-3
+                        ${isActive
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`
+                      }>
+                      <span className="relative flex-shrink-0">
+                        <Icon size={17} />
+                        {badge > 0 && (
+                          <span className="absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-white">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex-1 transition-all duration-300 lg:opacity-0 lg:w-0 lg:group-hover:opacity-100 overflow-hidden whitespace-nowrap">{label}</span>
+                      {badge > 0 && (
+                        <span className="hidden lg:group-hover:inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-600">
+                          {badge > 99 ? '99+' : badge}
+                        </span>
+                      )}
+                    </NavLink>
+                  );
+                })}
+              </div>
+            </div>
           ))}
         </nav>
 
@@ -215,16 +274,6 @@ export default function Layout({ children, user, onLogout }) {
             </button>
             <NotificationBell user={user} />
 
-            {/* Dark Mode Toggle */}
-            <button
-              onClick={toggle}
-              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Toggle dark mode"
-            >
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
-
             {/* Auto Wi-Fi Attendance Indicator & Simulator */}
             {wifiConfigured && (
               <button
@@ -234,7 +283,7 @@ export default function Layout({ children, user, onLogout }) {
                     ? `Connected to Office Wi-Fi "${wifiSSID}". Attendance active. Click to disconnect simulated network.`
                     : `Office Wi-Fi configured ("${wifiConfigured}"). Click to simulate network connection for auto-attendance.`
                 }
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 ${
+                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 ${
                   wifiSSID
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
                     : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'

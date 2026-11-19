@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
+import { fmtCurrency } from '../lib/format';
 import {
   Users, DollarSign, Bell, TrendingUp, ArrowRight, Trophy, Medal, Award,
   Megaphone, X, Sun, FileBarChart, MessageSquare, UserPlus, BadgeCheck,
@@ -117,16 +118,9 @@ export default function Dashboard({ user }) {
   const destDataRaw = by_dest.map(s => ({ name: s.k, value: s.n }));
   const destData = canViewChinaData(user) ? destDataRaw : destDataRaw.filter(d => d.name !== 'China');
 
-  // Trend data for sparkline
-  const trendData = trend.length > 0 ? trend : [
-    { date: '1', newLeads: 5, revenue: 120000 },
-    { date: '5', newLeads: 8, revenue: 180000 },
-    { date: '10', newLeads: 12, revenue: 250000 },
-    { date: '15', newLeads: 7, revenue: 160000 },
-    { date: '20', newLeads: 15, revenue: 320000 },
-    { date: '25', newLeads: 9, revenue: 210000 },
-    { date: '30', newLeads: 11, revenue: 280000 },
-  ];
+  // Trend data for sparkline — only real activity, never sample values.
+  const trendData = trend;
+  const hasRevenue = trendData.some(d => Number(d.revenue) > 0);
 
   return (
     <div className="space-y-6">
@@ -215,7 +209,6 @@ export default function Dashboard({ user }) {
           value={total.toLocaleString()}
           sub={isConsultant ? "assigned to me" : "all time"}
           accent="blue"
-          trend={+12}
         />
         <StrategicCard
           icon={<UserPlus size={18}/>}
@@ -223,7 +216,6 @@ export default function Dashboard({ user }) {
           value={newToday}
           sub={new Date().toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
           accent="sky"
-          trend={newToday > 5 ? +8 : -3}
         />
         <StrategicCard
           icon={<BadgeCheck size={18}/>}
@@ -231,15 +223,13 @@ export default function Dashboard({ user }) {
           value={fileOpened}
           sub={`${convRate}% conversion`}
           accent="emerald"
-          trend={+5}
         />
         <StrategicCard
           icon={<DollarSign size={18}/>}
           label={isConsultant ? "My Collection" : "Revenue Collected"}
-          value={`৳${(totalPaid/1000).toFixed(0)}K`}
+          value={fmtCurrency(totalPaid, { compact: true })}
           sub="BDT total"
           accent="violet"
-          trend={+18}
         />
         <StrategicCard
           icon={<Bell size={18}/>}
@@ -270,7 +260,7 @@ export default function Dashboard({ user }) {
               <h3 className="font-bold text-slate-800 text-lg">Pipeline Breakdown</h3>
               <p className="text-xs text-slate-400 mt-0.5">{total} {isConsultant ? 'my leads' : 'total leads'} across all stages</p>
             </div>
-            <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-3 py-1 rounded-full">This month</span>
+            <span className="text-xs font-semibold bg-slate-100 text-slate-500 px-3 py-1 rounded-full">All time</span>
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={pipeline} margin={{ top: 0, right: 8, left: -20, bottom: 42 }}>
@@ -328,26 +318,32 @@ export default function Dashboard({ user }) {
                 <h3 className="font-bold text-slate-800">Revenue Trend</h3>
                 <p className="text-xs text-slate-400">7-day collection movement</p>
               </div>
-              <TrendBadge data={trendData} />
+              <TrendBadge data={hasRevenue ? trendData : []} />
             </div>
-            <ResponsiveContainer width="100%" height={100}>
-              <AreaChart data={trendData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.2}/>
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="date" hide />
-                <YAxis hide />
-                <Tooltip 
-                  contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }}
-                  formatter={(v) => `৳${Number(v).toLocaleString()}`}
-                />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2.5} fill="url(#revGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {hasRevenue ? (
+              <ResponsiveContainer width="100%" height={100}>
+                <AreaChart data={trendData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.2}/>
+                      <stop offset="100%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="date" hide />
+                  <YAxis hide />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,.1)', fontSize: 12 }}
+                    formatter={(v) => fmtCurrency(v)}
+                  />
+                  <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2.5} fill="url(#revGrad)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[100px] flex items-center justify-center rounded-xl bg-slate-50/70 border border-dashed border-slate-200">
+                <p className="text-xs text-slate-400">No collections recorded in this period</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

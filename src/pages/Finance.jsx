@@ -216,6 +216,7 @@ export default function Finance() {
                   vs prev month
                 </p>
               )}
+              <p className="text-[10px] text-slate-400 mt-0.5">Margin {profitMargin}%</p>
             </div>
             <div className="rounded-xl p-3 bg-white/5 border border-white/10 backdrop-blur-sm">
               <div className="flex items-center gap-2 mb-1">
@@ -229,14 +230,6 @@ export default function Finance() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* KPI row (light cards below header) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <FinKpi icon={<ArrowDownCircle size={18} />} label="Total Income" value={income.sum} color="emerald" symbol="৳" />
-        <FinKpi icon={<ArrowUpCircle size={18} />} label="Total Expenses" value={expenses.sum} color="rose" symbol="৳" />
-        <FinKpi icon={<DollarSign size={18} />} label="Net Profit" value={income.sum - expenses.sum} color="blue" symbol="৳" />
-        <FinKpi icon={<Wallet size={18} />} label="Cash Position" value={liveBalance} color={liveBalance >= 0 ? 'amber' : 'rose'} symbol="৳" />
       </div>
 
       {/* Tabs */}
@@ -262,14 +255,6 @@ export default function Finance() {
         <div className="space-y-4">
           {pnlWithCumulative.length > 0 ? (
             <>
-              {/* Top summary strip */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <SummaryPill label="Total Income" value={income.sum} accent="emerald" />
-                <SummaryPill label="Total Expenses" value={expenses.sum} accent="rose" />
-                <SummaryPill label="Net Profit" value={income.sum - expenses.sum} accent="blue" />
-                <SummaryPill label="Profit Margin" value={`${profitMargin}%`} accent="indigo" />
-              </div>
-
               {/* Quick Actions */}
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setModal({ type: 'income' })}
@@ -623,40 +608,6 @@ export default function Finance() {
             onSave={(newMonth) => { setModal(null); if (newMonth) setMonth(newMonth); load(); }} />
         </Modal>
       )}
-    </div>
-  );
-}
-
-function SummaryPill({ label, value, accent }) {
-  const accentStyles = {
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    rose: 'bg-rose-50 text-rose-700 border-rose-100',
-    blue: 'bg-blue-50 text-blue-700 border-blue-100',
-    indigo: 'bg-indigo-50 text-indigo-700 border-indigo-100',
-  };
-  return (
-    <div className={`rounded-2xl p-4 border shadow-sm ${accentStyles[accent] || 'bg-slate-50 text-slate-700 border-slate-100'}`}>
-      <p className="text-[10px] uppercase font-bold tracking-wider opacity-60 mb-1">{label}</p>
-      <p className="text-lg font-bold tabular-nums">{typeof value === 'number' ? cFmt(value) : value}</p>
-    </div>
-  );
-}
-
-function FinKpi({ icon, label, value, color, symbol }) {
-  const colors = {
-    emerald: 'bg-emerald-50 text-emerald-600',
-    rose: 'bg-rose-50 text-rose-500',
-    blue: 'bg-blue-50 text-blue-600',
-    amber: 'bg-amber-50 text-amber-600',
-  };
-  const textColors = { emerald: 'text-emerald-700', rose: 'text-rose-600', blue: 'text-blue-700', amber: 'text-amber-700' };
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4 shadow-sm">
-      <div className={`p-3 rounded-xl ${colors[color]}`}>{icon}</div>
-      <div>
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p>
-        <p className={`text-2xl font-bold ${textColors[color]} tabular-nums`}>{symbol}{value.toLocaleString()}</p>
-      </div>
     </div>
   );
 }

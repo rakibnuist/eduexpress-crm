@@ -20,6 +20,12 @@ export const PERMISSIONS = {
   // Daily Workspace
   VIEW_MY_DAY:              'view_my_day',
 
+  // CEO operating layer
+  VIEW_TASKS:               'view_tasks',
+  MANAGE_TASKS:             'manage_tasks',
+  VIEW_APPROVALS:           'view_approvals',
+  DECIDE_APPROVALS:         'decide_approvals',
+
   // Leads & Pipeline
   MANAGE_ALL_LEADS:         'manage_all_leads',
   MANAGE_OWN_LEADS:         'manage_own_leads',
@@ -112,6 +118,7 @@ export const ROLE_DEFS = {
       PERMISSIONS.REPLY_OWN_CHANNELS,
       PERMISSIONS.REPLY_ALL_CHANNELS,   // Can reply to all channels but own WhatsApp only
       PERMISSIONS.VIEW_BROADCASTS,
+      PERMISSIONS.VIEW_TASKS,
     ],
   },
   application_manager: {
@@ -131,6 +138,9 @@ export const ROLE_DEFS = {
       PERMISSIONS.REPLY_ALL_CHANNELS,
       PERMISSIONS.VIEW_BROADCASTS,
       PERMISSIONS.VIEW_ANALYTICS,
+      PERMISSIONS.VIEW_TASKS,
+      PERMISSIONS.MANAGE_TASKS,
+      PERMISSIONS.VIEW_APPROVALS,
     ],
   },
   marketing_manager: {
@@ -151,6 +161,9 @@ export const ROLE_DEFS = {
       PERMISSIONS.SEND_BROADCASTS,
       PERMISSIONS.VIEW_BROADCASTS,
       PERMISSIONS.VIEW_ANALYTICS,
+      PERMISSIONS.VIEW_TASKS,
+      PERMISSIONS.MANAGE_TASKS,
+      PERMISSIONS.VIEW_APPROVALS,
     ],
   },
   agent: {
@@ -161,25 +174,38 @@ export const ROLE_DEFS = {
       PERMISSIONS.MANAGE_OWN_LEADS,
       PERMISSIONS.VIEW_LEADS,
       PERMISSIONS.VIEW_APPLICATIONS,
+      PERMISSIONS.VIEW_TASKS,
     ],
   },
 };
 
 // ─── Navigation Items (route + icon key + label + required permission) ─────
 export const NAV_ITEMS = [
+  // ── COMMAND ──────────────────────────────────────────────────────────────
+  {
+    id: 'command_center',
+    to: '/',
+    icon: 'Command',
+    label: 'Command Center',
+    group: 'Command',
+    permission: PERMISSIONS.VIEW_EXECUTIVE_DASHBOARD,
+    roles: ['founder_ceo', 'managing_director'],
+  },
   {
     id: 'executive_dashboard',
     to: '/',
     icon: 'LayoutDashboard',
     label: 'Executive Dashboard',
+    group: 'Command',
     permission: PERMISSIONS.VIEW_EXECUTIVE_DASHBOARD,
-    roles: ['founder_ceo', 'managing_director', 'investor'],
+    roles: ['investor'],
   },
   {
     id: 'personal_dashboard',
     to: '/',
     icon: 'LayoutDashboard',
     label: 'My Dashboard',
+    group: 'Command',
     permission: PERMISSIONS.VIEW_PERSONAL_DASHBOARD,
     roles: ['consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
@@ -187,7 +213,8 @@ export const NAV_ITEMS = [
     id: 'cockpit',
     to: '/cockpit',
     icon: 'Eye',
-    label: 'Executive Cockpit',
+    label: 'Live Office',
+    group: 'Command',
     permission: PERMISSIONS.VIEW_COCKPIT,
     roles: ['founder_ceo', 'managing_director'],
   },
@@ -196,30 +223,27 @@ export const NAV_ITEMS = [
     to: '/reports',
     icon: 'FileBarChart',
     label: 'Reports & Analytics',
+    group: 'Command',
     permission: PERMISSIONS.VIEW_REPORTS,
     roles: ['founder_ceo', 'managing_director', 'investor', 'marketing_manager', 'application_manager'],
   },
+
+  // ── OPERATIONS ───────────────────────────────────────────────────────────
   {
     id: 'my_day',
     to: '/my-day',
     icon: 'Sun',
     label: 'Daily Workspace',
+    group: 'Operations',
     permission: PERMISSIONS.VIEW_MY_DAY,
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
-  },
-  {
-    id: 'ad_performance',
-    to: '/ad-performance',
-    icon: 'MousePointerClick',
-    label: 'Ad Performance',
-    permission: PERMISSIONS.VIEW_AD_PERFORMANCE,
-    roles: ['founder_ceo', 'managing_director'],
   },
   {
     id: 'leads',
     to: '/leads',
     icon: 'Users',
     label: 'Leads & Pipeline',
+    group: 'Operations',
     permission: PERMISSIONS.VIEW_LEADS,
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
@@ -228,6 +252,7 @@ export const NAV_ITEMS = [
     to: '/applications',
     icon: 'Plane',
     label: 'Applications Hub',
+    group: 'Operations',
     permission: PERMISSIONS.VIEW_APPLICATIONS,
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager', 'agent'],
   },
@@ -236,6 +261,7 @@ export const NAV_ITEMS = [
     to: '/applications?action=add&region=china',
     icon: 'PlusCircle',
     label: 'Add Application (China)',
+    group: 'Operations',
     permission: PERMISSIONS.ADD_APPLICATION_CHINA,
     roles: ['founder_ceo', 'application_manager'],
     // Special: only shown when user has application_manager role and is on China tab
@@ -246,14 +272,28 @@ export const NAV_ITEMS = [
     to: '/conversations',
     icon: 'MessageSquare',
     label: 'Chat Inbox',
+    group: 'Operations',
     permission: PERMISSIONS.VIEW_CHAT_INBOX,
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
   },
+  {
+    id: 'tasks',
+    to: '/tasks',
+    icon: 'ListChecks',
+    label: 'Tasks & Directives',
+    group: 'Operations',
+    permission: PERMISSIONS.VIEW_TASKS,
+    roles: ['founder_ceo', 'managing_director', 'consultant', 'application_manager', 'marketing_manager', 'agent'],
+    badgeKey: 'tasks',
+  },
+
+  // ── GROWTH ───────────────────────────────────────────────────────────────
   {
     id: 'marketing',
     to: '/marketing',
     icon: 'Megaphone',
     label: 'Marketing Hub',
+    group: 'Growth',
     permission: PERMISSIONS.VIEW_MARKETING,
     roles: ['founder_ceo', 'managing_director', 'marketing_manager'],
   },
@@ -262,14 +302,27 @@ export const NAV_ITEMS = [
     to: '/automation',
     icon: 'Zap',
     label: 'Automation Hub',
+    group: 'Growth',
     permission: PERMISSIONS.VIEW_AUTOMATION,
     roles: ['founder_ceo', 'managing_director', 'marketing_manager'],
   },
+  {
+    id: 'ad_performance',
+    to: '/ad-performance',
+    icon: 'MousePointerClick',
+    label: 'Ad Performance',
+    group: 'Growth',
+    permission: PERMISSIONS.VIEW_AD_PERFORMANCE,
+    roles: ['founder_ceo', 'managing_director'],
+  },
+
+  // ── CONTROL ──────────────────────────────────────────────────────────────
   {
     id: 'finance',
     to: '/finance',
     icon: 'DollarSign',
     label: 'Finance',
+    group: 'Control',
     permission: PERMISSIONS.VIEW_FINANCE,
     roles: ['founder_ceo', 'managing_director', 'investor'],
   },
@@ -277,15 +330,29 @@ export const NAV_ITEMS = [
     id: 'hr',
     to: '/hr',
     icon: 'UserCheck',
-    label: 'HR',
+    label: 'HR & Team',
+    group: 'Control',
     permission: PERMISSIONS.VIEW_HR,
     roles: ['founder_ceo', 'managing_director'],
   },
+  {
+    id: 'approvals',
+    to: '/approvals',
+    icon: 'ClipboardCheck',
+    label: 'Approvals',
+    group: 'Control',
+    permission: PERMISSIONS.VIEW_APPROVALS,
+    roles: ['founder_ceo', 'managing_director', 'application_manager', 'marketing_manager'],
+    badgeKey: 'approvals',
+  },
+
+  // ── ADMINISTRATION ───────────────────────────────────────────────────────
   {
     id: 'destinations',
     to: '/destinations',
     icon: 'Globe',
     label: 'Destinations',
+    group: 'Administration',
     permission: PERMISSIONS.MANAGE_SETTINGS,
     roles: ['founder_ceo', 'managing_director'],
   },
@@ -294,17 +361,21 @@ export const NAV_ITEMS = [
     to: '/settings',
     icon: 'Settings',
     label: 'Settings',
+    group: 'Administration',
     permission: PERMISSIONS.MANAGE_SETTINGS,
     roles: ['founder_ceo', 'managing_director'],
   },
 ];
 
+export const NAV_GROUPS = ['Command', 'Operations', 'Growth', 'Control', 'Administration'];
+
+
 // ─── Icon Map (for dynamic import or string-based lookup) ───────────────────
 // These are the Lucide icon names used in NAV_ITEMS
 export const ICON_NAMES = [
-  'LayoutDashboard', 'Eye', 'FileBarChart', 'Sun', 'Users', 'Plane',
+  'LayoutDashboard', 'Command', 'Eye', 'FileBarChart', 'Sun', 'Users', 'Plane',
   'PlusCircle', 'MessageSquare', 'Megaphone', 'Zap', 'DollarSign',
-  'UserCheck', 'Settings', 'Globe',
+  'UserCheck', 'Settings', 'Globe', 'ClipboardCheck', 'ListChecks',
 ];
 
 // ─── Permission Helpers ─────────────────────────────────────────────────────

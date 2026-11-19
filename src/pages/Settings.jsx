@@ -34,7 +34,7 @@ export default function Settings() {
   ];
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-6xl mx-auto">
       {/* ── Page Header ── */}
       <div className="flex items-start gap-4 pb-5 border-b border-slate-200 mb-0">
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow flex-shrink-0">

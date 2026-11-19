@@ -13,6 +13,9 @@ import {
 } from './lib/roles';
 
 // Route-level code splitting
+const CommandCenter = lazy(() => import('./pages/CommandCenter'));
+const Approvals     = lazy(() => import('./pages/Approvals'));
+const Tasks         = lazy(() => import('./pages/Tasks'));
 const Dashboard     = lazy(() => import('./pages/Dashboard'));
 const Cockpit       = lazy(() => import('./pages/Cockpit'));
 const Applications  = lazy(() => import('./pages/Applications'));
@@ -54,7 +57,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-sm">Loading EduExpress Core…</p>
+          <p className="text-slate-400 text-sm">Loading EduExpress Command…</p>
         </div>
       </div>
     );
@@ -83,9 +86,11 @@ export default function App() {
                   <Layout user={user} onLogout={() => setUser(null)}>
                     <Suspense fallback={<PageLoader />}>
                       <Routes>
-                        <Route path="/" element={<Dashboard user={user} />} />
+                        <Route path="/" element={isFullAdmin(user) ? <CommandCenter user={user} /> : <Dashboard user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_COCKPIT) && <Route path="/cockpit" element={<Cockpit />} />}
                         {canViewReports(user) && <Route path="/reports" element={<Reports />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_APPROVALS) && <Route path="/approvals" element={<Approvals user={user} />} />}
+                        {hasPermission(user, PERMISSIONS.VIEW_TASKS) && <Route path="/tasks" element={<Tasks user={user} />} />}
                         <Route path="/leads" element={<Leads user={user} />} />
                         <Route path="/leads/:id" element={<LeadDetail user={user} />} />
                         {hasPermission(user, PERMISSIONS.VIEW_MY_DAY) && <Route path="/my-day" element={<MyDay user={user} />} />}

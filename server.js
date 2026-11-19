@@ -3068,6 +3068,13 @@ function runMigrations() {
     `ALTER TABLE content_posts ADD COLUMN priority TEXT CHECK(priority IN ('low','normal','high','urgent')) DEFAULT 'normal'`,
     `ALTER TABLE content_posts ADD COLUMN notes TEXT`,
     `ALTER TABLE content_posts ADD COLUMN tags TEXT`,
+    // Marketing schema reconciliation. The v3.0 content_posts table keeps the
+    // publish time in post_time and the network in platform; restored or older
+    // databases may still lack these, and analytics still reads reach/engagement.
+    `ALTER TABLE content_posts ADD COLUMN platform TEXT DEFAULT 'facebook'`,
+    `ALTER TABLE content_posts ADD COLUMN reach INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN engagement INTEGER`,
+    `ALTER TABLE content_posts ADD COLUMN cta TEXT`,
     `ALTER TABLE conversations ADD COLUMN assigned_to_id INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_contact_channel ON conversations(contact_id, channel_id)`,
     // ── Ad Attribution columns (which FB page / ad created the lead) ──
@@ -3080,6 +3087,74 @@ function runMigrations() {
     `ALTER TABLE leads ADD COLUMN meta_adset_name TEXT`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
+
+  // ── CEO operating layer: approvals, decision audit and assigned tasks ──
+  // These are intentionally append-only for decisions: an approval request is
+  // never deleted, and every action is recorded in approval_events.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS approval_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_no TEXT,
+        type TEXT NOT NULL DEFAULT 'other',
+        title TEXT NOT NULL,
+        description TEXT,
+        amount REAL,
+        currency TEXT DEFAULT 'BDT',
+        lead_id INTEGER,
+        reference_type TEXT,
+        reference_id INTEGER,
+        requested_by_id INTEGER,
+        requested_by TEXT,
+        requested_by_role TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        priority TEXT NOT NULL DEFAULT 'normal',
+        due_date TEXT,
+        decided_by_id INTEGER,
+        decided_by TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_approval_requester ON approval_requests(requested_by_id);
+      CREATE INDEX IF NOT EXISTS idx_approval_type ON approval_requests(type);
+
+      CREATE TABLE IF NOT EXISTS approval_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        approval_id INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        actor_id INTEGER,
+        actor_name TEXT,
+        note TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_approval_events_request ON approval_events(approval_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS management_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        details TEXT,
+        assigned_to TEXT,
+        assigned_user_id INTEGER,
+        assigned_by TEXT,
+        assigned_by_id INTEGER,
+        due_date TEXT,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        status TEXT NOT NULL DEFAULT 'open',
+        category TEXT,
+        lead_id INTEGER,
+        completed_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON management_tasks(status, due_date);
+      CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON management_tasks(assigned_to, status);
+    `);
+  } catch (e) {
+    console.error('[migration] CEO operating-layer tables failed:', e.message);
+  }
 
   // ── RBAC Migration: create user_roles and channel_access tables, migrate old roles ──
   try {
@@ -3318,6 +3393,7 @@ function runMigrations() {
     // If the table still has the old CHECK constraint (with 'drafted' but not 'ideation'), recreate it
     if (sql.includes("drafted") && !sql.includes("ideation")) {
       console.log("[migration] Recreating content_posts table with new v3.0 pipeline statuses...");
+      db.exec(`DROP TABLE IF EXISTS content_posts_new`);
       db.exec(`
         CREATE TABLE content_posts_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3325,6 +3401,7 @@ function runMigrations() {
           page TEXT CHECK(page IN ('china','bd','instagram','tiktok')),
           pillar TEXT,
           format TEXT,
+          platform TEXT DEFAULT 'facebook',
           hook TEXT,
           body TEXT,
           hashtags TEXT,
@@ -3351,6 +3428,8 @@ function runMigrations() {
           saves INTEGER,
           video_views INTEGER,
           leads INTEGER,
+          reach INTEGER,
+          engagement INTEGER,
           published_at TEXT,
           published_by TEXT,
           language TEXT DEFAULT 'bangla',
@@ -3365,10 +3444,39 @@ function runMigrations() {
           tags TEXT,
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now'))
-        );
-        INSERT INTO content_posts_new SELECT * FROM content_posts;
-        DROP TABLE content_posts;
-        ALTER TABLE content_posts_new RENAME TO content_posts;
+        )
+      `);
+
+      // Copy data with an explicit, column-aware mapping. A blind
+      // `INSERT ... SELECT *` breaks as soon as either table gains a column
+      // and (because exec swallows failures) can silently drop every post.
+      const oldCols = new Set(db.prepare("PRAGMA table_info(content_posts)").all().map(c => c.name));
+      const has = (c) => oldCols.has(c);
+      const expr = (c, fallback = 'NULL') => has(c) ? `"${c}"` : fallback;
+      const insertCols = [
+        'id','week','page','pillar','format','platform','hook','body','hashtags','cta','brief',
+        'post_date','post_time','asset_url','asset_type','asset_uploaded_by','asset_uploaded_at',
+        'status','quality_score','quality_checks','utm_source','utm_medium','utm_campaign',
+        'utm_content','short_link','redraft_count','research_intel_id','shares','comments','saves',
+        'video_views','leads','reach','engagement','published_at','published_by','language',
+        'campaign_id','assigned_to','reviewed_by','reviewed_at','rejection_reason','due_date',
+        'priority','notes','tags','created_at','updated_at'
+      ];
+      const selectCols = [
+        'id','week','page','pillar','format', has('platform') ? '"platform"' : "'facebook'",
+        'hook','body','hashtags', has('cta') ? '"cta"' : 'NULL','brief','post_date',
+        has('post_time') ? '"post_time"' : expr('slot_time'),
+        'asset_url','asset_type','asset_uploaded_by','asset_uploaded_at','status','quality_score',
+        'quality_checks','utm_source','utm_medium','utm_campaign','utm_content','short_link',
+        'redraft_count','research_intel_id','shares','comments','saves','video_views','leads',
+        'reach','engagement','published_at','published_by', has('language') ? '"language"' : "'bangla'",
+        'campaign_id','assigned_to','reviewed_by','reviewed_at','rejection_reason','due_date',
+        'priority','notes','tags','created_at','updated_at'
+      ];
+      db.prepare(`INSERT INTO content_posts_new (${insertCols.join(',')}) SELECT ${selectCols.join(',')} FROM content_posts`).run();
+      db.prepare('DROP TABLE content_posts').run();
+      db.prepare('ALTER TABLE content_posts_new RENAME TO content_posts').run();
+      db.exec(`
         CREATE INDEX IF NOT EXISTS idx_posts_status ON content_posts(status);
         CREATE INDEX IF NOT EXISTS idx_posts_page ON content_posts(page);
         CREATE INDEX IF NOT EXISTS idx_posts_campaign ON content_posts(campaign_id);
@@ -7678,6 +7786,352 @@ function dayRangeFor(period, anchorIso) {
 }
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CEO REMOTE COMMAND LAYER
+// Approvals, assigned tasks, and one exception-driven command snapshot.
+// Office time is Asia/Dhaka (UTC+6).
+// ─────────────────────────────────────────────────────────────────────────────
+function dhakaDate(offsetDays = 0) {
+  return new Date(Date.now() + 6 * 3600 * 1000 + offsetDays * 86400 * 1000).toISOString().slice(0, 10);
+}
+function dhakaHour() {
+  return new Date(Date.now() + 6 * 3600 * 1000).getUTCHours();
+}
+function monthBounds(monthIso) {
+  const [y, m] = String(monthIso).split('-').map(Number);
+  const start = `${y}-${String(m).padStart(2, '0')}-01`;
+  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return { start, end };
+}
+function daysBetween(isoA, isoB) {
+  const a = new Date(isoA + 'T00:00:00Z').getTime();
+  const b = new Date(isoB + 'T00:00:00Z').getTime();
+  return Math.round((b - a) / 86400000);
+}
+const APPROVAL_TYPES = new Set(['expense', 'refund', 'discount', 'document_release', 'other']);
+const APPROVAL_PRIORITIES = new Set(['low', 'normal', 'high', 'urgent']);
+const TASK_STATUSES = new Set(['open', 'in_progress', 'blocked', 'done', 'cancelled']);
+
+function approvalSummary() {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN priority IN ('urgent','high') THEN 1 ELSE 0 END),0) AS urgent,
+      COALESCE(SUM(amount),0) AS amount,
+      MIN(created_at) AS oldest
+    FROM approval_requests WHERE status='pending'
+  `).get();
+  return row || { total: 0, urgent: 0, amount: 0, oldest: null };
+}
+function taskSummary() {
+  const today = dhakaDate();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN status!='done' AND status!='cancelled' THEN 1 ELSE 0 END),0) AS open,
+      COALESCE(SUM(CASE WHEN status!='done' AND status!='cancelled' AND due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END),0) AS overdue,
+      COALESCE(SUM(CASE WHEN status='done' AND substr(completed_at,1,10)=? THEN 1 ELSE 0 END),0) AS done_today
+    FROM management_tasks
+  `).get(today, today);
+  return row || { total: 0, open: 0, overdue: 0, done_today: 0 };
+}
+
+// Lightweight badge counts used by the sidebar on every page.
+app.get('/api/ceo/badges', (req, res) => {
+  if (!isFullAdmin(req.user)) return res.json({ approvals: 0, tasks: 0, overdueTasks: 0 });
+  const a = approvalSummary();
+  const t = taskSummary();
+  res.json({ approvals: a.total, urgentApprovals: a.urgent, tasks: t.open, overdueTasks: t.overdue });
+});
+
+app.get('/api/ceo/command', (req, res) => requireAdmin(req, res, () => {
+  const today = dhakaDate();
+  const month = today.slice(0, 7);
+  const { start: monthStart, end: monthEnd } = monthBounds(month);
+  const last7 = dhakaDate(-6);
+  const last30 = dhakaDate(-29);
+
+  const pipelineRows = db.prepare("SELECT lead_status AS k, COUNT(*) AS n FROM leads GROUP BY lead_status ORDER BY n DESC").all();
+  const pipelineTotal = pipelineRows.reduce((s, r) => s + Number(r.n || 0), 0);
+  const statusCount = Object.fromEntries(pipelineRows.map(r => [r.k, Number(r.n || 0)]));
+
+  const newToday = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE date_added=? OR substr(created_at,1,10)=?").get(today, today).n;
+  const new7 = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)").get(last7, today, last7, today).n;
+  const new30 = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE (date_added BETWEEN ? AND ?) OR (substr(created_at,1,10) BETWEEN ? AND ?)").get(last30, today, last30, today).n;
+  const unassigned = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE (assigned_consultant IS NULL OR TRIM(assigned_consultant)='') AND lead_status NOT IN ('Enrolled','Not Interested')").get().n;
+  const noDestination = db.prepare("SELECT COUNT(*) AS n FROM leads WHERE (destination IS NULL OR TRIM(destination)='') AND lead_status NOT IN ('Not Interested')").get().n;
+  const overdueFollowups = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE next_followup IS NOT NULL AND next_followup < ?
+      AND lead_status NOT IN ('Enrolled','Not Interested')`).get(today).n;
+  const staleNewLeads = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE lead_status='New Lead' AND COALESCE(date_added, substr(created_at,1,10)) < ?
+      AND (next_followup IS NULL OR next_followup <= ?)`).get(dhakaDate(-3), today).n;
+
+  const activeApps = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE application_stage IS NOT NULL AND TRIM(application_stage)!=''
+      AND LOWER(application_stage) NOT IN ('none','completed','enrolled','visa approved','visa_approved','departed','registered')`).get().n;
+  const stalledApps = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE application_stage IS NOT NULL AND TRIM(application_stage)!=''
+      AND LOWER(application_stage) NOT IN ('none','completed','enrolled','visa approved','visa_approved','departed','registered')
+      AND COALESCE(date_added, substr(created_at,1,10)) < ?`).get(dhakaDate(-21)).n;
+  const visaDeadlines = db.prepare(`SELECT COUNT(*) AS n FROM leads
+    WHERE visa_deadline IS NOT NULL AND TRIM(visa_deadline)!='' AND visa_deadline BETWEEN ? AND ?`).get(today, dhakaDate(30)).n;
+
+  const cashInitial = parseFloat(getConfig('cash_initial')) || 0;
+  const allIncome = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income WHERE exclude_from_cash IS NULL OR exclude_from_cash=0").get().s;
+  const allExpense = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses").get().s;
+  const cash = cashInitial + allIncome - allExpense;
+  const monthIncome = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM income WHERE date BETWEEN ? AND ? AND (exclude_from_cash IS NULL OR exclude_from_cash=0)").get(monthStart, monthEnd).s;
+  const monthExpense = db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE date BETWEEN ? AND ?").get(monthStart, monthEnd).s;
+  const receivables = db.prepare("SELECT COALESCE(SUM(balance),0) AS s, COUNT(*) AS n FROM leads WHERE balance > 0").get();
+  const expenseMonths = db.prepare(`SELECT month, SUM(amount) AS total FROM expenses
+    WHERE month IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 3`).all();
+  const trailingBurn = expenseMonths.length ? expenseMonths.reduce((s, r) => s + Number(r.total || 0), 0) / expenseMonths.length : 0;
+  const runwayMonths = trailingBurn > 0 ? cash / trailingBurn : null;
+  const targetRow = db.prepare("SELECT COALESCE(SUM(target_revenue),0) AS revenue, COALESCE(SUM(target_enrolled),0) AS enrolled FROM kpi_targets WHERE month=?").get(month);
+  const collectedThisMonth = monthIncome;
+
+  const activeEmployees = db.prepare("SELECT COUNT(*) AS n FROM employees WHERE active='Yes'").get().n;
+  const employees = db.prepare("SELECT id,emp_id,name,role,salary FROM employees WHERE active='Yes' ORDER BY name").all();
+  const attendanceToday = db.prepare("SELECT emp_id,check_in,status,source FROM attendance WHERE date=?").all(today);
+  const logsToday = db.prepare("SELECT emp_id,submitted_at FROM daily_logs WHERE date=?").all(today);
+  const logMap = new Map(logsToday.map(l => [String(l.emp_id), l]));
+  const attMap = new Map(attendanceToday.map(a => [String(a.emp_id), a]));
+  const team = employees.map(e => {
+    const att = attMap.get(String(e.emp_id));
+    const log = logMap.get(String(e.emp_id));
+    const load = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE assigned_consultant=?
+      AND lead_status NOT IN ('Enrolled','Not Interested')`).get(e.name).n;
+    const overdue = db.prepare(`SELECT COUNT(*) AS n FROM leads WHERE assigned_consultant=?
+      AND next_followup IS NOT NULL AND next_followup < ? AND lead_status NOT IN ('Enrolled','Not Interested')`).get(e.name, today).n;
+    const taskRow = db.prepare(`SELECT COUNT(*) AS open, COALESCE(SUM(CASE WHEN due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END),0) AS overdue
+      FROM management_tasks WHERE (assigned_to=? OR assigned_user_id IN (SELECT id FROM users WHERE emp_id=?))
+      AND status NOT IN ('done','cancelled')`).get(today, e.name, e.emp_id);
+    const last = db.prepare("SELECT MAX(created_at) AS t FROM activity_log WHERE actor_name=?").get(e.name)?.t || null;
+    return {
+      emp_id: e.emp_id, name: e.name, role: e.role,
+      check_in: att?.check_in || null, attendance: att?.status || 'Not checked in',
+      log_submitted: !!log, log_at: log?.submitted_at || null,
+      leads: Number(load || 0), overdue_followups: Number(overdue || 0),
+      open_tasks: Number(taskRow?.open || 0), overdue_tasks: Number(taskRow?.overdue || 0),
+      last_activity: last,
+    };
+  });
+  const checkedIn = new Set(attendanceToday.map(a => String(a.emp_id))).size;
+  const logsSubmitted = new Set(logsToday.map(l => String(l.emp_id))).size;
+
+  const unread = db.prepare("SELECT COUNT(*) AS convs, COALESCE(SUM(unread_count),0) AS msgs FROM conversations WHERE unread_count > 0").get();
+  const openConvs = db.prepare("SELECT COUNT(*) AS n FROM conversations WHERE status='open'").get().n;
+
+  const approvals = approvalSummary();
+  const tasks = taskSummary();
+  const pendingApprovalRows = db.prepare("SELECT * FROM approval_requests WHERE status='pending' ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at ASC LIMIT 5").all();
+  const taskRows = db.prepare("SELECT * FROM management_tasks WHERE status NOT IN ('done','cancelled') ORDER BY CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END LIMIT 5").all();
+  const recentActivity = db.prepare("SELECT id,type,actor_name,lead_name,amount,from_value,to_value,details,created_at FROM activity_log ORDER BY id DESC LIMIT 10").all();
+  const lastLead = db.prepare("SELECT MAX(COALESCE(date_added, substr(created_at,1,10))) AS d FROM leads").get()?.d || null;
+  const lastActivity = db.prepare("SELECT MAX(created_at) AS t FROM activity_log").get()?.t || null;
+
+  // Data-quality and control exceptions, ordered by the cost of ignoring them.
+  const exceptions = [];
+  const addException = (severity, category, title, detail, count, href, actionLabel) => {
+    exceptions.push({ severity, category, title, detail, count, href, actionLabel });
+  };
+  if (approvals.total > 0) addException(approvals.urgent > 0 ? 'critical' : 'warning', 'Decision', 'Approvals waiting for you', `${approvals.total} request${approvals.total === 1 ? '' : 's'} pending${approvals.urgent ? `, ${approvals.urgent} high priority` : ''}.`, approvals.total, '/approvals', 'Review approvals');
+  if (tasks.overdue > 0) addException('critical', 'Execution', 'Overdue assigned tasks', `${tasks.overdue} task${tasks.overdue === 1 ? '' : 's'} passed the due date.`, tasks.overdue, '/tasks', 'Open tasks');
+  if (visaDeadlines > 0) addException('critical', 'Delivery', 'Visa deadlines within 30 days', `${visaDeadlines} student file${visaDeadlines === 1 ? '' : 's'} need visa-readiness attention.`, visaDeadlines, '/applications', 'Review applications');
+  if (stalledApps > 0) addException('warning', 'Delivery', 'Applications ageing in stage', `${stalledApps} active application${stalledApps === 1 ? '' : 's'} have been in the same stage for 21+ days.`, stalledApps, '/applications', 'Open applications');
+  if (staleNewLeads > 0) addException('warning', 'Pipeline', 'New leads without a next step', `${staleNewLeads} new lead${staleNewLeads === 1 ? '' : 's'} are older than 3 days with no scheduled follow-up.`, staleNewLeads, '/leads?status=New%20Lead', 'Work the pipeline');
+  if (unassigned > 0) addException('warning', 'Ownership', 'Leads without an owner', `${unassigned} open lead${unassigned === 1 ? '' : 's'} have no assigned consultant.`, unassigned, '/leads', 'Assign leads');
+  if (noDestination > 0) addException('warning', 'Data quality', 'Leads missing a destination', `${noDestination} lead record${noDestination === 1 ? '' : 's'} have no destination, so routing and destination reporting are unreliable.`, noDestination, '/leads', 'Clean records');
+  if (unread.convs > 0) addException('warning', 'Customer', 'Unread family messages', `${unread.convs} conversation${unread.convs === 1 ? '' : 's'} have ${unread.msgs} unread message${unread.msgs === 1 ? '' : 's'}.`, unread.convs, '/conversations', 'Open inbox');
+  if (runwayMonths !== null && runwayMonths < 2) addException(runwayMonths < 1 ? 'critical' : 'warning', 'Cash', 'Thin cash runway', `Cash covers about ${runwayMonths.toFixed(1)} month${runwayMonths.toFixed(1) === '1.0' ? '' : 's'} at the trailing three-month expense average.`, null, '/finance', 'Review finance');
+  if (dhakaHour() >= 11 && checkedIn < activeEmployees) addException('warning', 'Team', 'Team attendance gap', `${activeEmployees - checkedIn} active employee${activeEmployees - checkedIn === 1 ? '' : 's'} have not checked in today.`, activeEmployees - checkedIn, '/hr?tab=attendance', 'View attendance');
+  if (dhakaHour() >= 17 && logsSubmitted < activeEmployees) addException('warning', 'Team', 'Daily logs missing', `${activeEmployees - logsSubmitted} employee${activeEmployees - logsSubmitted === 1 ? '' : 's'} have not submitted today's log.`, activeEmployees - logsSubmitted, '/hr', 'View team');
+  const dupEmp = db.prepare("SELECT emp_id, COUNT(*) AS c FROM employees WHERE active='Yes' GROUP BY emp_id HAVING c > 1").all();
+  if (dupEmp.length > 0) addException('warning', 'Data quality', 'Duplicate employee IDs', `${dupEmp.length} employee ID${dupEmp.length === 1 ? '' : 's'} are shared by more than one active person (${dupEmp.map(d => d.emp_id).join(', ')}).`, dupEmp.length, '/hr?tab=team', 'Fix employee records');
+  if (lastLead && daysBetween(lastLead, today) > 3) addException('warning', 'Data freshness', 'No recent leads recorded', `The newest lead in this database is dated ${lastLead}. Check ingestion before trusting pipeline totals.`, null, '/leads', 'Inspect leads');
+
+  const order = { critical: 0, warning: 1, info: 2 };
+  exceptions.sort((a, b) => order[a.severity] - order[b.severity] || (b.count || 0) - (a.count || 0));
+
+  res.json({
+    generated_at: new Date().toISOString(),
+    today,
+    data_freshness: { last_lead: lastLead, last_activity: lastActivity, days_since_lead: lastLead ? daysBetween(lastLead, today) : null },
+    cash: { position: cash, trailing_burn: trailingBurn, runway_months: runwayMonths, initial: cashInitial },
+    month: { label: month, income: monthIncome, expense: monthExpense, profit: monthIncome - monthExpense, target_revenue: Number(targetRow?.revenue || 0), target_enrolled: Number(targetRow?.enrolled || 0), collected: collectedThisMonth },
+    pipeline: { total: pipelineTotal, new_today: newToday, new_7d: new7, new_30d: new30, unassigned, no_destination: noDestination, overdue_followups: overdueFollowups, by_status: pipelineRows },
+    delivery: { active_applications: activeApps, stalled_applications: stalledApps, visa_deadlines_30d: visaDeadlines },
+    customers: { open_conversations: openConvs, unread_conversations: Number(unread.convs || 0), unread_messages: Number(unread.msgs || 0) },
+    team: { active_staff: activeEmployees, checked_in: checkedIn, logs_submitted: logsSubmitted, missing_logs: Math.max(0, activeEmployees - logsSubmitted), people: team },
+    decisions: { pending_approvals: approvals.total, urgent_approvals: approvals.urgent, pending_amount: approvals.amount, oldest_approval: approvals.oldest, open_tasks: tasks.open, overdue_tasks: tasks.overdue, done_today: tasks.done_today },
+    approvals: pendingApprovalRows,
+    tasks: taskRows,
+    exceptions,
+    recent_activity: recentActivity,
+    receivables,
+  });
+}));
+
+// ── Approvals ───────────────────────────────────────────────────────────────
+app.get('/api/approvals', (req, res) => {
+  const status = String(req.query.status || '').trim();
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
+  const params = [];
+  let where = '';
+  if (['pending','approved','rejected','cancelled'].includes(status)) { where = 'WHERE status=?'; params.push(status); }
+  // Managers see the queue; everyone else sees only their own requests.
+  if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager')) {
+    where = where ? `${where} AND requested_by_id=?` : 'WHERE requested_by_id=?';
+    params.push(req.user.id);
+  }
+  const rows = db.prepare(`SELECT * FROM approval_requests ${where} ORDER BY
+    CASE status WHEN 'pending' THEN 0 ELSE 1 END,
+    CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+    created_at DESC LIMIT ${limit}`).all(...params);
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM approval_requests ${where}`).get(...params).n;
+  res.json({ rows, total });
+});
+
+app.get('/api/approvals/:id', (req, res) => {
+  const row = db.prepare("SELECT * FROM approval_requests WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Approval request not found' });
+  if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager') && Number(row.requested_by_id) !== Number(req.user.id)) {
+    return res.status(403).json({ error: 'Not your request' });
+  }
+  const events = db.prepare("SELECT * FROM approval_events WHERE approval_id=? ORDER BY id").all(row.id);
+  res.json({ ...row, events });
+});
+
+app.post('/api/approvals', (req, res) => {
+  if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager')) {
+    return res.status(403).json({ error: 'Manager or admin only' });
+  }
+  const d = req.body || {};
+  const title = String(d.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  const type = APPROVAL_TYPES.has(d.type) ? d.type : 'other';
+  const priority = APPROVAL_PRIORITIES.has(d.priority) ? d.priority : 'normal';
+  const amount = d.amount === '' || d.amount == null ? null : Number(d.amount);
+  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) return res.status(400).json({ error: 'Amount must be a positive number' });
+  const info = db.prepare(`INSERT INTO approval_requests
+      (type,title,description,amount,currency,lead_id,reference_type,reference_id,requested_by_id,requested_by,requested_by_role,status,priority,due_date)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`).run(
+    type, title.slice(0, 200), d.description ? String(d.description).slice(0, 5000) : null,
+    amount, String(d.currency || 'BDT').slice(0, 8), d.lead_id || null, d.reference_type || null, d.reference_id || null,
+    req.user.id, req.user.name || req.user.email || 'User', (req.user.roles?.[0] || req.user.role || ''), priority, d.due_date || null,
+  );
+  const id = info.lastInsertRowid;
+  const requestNo = `APR-${dhakaDate().slice(0, 4)}${dhakaDate().slice(5, 7)}-${String(id).padStart(4, '0')}`;
+  db.prepare("UPDATE approval_requests SET request_no=?, updated_at=datetime('now') WHERE id=?").run(requestNo, id);
+  db.prepare("INSERT INTO approval_events (approval_id,action,actor_id,actor_name,note) VALUES (?,?,?,?,?)").run(id, 'created', req.user.id, req.user.name || req.user.email, d.description ? String(d.description).slice(0, 500) : null);
+  logActivity({ type: 'approval_requested', actor: req.user, amount, details: { approval_id: id, request_no: requestNo, title, approval_type: type, priority } });
+  res.json(db.prepare("SELECT * FROM approval_requests WHERE id=?").get(id));
+});
+
+app.patch('/api/approvals/:id', (req, res) => {
+  const row = db.prepare("SELECT * FROM approval_requests WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Approval request not found' });
+  const action = String(req.body?.action || '').toLowerCase();
+  const note = String(req.body?.note || '').trim().slice(0, 2000);
+  if (!['approve', 'reject', 'cancel'].includes(action)) return res.status(400).json({ error: 'Action must be approve, reject or cancel' });
+  if (row.status !== 'pending') return res.status(409).json({ error: `Request is already ${row.status}` });
+  const isRequester = Number(row.requested_by_id) === Number(req.user.id);
+  if (action === 'cancel') {
+    if (!isRequester && !isFullAdmin(req.user)) return res.status(403).json({ error: 'Only the requester or an admin can cancel' });
+  } else {
+    if (!isFullAdmin(req.user)) return res.status(403).json({ error: 'Only the CEO or Managing Director can decide approvals' });
+    if (isRequester) return res.status(409).json({ error: 'You cannot approve or reject your own request' });
+    if (!note) return res.status(400).json({ error: 'A decision note is required' });
+  }
+  const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'cancelled';
+  db.prepare(`UPDATE approval_requests SET status=?, decided_by_id=?, decided_by=?, decided_at=datetime('now'), decision_note=?, updated_at=datetime('now') WHERE id=?`)
+    .run(status, req.user.id, req.user.name || req.user.email, note || null, row.id);
+  db.prepare("INSERT INTO approval_events (approval_id,action,actor_id,actor_name,note) VALUES (?,?,?,?,?)")
+    .run(row.id, status, req.user.id, req.user.name || req.user.email, note || null);
+  logActivity({ type: `approval_${status}`, actor: req.user, amount: row.amount, details: { approval_id: row.id, request_no: row.request_no, title: row.title, note: note || null } });
+  res.json(db.prepare("SELECT * FROM approval_requests WHERE id=?").get(row.id));
+});
+
+// ── Assigned tasks / CEO directives ─────────────────────────────────────────
+app.get('/api/tasks', (req, res) => {
+  const status = String(req.query.status || '').trim();
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 300);
+  const params = [];
+  const where = [];
+  if (status && TASK_STATUSES.has(status)) { where.push('status=?'); params.push(status); }
+  if (!isFullAdmin(req.user) && !userHasAnyRole(req.user, 'application_manager', 'marketing_manager')) {
+    where.push('(assigned_to=? OR assigned_user_id=?)');
+    params.push(req.user.name || '', req.user.id);
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const rows = db.prepare(`SELECT * FROM management_tasks ${clause} ORDER BY
+    CASE status WHEN 'blocked' THEN 0 WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+    CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC, created_at DESC LIMIT ${limit}`).all(...params);
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM management_tasks ${clause}`).get(...params).n;
+  res.json({ rows, total });
+});
+
+app.post('/api/tasks', (req, res) => requireManagerOrAdmin(req, res, () => {
+  const d = req.body || {};
+  const title = String(d.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  const assignedTo = String(d.assigned_to || '').trim();
+  const priority = ['low','normal','high','urgent'].includes(d.priority) ? d.priority : 'normal';
+  let assignedUserId = null;
+  if (assignedTo) {
+    const u = db.prepare("SELECT id FROM users WHERE LOWER(name)=LOWER(?) OR LOWER(email)=LOWER(?)").get(assignedTo, assignedTo);
+    assignedUserId = u?.id || null;
+  }
+  const info = db.prepare(`INSERT INTO management_tasks
+      (title,details,assigned_to,assigned_user_id,assigned_by,assigned_by_id,due_date,priority,status,category,lead_id)
+      VALUES (?,?,?,?,?,?,?,?,'open',?,?)`).run(
+    title.slice(0, 200), d.details ? String(d.details).slice(0, 5000) : null, assignedTo || null, assignedUserId,
+    req.user.name || req.user.email || 'User', req.user.id, d.due_date || null, priority, d.category || null, d.lead_id || null,
+  );
+  const row = db.prepare("SELECT * FROM management_tasks WHERE id=?").get(info.lastInsertRowid);
+  logActivity({ type: 'task_assigned', actor: req.user, details: { task_id: row.id, title: row.title, assigned_to: row.assigned_to, due_date: row.due_date, priority } });
+  res.json(row);
+}));
+
+app.patch('/api/tasks/:id', (req, res) => {
+  const row = db.prepare("SELECT * FROM management_tasks WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Task not found' });
+  const isManager = isFullAdmin(req.user) || userHasAnyRole(req.user, 'application_manager', 'marketing_manager');
+  const isAssignee = Number(row.assigned_user_id) === Number(req.user.id) || String(row.assigned_to || '').toLowerCase() === String(req.user.name || '').toLowerCase();
+  if (!isManager && !isAssignee) return res.status(403).json({ error: 'Not your task' });
+  const d = req.body || {};
+  const updates = [];
+  const params = [];
+  if (d.status !== undefined) {
+    if (!TASK_STATUSES.has(d.status)) return res.status(400).json({ error: 'Invalid status' });
+    updates.push('status=?'); params.push(d.status);
+    if (d.status === 'done') updates.push("completed_at=datetime('now')");
+    if (d.status !== 'done') updates.push('completed_at=NULL');
+  }
+  if (isManager) {
+    if (d.title !== undefined) { const t = String(d.title).trim(); if (!t) return res.status(400).json({ error: 'Title cannot be empty' }); updates.push('title=?'); params.push(t.slice(0,200)); }
+    if (d.details !== undefined) { updates.push('details=?'); params.push(d.details ? String(d.details).slice(0,5000) : null); }
+    if (d.assigned_to !== undefined) { const a = String(d.assigned_to || '').trim(); updates.push('assigned_to=?'); params.push(a || null); const u = a ? db.prepare("SELECT id FROM users WHERE LOWER(name)=LOWER(?) OR LOWER(email)=LOWER(?)").get(a, a) : null; updates.push('assigned_user_id=?'); params.push(u?.id || null); }
+    if (d.due_date !== undefined) { updates.push('due_date=?'); params.push(d.due_date || null); }
+    if (d.priority !== undefined) { if (!['low','normal','high','urgent'].includes(d.priority)) return res.status(400).json({ error: 'Invalid priority' }); updates.push('priority=?'); params.push(d.priority); }
+    if (d.category !== undefined) { updates.push('category=?'); params.push(d.category || null); }
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No changes supplied' });
+  updates.push('updated_at=datetime(\'now\')');
+  params.push(row.id);
+  db.prepare(`UPDATE management_tasks SET ${updates.join(', ')} WHERE id=?`).run(...params);
+  const updated = db.prepare("SELECT * FROM management_tasks WHERE id=?").get(row.id);
+  logActivity({ type: updated.status === 'done' ? 'task_completed' : 'task_updated', actor: req.user, details: { task_id: row.id, title: updated.title, status: updated.status, assigned_to: updated.assigned_to } });
+  res.json(updated);
+});
+
+app.delete('/api/tasks/:id', (req, res) => requireAdmin(req, res, () => {
+  const row = db.prepare("SELECT * FROM management_tasks WHERE id=?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Task not found' });
+  db.prepare("DELETE FROM management_tasks WHERE id=?").run(row.id);
+  logActivity({ type: 'task_deleted', actor: req.user, details: { task_id: row.id, title: row.title } });
+  res.json({ ok: true });
+}));
+
 app.get('/api/reports', (req, res) => requireManagerOrAdmin(req, res, () => {
   const period = req.query.period === 'week' ? 'week' : 'month';
   const anchor = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
@@ -7776,9 +8230,37 @@ app.get('/api/reports', (req, res) => requireManagerOrAdmin(req, res, () => {
 
   const delta = (cur, prev) => prev === 0 ? (cur > 0 ? 100 : 0) : Math.round(((cur - prev) / prev) * 100);
 
+  // Daily series for the in-app performance trend. This is computed from real
+  // activity; the client must never fall back to sample numbers.
+  const trendRows = db.prepare(`
+    WITH RECURSIVE dates(day) AS (
+      SELECT ?
+      UNION ALL
+      SELECT date(day, '+1 day') FROM dates WHERE day < ?
+    )
+    SELECT day,
+      (SELECT COUNT(*) FROM leads l
+        WHERE l.date_added = day OR substr(l.created_at,1,10) = day) AS leads,
+      (SELECT COALESCE(SUM(i.amount),0) FROM income i
+        WHERE i.date = day AND (i.exclude_from_cash IS NULL OR i.exclude_from_cash = 0)) AS revenue
+    FROM dates
+  `).all(startStr, endStr);
+  const trend = trendRows.map(r => {
+    const d = new Date(r.day + 'T00:00:00Z');
+    return {
+      date: r.day,
+      day: period === 'week'
+        ? d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })
+        : String(d.getUTCDate()),
+      leads: Number(r.leads) || 0,
+      revenue: Number(r.revenue) || 0,
+    };
+  });
+
   res.json({
     period: { type: period, start: startStr, end: endStr, label: range.label,
               previousStart: prevStartStr, previousEnd: prevEndStr, previousLabel: range.prevLabel },
+    trend,
     headline: {
       new_leads:    { current: newLeadsRow.n, previous: newLeadsPrev.n, delta: delta(newLeadsRow.n, newLeadsPrev.n) },
       enrolments:   { current: enrolled, previous: enrolledPrev, delta: delta(enrolled, enrolledPrev) },
@@ -10127,7 +10609,7 @@ function marketingCrud(path, table, cols) {
   }));
 }
 
-const POST_COLS = ['week','post_date','slot_time','page','pillar','format','hook','body','hashtags','brief','asset_url','status','rejection_reason','published_url','reach','engagement','source'];
+const POST_COLS = ['week','post_date','post_time','page','platform','pillar','format','hook','body','hashtags','cta','language','brief','asset_url','asset_type','status','rejection_reason','due_date','priority','notes','tags','campaign_id','assigned_to','quality_score','reach','engagement'];
 
 // ── Content posts (weekly calendar) ──
 app.get('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
@@ -10136,7 +10618,7 @@ app.get('/api/marketing/posts', (req, res) => requireMarketing(req, res, () => {
   if (week)   { where.push('week=?');   params.push(week); }
   if (page)   { where.push('page=?');   params.push(page); }
   if (status) { where.push('status=?'); params.push(status); }
-  const sql = `SELECT * FROM content_posts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY post_date, slot_time`;
+  const sql = `SELECT * FROM content_posts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY post_date, post_time`;
   res.json(db.prepare(sql).all(...params));
 }));
 
@@ -10474,7 +10956,7 @@ app.get('/api/marketing/research/active', (req, res) => requireMarketing(req, re
   const rows = db.prepare(`
     SELECT * FROM research_intelligence
     WHERE status IN ('new','reviewed') AND (urgency IN ('critical','high') OR category IN ('viral_signal','offer_alert','trending_topic'))
-    ORDER BY urgency_sort, research_date DESC
+    ORDER BY CASE urgency WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, research_date DESC
     LIMIT 20
   `).all();
   res.json(rows);
@@ -11380,18 +11862,29 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 let isBackgroundSyncing = false;
+let backgroundSyncPausedUntil = 0;
 
 // Background loop to poll Facebook for new messages because webhooks are dropped in Development mode
 setInterval(async () => {
   try {
     if (!dbReady || isBackgroundSyncing) return;
+    if (Date.now() < backgroundSyncPausedUntil) return;
     isBackgroundSyncing = true;
     const channels = db.prepare("SELECT id, name, type FROM channels WHERE type IN ('messenger', 'instagram') AND active = 1").all();
     for (const channel of channels) {
       // Run a fast, 1-month sync (max 5 conversations) in the background to prevent WASM OOM crashes
       await syncChannelMessages(channel.id, 1, 5).catch(err => {
-        console.warn(`[sync-polling-loop] Sync failed for channel ${channel.name}:`, err.message);
+        const message = String(err?.message || err);
+        if (/code=190|OAuthException|invalid.*access token|validating access token|session has expired/i.test(message)) {
+          // An expired Meta token cannot recover by retrying every 15s. Pause
+          // background polling for an hour and log a single actionable line.
+          backgroundSyncPausedUntil = Date.now() + 60 * 60 * 1000;
+          console.warn('[sync-polling-loop] Meta access token is invalid or expired — background sync paused for 60 minutes. Refresh the channel token in Settings → Integrations.');
+          return;
+        }
+        console.warn(`[sync-polling-loop] Sync failed for channel ${channel.name}:`, message);
       });
+      if (Date.now() < backgroundSyncPausedUntil) break;
     }
   } catch (err) {
     console.error('[sync-polling-loop] Global error in background loop:', err.message);

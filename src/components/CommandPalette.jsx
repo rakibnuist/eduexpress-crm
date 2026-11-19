@@ -8,20 +8,22 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import {
   Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Users,
-  Plane, DollarSign, UserCheck, Settings, GraduationCap,
+  Plane, DollarSign, UserCheck, Settings, GraduationCap, ClipboardCheck, ListChecks,
 } from 'lucide-react';
 import { isFullAdmin, userHasAnyRole } from '../lib/roles';
 
 const PAGES = [
-  { id: 'dashboard',    label: 'Dashboard',      to: '/',             icon: LayoutDashboard, keys: 'home dashboard' },
-  { id: 'cockpit',      label: 'Cockpit',        to: '/cockpit',      icon: Eye,             keys: 'cockpit live alerts',     staffOnly: true },
-  { id: 'reports',      label: 'Reports',        to: '/reports',      icon: FileBarChart,    keys: 'reports weekly monthly',  staffOnly: true },
-  { id: 'my-day',       label: 'My Day',         to: '/my-day',       icon: Sun,             keys: 'my day daily log' },
-  { id: 'leads',        label: 'Leads & Pipeline', to: '/leads',        icon: Users,           keys: 'leads students pipeline sales board kanban' },
-  { id: 'applications', label: 'Applications',   to: '/applications', icon: Plane,           keys: 'applications kanban' },
-  { id: 'finance',      label: 'Finance',        to: '/finance',      icon: DollarSign,      keys: 'finance cashflow money',  adminOnly: true },
-  { id: 'hr',           label: 'HR',             to: '/hr',           icon: UserCheck,       keys: 'hr consultants attendance payroll', adminOnly: true },
-  { id: 'settings',     label: 'Settings',       to: '/settings',     icon: Settings,        keys: 'settings users import',   adminOnly: true },
+  { id: 'home',         label: 'Command Center',  to: '/',             icon: LayoutDashboard, keys: 'home command center ceo dashboard' },
+  { id: 'approvals',    label: 'Approvals',       to: '/approvals',    icon: ClipboardCheck,  keys: 'approvals decisions refund expense waiver audit', staffOnly: true },
+  { id: 'tasks',        label: 'Tasks & Directives', to: '/tasks',     icon: ListChecks,      keys: 'tasks directives assign follow up' },
+  { id: 'cockpit',      label: 'Live Office',     to: '/cockpit',      icon: Eye,             keys: 'cockpit live alerts',     staffOnly: true },
+  { id: 'reports',      label: 'Reports',         to: '/reports',      icon: FileBarChart,    keys: 'reports weekly monthly',  staffOnly: true },
+  { id: 'my-day',       label: 'My Day',          to: '/my-day',       icon: Sun,             keys: 'my day daily log' },
+  { id: 'leads',        label: 'Leads & Pipeline', to: '/leads',       icon: Users,           keys: 'leads students pipeline sales board kanban' },
+  { id: 'applications', label: 'Applications',    to: '/applications', icon: Plane,           keys: 'applications kanban' },
+  { id: 'finance',      label: 'Finance',         to: '/finance',      icon: DollarSign,      keys: 'finance cashflow money',  adminOnly: true },
+  { id: 'hr',           label: 'HR',              to: '/hr',           icon: UserCheck,       keys: 'hr consultants attendance payroll', adminOnly: true },
+  { id: 'settings',     label: 'Settings',        to: '/settings',     icon: Settings,        keys: 'settings users import',   adminOnly: true },
 ];
 
 export default function CommandPalette({ user }) {
@@ -52,9 +54,10 @@ export default function CommandPalette({ user }) {
 
   const isAdmin = isFullAdmin(user);
   const isStaff = isAdmin || userHasAnyRole(user, 'application_manager', 'marketing_manager');
-  const visiblePages = useMemo(() => PAGES.filter(p =>
-    (!p.staffOnly || isStaff) && (!p.adminOnly || isAdmin)
-  ), [isStaff, isAdmin]);
+  const visiblePages = useMemo(() => PAGES
+    .filter(p => (!p.staffOnly || isStaff) && (!p.adminOnly || isAdmin))
+    .map(p => p.id === 'home' ? { ...p, label: isAdmin ? 'Command Center' : 'My Dashboard' } : p),
+  [isStaff, isAdmin]);
 
   // Search effect: debounced lead lookup + page filter
   useEffect(() => {
