@@ -193,7 +193,10 @@ export default function CommandCenter({ user }) {
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2"><UserCheck size={16} /> Team today</h2>
                 <p className="text-[10px] text-slate-400 mt-0.5">{team.checked_in}/{team.active_staff} checked in · {team.logs_submitted} daily logs</p>
               </div>
-              <Link to="/hr" className="text-xs font-semibold text-blue-600 flex items-center gap-1">HR <ChevronRight size={13} /></Link>
+              <div className="flex items-center gap-3">
+                <Link to="/kpi" className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-0.5">KPI Trace <ChevronRight size={13} /></Link>
+                <Link to="/hr" className="text-xs font-semibold text-slate-500 hover:text-blue-600 flex items-center gap-0.5">HR <ChevronRight size={13} /></Link>
+              </div>
             </div>
             <div className="space-y-2 mt-3">
               {team.people.map(p => (

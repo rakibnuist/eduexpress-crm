@@ -14,6 +14,9 @@ import {
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/Confirm';
 import {
+  TeamKpiWorkflowView, WorkflowTargetsForm, EMPLOYEE_ROLES, getRoleBadges
+} from '../components/EmployeeKpiWorkflow';
+import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Legend, CartesianGrid, PieChart, Pie, Cell, Area, AreaChart
 } from 'recharts';
@@ -193,7 +196,7 @@ export default function HR({ user }) {
       </div>
 
       {/* ── PERFORMANCE TAB ── */}
-      {tab === 'performance' && <PerformanceTab month={month} />}
+      {tab === 'performance' && <TeamKpiWorkflowView month={month} user={user} onRefreshExternal={load} />}
 
       {/* ── EMPLOYEES TAB ── */}
       {tab === 'employees' && (
@@ -474,247 +477,6 @@ export default function HR({ user }) {
           <AttendanceForm employees={employees} onSave={() => { setModal(null); load(); }} />
         </Modal>
       )}
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════
-   PERFORMANCE TAB — Team Scoreboard
-   ════════════════════════════════════════════ */
-function PerformanceTab({ month }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [picked, setPicked] = useState(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    api.employeeKpi(month).then(d => { setData(d); }).finally(() => setLoading(false));
-  }, [month]);
-  useEffect(() => { load(); }, [load]);
-
-  if (loading && !data) return <div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>;
-  if (!data || data.employees.length === 0) {
-    return <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
-      <Users size={36} className="text-slate-300 mx-auto mb-3" />
-      <p className="font-bold">No active consultants this month</p>
-      <p className="text-xs text-slate-400 mt-1">Add consultants in the Team tab first</p>
-    </div>;
-  }
-
-  const top = data.employees[0];
-
-  return (
-    <div className="space-y-5">
-      {/* Top performer banner */}
-      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-48 h-48 bg-amber-300/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white font-bold text-xl flex items-center justify-center shadow-lg">
-              <Crown size={28} />
-            </div>
-            <div>
-              <p className="text-xs uppercase text-amber-600 font-bold tracking-wider">Top performer</p>
-              <p className="text-xl font-bold text-slate-800">{top.name}</p>
-              <p className="text-xs text-slate-500 font-medium">Score {top.score} · {top.attendance.attendancePct}% attendance · {top.office_work.logsSubmitted}/{top.office_work.effWorking} daily logs</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 bg-white/50 px-3 py-1.5 rounded-full border border-amber-100">
-            <Calendar size={12} />
-            <span>{data.effWorking}/{data.workingDays} working days completed</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Performance grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {data.employees.map(e => (
-          <PerfCard key={e.id || e.emp_id} e={e} onClick={() => setPicked(e.emp_id)} />
-        ))}
-      </div>
-
-      {picked && (
-        <PerfDrilldown emp_id={picked} month={month} onClose={() => setPicked(null)} />
-      )}
-    </div>
-  );
-}
-
-function PerfCard({ e, onClick }) {
-  const scoreColor = e.score >= 70 ? 'text-emerald-600' : e.score >= 40 ? 'text-amber-600' : 'text-rose-600';
-  const ring = e.score >= 70 ? 'ring-emerald-200' : e.score >= 40 ? 'ring-amber-200' : 'ring-rose-200';
-
-  return (
-    <button onClick={onClick}
-      className={`text-left bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-lg hover:border-blue-300 transition-all ring-4 ring-transparent hover:${ring} shadow-sm`}>
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
-            {e.name?.[0]?.toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <p className="font-bold text-slate-800 truncate">{e.name}</p>
-            <div className="flex flex-wrap gap-1 mt-0.5">
-              {getRoleBadges(e.role).map((r, i) => (
-                <span key={i} className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${r.color}`}>{r.label}</span>
-              ))}
-              {getRoleBadges(e.role).length === 0 && <span className="text-xs text-slate-400 truncate">—</span>}
-            </div>
-          </div>
-        </div>
-        <div className="text-right flex-shrink-0">
-          <p className={`text-3xl font-extrabold ${scoreColor} leading-none`}>{e.score}</p>
-          <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mt-1">score</p>
-        </div>
-      </div>
-
-      <SignalRow label="Attendance" pct={e.attendance.attendancePct}
-        right={`${e.attendance.present + e.attendance.late}/${e.attendance.workingDays} days · ${e.attendance.late} late`} color="emerald" />
-      <SignalRow label="Daily logs" pct={e.office_work.logPct}
-        right={`${e.office_work.logsSubmitted}/${e.office_work.effWorking} ${e.office_work.streak ? `· 🔥 ${e.office_work.streak}` : ''}`} color="amber" />
-      <SignalRow label="Activity" pct={Math.min(100, Math.round((e.activity.score / Math.max(1, e.office_work.effWorking * 12)) * 100))}
-        right={`${e.activity.total} events`} color="blue" />
-
-      <div className="flex flex-wrap gap-1.5 mt-4">
-        {[
-          { key: 'lead_work', label: 'Lead touches', cls: 'bg-blue-50 text-blue-700 border border-blue-100' },
-          { key: 'payments', label: 'Payments', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
-          { key: 'application', label: 'Applications', cls: 'bg-violet-50 text-violet-700 border border-violet-100' },
-          { key: 'communication', label: 'Messages', cls: 'bg-amber-50 text-amber-700 border border-amber-100' },
-        ].map(g => (
-          (e.activity.by_group[g.key] || 0) > 0 && (
-            <span key={g.key} className={`text-[10px] font-bold px-2 py-1 rounded-full ${g.cls}`}>
-              {g.label} · {e.activity.by_group[g.key]}
-            </span>
-          )
-        ))}
-        {e.activity.total === 0 && <span className="text-[10px] text-slate-300 italic">No system activity recorded</span>}
-      </div>
-    </button>
-  );
-}
-
-function SignalRow({ label, pct, right, color }) {
-  const cls = { emerald: 'bg-emerald-400', amber: 'bg-amber-400', blue: 'bg-blue-400' }[color] || 'bg-slate-400';
-  return (
-    <div className="mb-2.5">
-      <div className="flex justify-between text-[11px] mb-1">
-        <span className="text-slate-500 font-bold">{label}</span>
-        <span className="text-slate-600 font-bold">{right}</span>
-      </div>
-      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full ${cls} rounded-full`} style={{ width: `${Math.max(2, pct)}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function PerfDrilldown({ emp_id, month, onClose }) {
-  const [data, setData] = useState(null);
-  useEffect(() => { api.employeeKpiOne(emp_id, month).then(setData); }, [emp_id, month]);
-  if (!data) return null;
-  const { employee, attendance, logs, activity } = data;
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white h-full w-full max-w-2xl overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold flex items-center justify-center">
-              {employee.name?.[0]?.toUpperCase()}
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-slate-800">{employee.name}</h3>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {getRoleBadges(employee.role).map((r, i) => (
-                  <span key={i} className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${r.color}`}>{r.label}</span>
-                ))}
-                <span className="text-xs text-slate-500">{employee.emp_id} · {month}</span>
-              </div>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-6">
-          {/* Daily logs */}
-          <div>
-            <p className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Pencil size={14} className="text-slate-400"/> Daily logs ({logs.length})</p>
-            {logs.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No daily logs submitted yet this month.</p>
-            ) : (
-              <div className="space-y-2">
-                {logs.slice(0, 10).map(l => (
-                  <div key={l.id} className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <p className="font-bold text-slate-700 text-sm">{l.date}</p>
-                      <p className="text-[10px] text-slate-400">submitted {l.submitted_at?.slice(0,16)}</p>
-                    </div>
-                    <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed"><strong className="text-slate-700">Did:</strong> {l.accomplishments}</p>
-                    {l.challenges && <p className="text-xs text-slate-600 whitespace-pre-wrap mt-1 leading-relaxed"><strong className="text-slate-700">Blockers:</strong> {l.challenges}</p>}
-                    {l.tomorrow_plan && <p className="text-xs text-slate-600 whitespace-pre-wrap mt-1 leading-relaxed"><strong className="text-slate-700">Tomorrow:</strong> {l.tomorrow_plan}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Attendance */}
-          <div>
-            <p className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Clock size={14} className="text-slate-400"/> Attendance ({attendance.length})</p>
-            {attendance.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No attendance recorded.</p>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-100">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
-                    <tr><th className="text-left px-3 py-2.5 font-bold">Date</th>
-                        <th className="text-left px-3 py-2.5 font-bold">Status</th>
-                        <th className="text-left px-3 py-2.5 font-bold">In</th>
-                        <th className="text-left px-3 py-2.5 font-bold">Out</th>
-                        <th className="text-right px-3 py-2.5 font-bold">Hours</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {attendance.slice().reverse().slice(0, 14).map(a => (
-                      <tr key={a.id} className="hover:bg-slate-50">
-                        <td className="px-3 py-2 font-bold">{a.date}</td>
-                        <td className="px-3 py-2">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.status === 'Late' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{a.status}</span>
-                        </td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-slate-600">{a.check_in || '—'}</td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-slate-600">{a.check_out || '—'}</td>
-                        <td className="px-3 py-2 text-right tabular-nums font-bold">{a.hours_worked ? `${a.hours_worked.toFixed?.(1) || a.hours_worked}h` : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Activity */}
-          <div>
-            <p className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><TrendingUp size={14} className="text-slate-400"/> Activity ({activity.length})</p>
-            {activity.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No activity recorded for this consultant.</p>
-            ) : (
-              <div className="space-y-1 max-h-96 overflow-y-auto rounded-xl border border-slate-100 p-2">
-                {activity.map(a => (
-                  <div key={a.id} className="text-xs flex items-baseline gap-2 py-2 px-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 rounded-lg">
-                    <span className="text-slate-400 tabular-nums font-mono">{(a.created_at || '').slice(0, 10)}</span>
-                    <span className="text-slate-500 font-bold">{a.type.replace(/_/g, ' ')}</span>
-                    {a.lead_name && <span className="text-slate-700 truncate font-medium">{a.lead_name}</span>}
-                    {a.to_value && <span className="text-slate-400 italic truncate">→ {a.to_value}</span>}
-                    {a.amount && <span className="text-emerald-600 font-bold tabular-nums">৳{Number(a.amount).toLocaleString()}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1141,7 +903,7 @@ function KPITab({ kpis, month, onRefresh }) {
 
       {editTarget && (
         <Modal title={`Set Targets — ${editTarget.consultant}`} onClose={() => setEditTarget(null)}>
-          <TargetForm kpi={editTarget} month={month} onSave={() => { setEditTarget(null); onRefresh(); }} />
+          <WorkflowTargetsForm emp={{ name: editTarget.consultant, targets: editTarget }} month={month} onSave={() => { setEditTarget(null); onRefresh(); }} />
         </Modal>
       )}
     </div>
@@ -1242,26 +1004,6 @@ function MiniStat({ label, value, color }) {
 /* ════════════════════════════════════════════
    HELPERS / FORMS
    ════════════════════════════════════════════ */
-
-// Available designation/role options for consultant records
-const EMPLOYEE_ROLES = [
-  { key: 'founder_ceo', label: 'Founder & CEO', color: 'bg-purple-50 text-purple-700 border-purple-200' },
-  { key: 'managing_director', label: 'Managing Director', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  { key: 'investor', label: 'Investor', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  { key: 'consultant', label: 'Consultant', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  { key: 'application_manager', label: 'Application Manager', color: 'bg-amber-50 text-amber-700 border-amber-200' },
-  { key: 'marketing_manager', label: 'Marketing Manager', color: 'bg-rose-50 text-rose-700 border-rose-200' },
-  { key: 'hr_manager', label: 'HR Manager', color: 'bg-teal-50 text-teal-700 border-teal-200' },
-  { key: 'admin', label: 'Admin', color: 'bg-slate-100 text-slate-700 border-slate-200' },
-];
-
-function getRoleBadges(roleString) {
-  if (!roleString) return [];
-  return roleString.split(',').map(r => r.trim()).filter(Boolean).map(r => {
-    const found = EMPLOYEE_ROLES.find(opt => opt.key === r);
-    return { key: r, label: found?.label || r, color: found?.color || 'bg-slate-50 text-slate-700 border-slate-200' };
-  });
-}
 
 function EmpForm({ emp, onSave }) {
   const [form, setForm] = useState(() => {
@@ -1449,59 +1191,6 @@ function AttendanceForm({ employees, onSave }) {
       <div className="col-span-2 flex justify-end pt-1">
         <button type="submit" disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 disabled:opacity-60 transition-colors">
           {saving ? 'Saving…' : 'Log Attendance'}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function TargetForm({ kpi, month, onSave }) {
-  const [form, setForm] = useState({
-    consultant: kpi.consultant,
-    month,
-    target_leads: kpi.target_leads || '',
-    target_enrolled: kpi.target_enrolled || '',
-    target_revenue: kpi.target_revenue || '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState('');
-  const toast = useToast();
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  async function submit(e) {
-    e.preventDefault();
-    setSaving(true);
-    setErr('');
-    try {
-      await api.setKpiTargets({
-        consultant: form.consultant,
-        month: form.month,
-        target_leads: Number(form.target_leads) || 0,
-        target_enrolled: Number(form.target_enrolled) || 0,
-        target_revenue: Number(form.target_revenue) || 0,
-      });
-      toast.success(`Targets saved for ${kpi.consultant}`);
-      onSave();
-    } catch(e) {
-      setErr(e.message);
-      toast.error('Failed to save targets: ' + e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-slate-500">Set monthly targets for <strong>{kpi.consultant}</strong> in <strong>{month}</strong></p>
-      {[['target_leads', 'Target New Leads'], ['target_enrolled', 'Target File Opens'], ['target_revenue', 'Target Revenue (BDT)']].map(([k, l]) => (
-        <div key={k}>
-          <label className="block text-xs font-bold text-slate-600 mb-1">{l}</label>
-          <input type="number" min="0" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none"
-            value={form[k]} onChange={e => set(k, e.target.value)} placeholder="0" />
-        </div>
-      ))}
-      {err && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
-      <div className="flex justify-end pt-1">
-        <button type="submit" disabled={saving} className="bg-indigo-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-60 transition-colors">
-          {saving ? 'Saving…' : 'Save Targets'}
         </button>
       </div>
     </form>

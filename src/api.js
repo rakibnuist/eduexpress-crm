@@ -208,8 +208,9 @@ export const api = {
   // Reports (weekly/monthly digest)
   report:         (period, date) => req('/reports?' + toQuery({ period, date })),
 
-  // Employee performance
+  // Employee performance & workflow tracing
   employeeKpi:    (month) => req('/employee-kpi?' + toQuery({ month })),
+  myKpi:          (month) => req('/employee-kpi/me?' + toQuery({ month })),
   employeeKpiOne: (emp_id, month) => req(`/employee-kpi/${emp_id}?` + toQuery({ month })),
   dailyLogs:      (params = {}) => req('/daily-logs?' + toQuery(params)),
   dailyLogsToday: ()         => req('/daily-logs/me/today'),

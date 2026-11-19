@@ -239,6 +239,15 @@ export const NAV_ITEMS = [
     roles: ['founder_ceo', 'managing_director', 'investor', 'consultant', 'application_manager', 'marketing_manager'],
   },
   {
+    id: 'kpi_workflow',
+    to: '/kpi',
+    icon: 'Activity',
+    label: 'KPI & Workflow',
+    group: 'Operations',
+    permission: PERMISSIONS.VIEW_MY_DAY,
+    roles: ['founder_ceo', 'managing_director', 'consultant', 'application_manager', 'marketing_manager'],
+  },
+  {
     id: 'leads',
     to: '/leads',
     icon: 'Users',
@@ -373,7 +382,7 @@ export const NAV_GROUPS = ['Command', 'Operations', 'Growth', 'Control', 'Admini
 // ─── Icon Map (for dynamic import or string-based lookup) ───────────────────
 // These are the Lucide icon names used in NAV_ITEMS
 export const ICON_NAMES = [
-  'LayoutDashboard', 'Command', 'Eye', 'FileBarChart', 'Sun', 'Users', 'Plane',
+  'LayoutDashboard', 'Command', 'Eye', 'FileBarChart', 'Sun', 'Activity', 'Users', 'Plane',
   'PlusCircle', 'MessageSquare', 'Megaphone', 'Zap', 'DollarSign',
   'UserCheck', 'Settings', 'Globe', 'ClipboardCheck', 'ListChecks',
 ];

@@ -7,7 +7,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import {
-  Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Users,
+  Search, X, ArrowRight, LayoutDashboard, Eye, FileBarChart, Sun, Activity, Users,
   Plane, DollarSign, UserCheck, Settings, GraduationCap, ClipboardCheck, ListChecks,
 } from 'lucide-react';
 import { isFullAdmin, userHasAnyRole } from '../lib/roles';
@@ -16,6 +16,7 @@ const PAGES = [
   { id: 'home',         label: 'Command Center',  to: '/',             icon: LayoutDashboard, keys: 'home command center ceo dashboard' },
   { id: 'approvals',    label: 'Approvals',       to: '/approvals',    icon: ClipboardCheck,  keys: 'approvals decisions refund expense waiver audit', staffOnly: true },
   { id: 'tasks',        label: 'Tasks & Directives', to: '/tasks',     icon: ListChecks,      keys: 'tasks directives assign follow up' },
+  { id: 'kpi',          label: 'KPI & Workflow',  to: '/kpi',          icon: Activity,        keys: 'kpi workflow performance sla trace employees targets' },
   { id: 'cockpit',      label: 'Live Office',     to: '/cockpit',      icon: Eye,             keys: 'cockpit live alerts',     staffOnly: true },
   { id: 'reports',      label: 'Reports',         to: '/reports',      icon: FileBarChart,    keys: 'reports weekly monthly',  staffOnly: true },
   { id: 'my-day',       label: 'My Day',          to: '/my-day',       icon: Sun,             keys: 'my day daily log' },

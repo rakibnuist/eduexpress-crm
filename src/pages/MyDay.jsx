@@ -8,13 +8,15 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useToast } from '../components/Toast';
 import { isFullAdmin } from '../lib/roles';
+import { bdtToday } from '../lib/format';
+import { ScorePill } from '../components/EmployeeKpiWorkflow';
 import {
   Sun, Send, Clock, CheckCircle2, AlertCircle, ChevronRight, Loader2,
   Calendar, History, Sparkles, Pencil, PhoneCall, Building2, FolderOpen, XCircle, Wifi, LogIn, LogOut,
-  Flame, Heart, Target, Coffee, Sunrise, Star, Zap, UserPlus, ArrowRight, ListChecks
+  Flame, Heart, Target, Coffee, Sunrise, Star, Zap, UserPlus, ArrowRight, ListChecks, Activity, AlertTriangle
 } from 'lucide-react';
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => bdtToday();
 const greeting = () => {
   const h = new Date().getHours();
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
@@ -31,7 +33,8 @@ export default function MyDay({ user }) {
   const [saved, setSaved]         = useState(false);
   const [attnLog, setAttnLog]     = useState(null);
   const [directives, setDirectives] = useState([]);
-  const [metrics, setMetrics]     = useState({ contacted: 0, followup: 0, positive: 0, negative: 0, visited: 0, opened: 0 });
+  const [myKpi, setMyKpi]           = useState(null);
+  const [metrics, setMetrics]       = useState({ contacted: 0, followup: 0, positive: 0, negative: 0, visited: 0, opened: 0 });
   const [linking, setLinking]     = useState(false);
   const toast = useToast();
 
@@ -76,6 +79,9 @@ export default function MyDay({ user }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [user]);
   useEffect(() => { api.dailyLogs({}).then(rs => setHistory((rs || []).slice(0, 14))).catch(() => {}); }, []);
+  useEffect(() => {
+    api.myKpi(todayISO().slice(0, 7)).then(setMyKpi).catch(() => setMyKpi(null));
+  }, [user]);
 
   // CEO/manager-assigned directives that belong to this person.
   useEffect(() => {
@@ -99,9 +105,8 @@ export default function MyDay({ user }) {
   };
 
   useEffect(() => {
-    const localStart = new Date();
-    localStart.setHours(0, 0, 0, 0);
-    const sinceStr = localStart.toISOString().replace('T', ' ').slice(0, 19);
+    const dhakaMidnightUtc = new Date(Date.parse(`${todayISO()}T00:00:00Z`) - 6 * 3600 * 1000);
+    const sinceStr = dhakaMidnightUtc.toISOString().replace('T', ' ').slice(0, 19);
     api.activity({ since: sinceStr, limit: 200 })
       .then(rows => {
         const mine = (rows || []).filter(a => 
@@ -121,7 +126,7 @@ export default function MyDay({ user }) {
         const negative = mine.filter(a => a.type === 'lead_status_changed' && a.to_value === 'Not Interested').length;
         const visited = mine.filter(a => a.type === 'lead_status_changed' && a.to_value === 'Office Visited').length;
         const opened = mine.filter(a => a.type === 'lead_status_changed' && a.to_value === 'File Opened').length;
-        const notes = mine.filter(a => a.type === 'lead_note_added' || a.type === 'note_added').length;
+        const notes = mine.filter(a => ['note', 'lead_note_added', 'note_added'].includes(a.type)).length;
 
         setAuto({
           total: mine.length, 
@@ -375,6 +380,58 @@ export default function MyDay({ user }) {
         <PersonalCard label="Not Interested" value={autoSummary?.negative || 0} sub="Nurtures stopped"
           icon={<XCircle size={14}/>} accent="rose" />
       </div>
+
+      {/* ── MY WORKFLOW & KPI SNAPSHOT ── */}
+      {myKpi?.summary && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+              <Activity size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-extrabold text-slate-800">My Monthly KPI & Workflow Score</p>
+                <ScorePill score={myKpi.summary.score} />
+                {myKpi.summary.leads?.totalAssigned > 0 && (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    (myKpi.bottleneckLeads?.length || 0) > 0
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}>
+                    {(myKpi.bottleneckLeads?.length || 0) > 0
+                      ? `⚠️ ${myKpi.bottleneckLeads.length} leads need attention`
+                      : '✓ SLA Clear'}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Attendance {myKpi.summary.scoreBreakdown?.attendance}/25 · Logs {myKpi.summary.scoreBreakdown?.discipline}/15 · Activity & Chats {myKpi.summary.scoreBreakdown?.activity}/35 · SLA & Tasks {myKpi.summary.scoreBreakdown?.execution}/25
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {myKpi.bottleneckLeads?.slice(0, 2).map(l => (
+              <Link
+                key={l.id}
+                to={`/leads/${l.id}`}
+                className="text-[11px] font-bold px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 transition-colors"
+                title="Open priority lead"
+              >
+                <AlertTriangle size={11} />
+                <span className="truncate max-w-[130px]">{l.client_name}</span>
+              </Link>
+            ))}
+            <Link
+              to="/kpi"
+              className="text-xs font-extrabold px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 transition-colors shadow-2xs"
+            >
+              <span>Full KPI & Trace</span>
+              <ArrowRight size={13} />
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: form */}

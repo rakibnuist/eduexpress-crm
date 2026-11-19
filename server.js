@@ -3087,6 +3087,10 @@ function runMigrations() {
     `ALTER TABLE contacts ADD COLUMN referral_data TEXT`,
     `ALTER TABLE leads ADD COLUMN meta_adset_id TEXT`,
     `ALTER TABLE leads ADD COLUMN meta_adset_name TEXT`,
+    // ── Employee KPI & Workflow target thresholds ──
+    `ALTER TABLE kpi_targets ADD COLUMN target_daily_actions INTEGER DEFAULT 12`,
+    `ALTER TABLE kpi_targets ADD COLUMN target_followups INTEGER DEFAULT 0`,
+    `ALTER TABLE kpi_targets ADD COLUMN max_sla_hours INTEGER DEFAULT 24`,
   ];
   migrations.forEach(m => { try { db.exec(m); } catch {} });
 
@@ -7445,14 +7449,49 @@ app.get('/api/kpi/:month', (req, res) => {
     const revenue  = db.prepare("SELECT SUM(service_fee) as s FROM leads WHERE assigned_consultant=?").get(c).s||0;
     const collected= db.prepare("SELECT SUM(paid) as s FROM leads WHERE assigned_consultant=?").get(c).s||0;
     const target   = db.prepare("SELECT * FROM kpi_targets WHERE consultant=? AND month=?").get(c,month)||{};
-    return { consultant:c, total, thisMonth, enrolled:byStatus['Enrolled']||0, fileOpened:byStatus['File Opened']||0, officeVisited:byStatus['Office Visited']||0, positive:byStatus['Positive']||0, notInterested:byStatus['Not Interested']||0, revenue, collected, conversionRate: total>0?((( byStatus['File Opened']||0)/total)*100).toFixed(1):0, responseRate: total>0?(((total-(byStatus['No Response']||0))/total)*100).toFixed(1):0, target_leads:target.target_leads||0, target_enrolled:target.target_enrolled||0, target_revenue:target.target_revenue||0 };
+    return {
+      consultant:c, total, thisMonth,
+      enrolled:byStatus['Enrolled']||0, fileOpened:byStatus['File Opened']||0,
+      officeVisited:byStatus['Office Visited']||0, positive:byStatus['Positive']||0,
+      notInterested:byStatus['Not Interested']||0, revenue, collected,
+      conversionRate: total>0?((( byStatus['File Opened']||0)/total)*100).toFixed(1):0,
+      responseRate: total>0?(((total-(byStatus['No Response']||0))/total)*100).toFixed(1):0,
+      target_leads:target.target_leads||0,
+      target_enrolled:target.target_enrolled||0,
+      target_revenue:target.target_revenue||0,
+      target_daily_actions: target.target_daily_actions ?? 12,
+      target_followups: target.target_followups || 0,
+      max_sla_hours: target.max_sla_hours ?? 24,
+    };
   }));
 });
 app.put('/api/kpi/targets', requireAdmin, (req, res) => {
-  const { consultant, month, target_leads, target_enrolled, target_revenue } = req.body;
+  const {
+    consultant, month,
+    target_leads, target_enrolled, target_revenue,
+    target_daily_actions, target_followups, max_sla_hours,
+  } = req.body || {};
   if (!consultant || !month) return res.status(400).json({ error: 'consultant and month are required' });
   try {
-    db.prepare(`INSERT INTO kpi_targets (consultant,month,target_leads,target_enrolled,target_revenue) VALUES (?,?,?,?,?) ON CONFLICT(consultant,month) DO UPDATE SET target_leads=excluded.target_leads,target_enrolled=excluded.target_enrolled,target_revenue=excluded.target_revenue`).run(consultant, month, Number(target_leads)||0, Number(target_enrolled)||0, Number(target_revenue)||0);
+    const existing = db.prepare("SELECT * FROM kpi_targets WHERE consultant=? AND month=?").get(consultant, month) || {};
+    const leadsVal = target_leads !== undefined ? (Number(target_leads) || 0) : (existing.target_leads || 0);
+    const enrolledVal = target_enrolled !== undefined ? (Number(target_enrolled) || 0) : (existing.target_enrolled || 0);
+    const revenueVal = target_revenue !== undefined ? (Number(target_revenue) || 0) : (existing.target_revenue || 0);
+    const dailyVal = target_daily_actions !== undefined ? Math.max(1, Number(target_daily_actions) || 12) : (existing.target_daily_actions ?? 12);
+    const followupsVal = target_followups !== undefined ? Math.max(0, Number(target_followups) || 0) : (existing.target_followups || 0);
+    const slaVal = max_sla_hours !== undefined ? Math.max(1, Number(max_sla_hours) || 24) : (existing.max_sla_hours ?? 24);
+
+    db.prepare(`
+      INSERT INTO kpi_targets (consultant,month,target_leads,target_enrolled,target_revenue,target_daily_actions,target_followups,max_sla_hours)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(consultant,month) DO UPDATE SET
+        target_leads=excluded.target_leads,
+        target_enrolled=excluded.target_enrolled,
+        target_revenue=excluded.target_revenue,
+        target_daily_actions=excluded.target_daily_actions,
+        target_followups=excluded.target_followups,
+        max_sla_hours=excluded.max_sla_hours
+    `).run(consultant, month, leadsVal, enrolledVal, revenueVal, dailyVal, followupsVal, slaVal);
     const saved = db.prepare("SELECT * FROM kpi_targets WHERE consultant=? AND month=?").get(consultant, month);
     res.json({ ok: true, saved });
   } catch(e) {
@@ -7664,120 +7703,711 @@ app.get('/api/daily-logs/me/today', (req, res) => {
   res.json({ linked: true, emp_id: emp.emp_id, emp_name: emp.name, today, log: row || null });
 });
 
-// Employee KPI dashboard — Attendance + Office Work + Activity per employee.
-app.get('/api/employee-kpi', (req, res) => requireManagerOrAdmin(req, res, () => {
-  const month = req.query.month || new Date().toISOString().slice(0, 7);
+function parseSqliteUtcDate(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return isNaN(ts.getTime()) ? null : ts;
+  const s = String(ts).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T00:00:00Z');
+  const normalized = s.includes('T') ? s : s.replace(' ', 'T');
+  const withZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(normalized) ? normalized : normalized + 'Z';
+  const d = new Date(withZone);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function dhakaTodayIso() {
+  return new Date(Date.now() + 6 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function toDhakaDate(ts) {
+  const d = parseSqliteUtcDate(ts);
+  if (!d) return null;
+  return new Date(d.getTime() + 6 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function toDhakaTime(ts) {
+  const d = parseSqliteUtcDate(ts);
+  if (!d) return null;
+  return new Date(d.getTime() + 6 * 3600 * 1000).toISOString().slice(11, 16);
+}
+
+function shiftIsoDays(isoDateStr, deltaDays) {
+  const d = new Date(isoDateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeMonthParam(rawMonth) {
+  if (rawMonth && /^\d{4}-\d{2}$/.test(String(rawMonth))) return String(rawMonth);
+  return dhakaTodayIso().slice(0, 7);
+}
+
+const KPI_ACT_WEIGHTS = {
+  lead_created:              3,
+  lead_status_changed:       2,
+  lead_assigned:             1,
+  lead_payment:              4,
+  payment_recorded:          3,
+  application_stage_changed: 3,
+  uni_app_status:            3,
+  reply_to_student:          2,
+  note:                      2,
+  task_completed:            3,
+  daily_log_submitted:       1,
+  daily_log_updated:         1,
+  attendance_in:             1,
+  lead_updated_via_app:      2,
+};
+
+const KPI_ACT_GROUPS = {
+  lead_work:    ['lead_created', 'lead_status_changed', 'lead_assigned', 'lead_updated_via_app'],
+  payments:     ['lead_payment', 'payment_recorded'],
+  application:  ['application_stage_changed', 'uni_app_status'],
+  communication:['reply_to_student', 'note'],
+  tasks:        ['task_completed', 'daily_log_submitted', 'daily_log_updated', 'attendance_in'],
+};
+
+const CLOSED_LEAD_STATUSES = new Set([
+  'Enrolled', 'Not Interested', 'Documents Withdraw', 'Application Withdraw'
+]);
+
+const BOT_KPI_SENDERS = new Set([
+  '', 'ai bot 🤖', 'auto', 'system', 'automation', 'auto-lead bot', 'meta automation',
+  'meta ad automation', 'website webhook', 'n8n bot', 'auto-cleanup bot', 'scholarship scraper'
+]);
+
+function resolveEmployeeContext(emp, allUsers, empByEmail) {
+  const empEmail = String(emp.email || '').trim().toLowerCase();
+  const empName = String(emp.name || '').trim().toLowerCase();
+
+  const linkedUsers = allUsers.filter(u => {
+    const uEmail = String(u.email || '').trim().toLowerCase();
+    const uName = String(u.name || '').trim().toLowerCase();
+    if (empEmail && uEmail && empEmail === uEmail) return true;
+    if (empName && uName && empName === uName) return true;
+    if (u.emp_id && u.emp_id === emp.emp_id) {
+      if (!uEmail || !empByEmail.has(uEmail) || empByEmail.get(uEmail) === emp.emp_id) return true;
+    }
+    return false;
+  });
+
+  const userIds = new Set(linkedUsers.map(u => Number(u.id)));
+  const aliases = new Set();
+  const rawNames = [];
+  const addAlias = (val) => {
+    const s = String(val || '').trim();
+    if (!s) return;
+    aliases.add(s.toLowerCase());
+    rawNames.push(s);
+  };
+  addAlias(emp.name);
+  linkedUsers.forEach(u => {
+    addAlias(u.name);
+    addAlias(u.consultant_name);
+  });
+
+  return { linkedUsers, userIds, aliases, rawNames: Array.from(new Set(rawNames)) };
+}
+
+function matchesEmployeeActivity(act, ctx) {
+  if (act.actor_user_id != null && ctx.userIds.has(Number(act.actor_user_id))) return true;
+  const actor = String(act.actor_name || '').trim().toLowerCase();
+  return actor ? ctx.aliases.has(actor) : false;
+}
+
+function matchesEmployeeLead(lead, emp, ctx) {
+  if (lead.assigned_employee_id != null && Number(lead.assigned_employee_id) === Number(emp.id)) return true;
+  const c = String(lead.assigned_consultant || '').trim().toLowerCase();
+  return c ? ctx.aliases.has(c) : false;
+}
+
+function matchesEmployeeTask(task, ctx) {
+  if (task.assigned_user_id != null && ctx.userIds.has(Number(task.assigned_user_id))) return true;
+  const assignee = String(task.assigned_to || '').trim().toLowerCase();
+  return assignee ? ctx.aliases.has(assignee) : false;
+}
+
+function computeEmployeeKpiReport(monthParam, { onlyEmp = null } = {}) {
+  const month = normalizeMonthParam(monthParam);
   const [y, m] = month.split('-').map(Number);
   const start = `${month}-01`;
-  const endDate = new Date(y, m, 0);
-  const end = endDate.toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const end = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+  const today = dhakaTodayIso();
 
-  // Working days in the month (Sun-Thu = working in Bangladesh, per existing logic)
-  const daysInMonth = endDate.getDate();
   let workingDays = 0;
   for (let d = 1; d <= daysInMonth; d++) {
-    const dow = new Date(y, m - 1, d).getDay();
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
     if (dow !== 5 && dow !== 6) workingDays++;
   }
-  // Effective working days so far (don't penalise for days that haven't happened yet)
   let effWorking = 0;
   const todayInMonth = today >= start && today <= end;
-  const cutoff = todayInMonth ? today : end;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = `${month}-${String(d).padStart(2, '0')}`;
-    if (date > cutoff) break;
-    const dow = new Date(y, m - 1, d).getDay();
-    if (dow !== 5 && dow !== 6) effWorking++;
+  const cutoff = todayInMonth ? today : (today < start ? start : end);
+  if (today >= start) {
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = `${month}-${String(d).padStart(2, '0')}`;
+      if (date > cutoff) break;
+      const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      if (dow !== 5 && dow !== 6) effWorking++;
+    }
   }
 
-  const employees = db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
-  // Activity types we score against. Weights are intentionally simple.
-  const ACT_WEIGHTS = {
-    lead_created:              3,
-    lead_status_changed:       2,
-    lead_assigned:             1,
-    lead_payment:              4,
-    payment_recorded:          2,
-    application_stage_changed: 3,
-    uni_app_status:            3,
-    reply_to_student:          2,
-    note:                      1,
-  };
-  const ACT_GROUPS = {
-    lead_work:    ['lead_created', 'lead_status_changed', 'lead_assigned'],
-    payments:     ['lead_payment', 'payment_recorded'],
-    application:  ['application_stage_changed', 'uni_app_status'],
-    communication:['reply_to_student', 'note'],
-  };
+  const employees = onlyEmp
+    ? [onlyEmp]
+    : db.prepare("SELECT * FROM employees WHERE active='Yes'").all();
+  const allEmployees = db.prepare("SELECT emp_id, email FROM employees WHERE active='Yes'").all();
+  const empByEmail = new Map();
+  allEmployees.forEach(e => {
+    const em = String(e.email || '').trim().toLowerCase();
+    if (em) empByEmail.set(em, e.emp_id);
+  });
+  const allUsers = db.prepare("SELECT id, name, email, emp_id, consultant_name, role, active FROM users").all();
+
+  const winStart = shiftIsoDays(start, -1);
+  const winEnd = shiftIsoDays(end, 1);
+
+  const monthAttendance = db.prepare("SELECT * FROM attendance WHERE date BETWEEN ? AND ?").all(start, end);
+  const monthDailyLogs = db.prepare("SELECT * FROM daily_logs WHERE date BETWEEN ? AND ?").all(start, end);
+  const monthActivitiesRaw = db.prepare("SELECT * FROM activity_log WHERE substr(created_at,1,10) BETWEEN ? AND ? ORDER BY id DESC").all(winStart, winEnd);
+  const monthActivities = monthActivitiesRaw.filter(a => {
+    const d = toDhakaDate(a.created_at);
+    return d && d >= start && d <= end;
+  });
+
+  const monthOutboundMsgsRaw = db.prepare("SELECT id, conversation_id, sent_by, type, created_at FROM messages WHERE direction='out' AND substr(created_at,1,10) BETWEEN ? AND ?").all(winStart, winEnd);
+  const monthOutboundMsgs = monthOutboundMsgsRaw.filter(msg => {
+    const sender = String(msg.sent_by || '').trim().toLowerCase();
+    if (BOT_KPI_SENDERS.has(sender)) return false;
+    const d = toDhakaDate(msg.created_at);
+    return d && d >= start && d <= end;
+  });
+
+  const allTargets = db.prepare("SELECT * FROM kpi_targets WHERE month=?").all(month);
+  const allTasks = db.prepare("SELECT id, title, details, assigned_to, assigned_user_id, assigned_by, due_date, priority, status, category, lead_id, completed_at, created_at, updated_at FROM management_tasks WHERE status != 'cancelled'").all();
+  const allLeads = db.prepare("SELECT id, lead_id, client_name, phone, destination, lead_status, assigned_consultant, assigned_employee_id, next_followup, service_fee, paid, date_added, created_at FROM leads").all();
+  const monthIncome = db.prepare("SELECT lead_id, amount, date, month FROM income WHERE month=? OR substr(date,1,7)=?").all(month, month);
+  const humanTouchRows = db.prepare(`
+    SELECT lead_id, MAX(created_at) as last_touch
+    FROM activity_log
+    WHERE lead_id IS NOT NULL
+      AND actor_user_id IS NOT NULL
+      AND type IN ('note','lead_status_changed','reply_to_student','application_stage_changed','uni_app_status','lead_payment','lead_updated_via_app')
+    GROUP BY lead_id
+  `).all();
+  const lastTouchByLead = new Map(humanTouchRows.map(r => [Number(r.lead_id), r.last_touch]));
+
+  const monthIncomeByLeadRef = new Map();
+  monthIncome.forEach(inc => {
+    const ref = String(inc.lead_id || '').trim();
+    if (ref) monthIncomeByLeadRef.set(ref, (monthIncomeByLeadRef.get(ref) || 0) + (Number(inc.amount) || 0));
+  });
+
+  const cutoffDayNum = Number(cutoff.slice(8, 10)) || daysInMonth;
+  const nowMs = Date.now();
 
   const rows = employees.map(emp => {
+    const ctx = resolveEmployeeContext(emp, allUsers, empByEmail);
+
+    // Pick first matching KPI target row for any of employee's known aliases
+    const targetRow = allTargets.find(t => ctx.aliases.has(String(t.consultant || '').trim().toLowerCase())) || {};
+    const targetDailyActions = Math.max(1, Number(targetRow.target_daily_actions) || 12);
+    const targetFollowups = Math.max(0, Number(targetRow.target_followups) || 0);
+    const maxSlaHours = Math.max(1, Number(targetRow.max_sla_hours) || 24);
+    const targets = {
+      target_leads: Number(targetRow.target_leads) || 0,
+      target_enrolled: Number(targetRow.target_enrolled) || 0,
+      target_revenue: Number(targetRow.target_revenue) || 0,
+      target_daily_actions: targetDailyActions,
+      target_followups: targetFollowups,
+      max_sla_hours: maxSlaHours,
+    };
+
     // — Attendance —
-    const attLogs = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date BETWEEN ? AND ?").all(emp.emp_id, start, end);
+    const attLogs = monthAttendance.filter(l => l.emp_id === emp.emp_id);
     const present = attLogs.filter(l => l.status === 'Present').length;
     const late    = attLogs.filter(l => l.status === 'Late').length;
     const absent  = Math.max(0, effWorking - present - late);
-    const hours   = attLogs.reduce((s, l) => s + (l.hours_worked || 0), 0);
+    const hours   = attLogs.reduce((s, l) => s + (Number(l.hours_worked) || 0), 0);
     const avgIn   = attLogs.filter(l => l.check_in).map(l => l.check_in).sort()[Math.floor(attLogs.length / 2)] || null;
-    const attendancePct = effWorking > 0 ? Math.round(((present + late) / effWorking) * 100) : 0;
+    const attendancePct = effWorking > 0 ? Math.min(100, Math.round(((present + late) / effWorking) * 100)) : 0;
+    const todayAtt = attLogs.find(l => l.date === today) || null;
 
     // — Office Work (daily logs) —
-    const logs = db.prepare("SELECT date FROM daily_logs WHERE emp_id=? AND date BETWEEN ? AND ?").all(emp.emp_id, start, end);
+    const logs = monthDailyLogs.filter(l => l.emp_id === emp.emp_id);
+    const logDates = new Set(logs.map(l => l.date));
     const logsSubmitted = logs.length;
-    // Streak: count back from today (or end of month) however many consecutive days have a log
+    const todayLogSubmitted = logDates.has(today);
     let streak = 0;
-    {
-      const dates = new Set(logs.map(l => l.date));
-      const d = new Date(Math.min(new Date(today).getTime(), endDate.getTime()));
-      while (true) {
-        const ds = d.toISOString().slice(0, 10);
-        if (ds < start) break;
-        const dow = d.getDay();
+    if (today >= start) {
+      let cur = cutoff;
+      while (cur >= start) {
+        const [cy, cm, cd] = cur.split('-').map(Number);
+        const dow = new Date(Date.UTC(cy, cm - 1, cd)).getUTCDay();
         if (dow !== 5 && dow !== 6) {
-          if (!dates.has(ds)) break;
+          if (!logDates.has(cur)) break;
           streak++;
         }
-        d.setDate(d.getDate() - 1);
+        cur = shiftIsoDays(cur, -1);
       }
     }
-    const logPct = effWorking > 0 ? Math.round((logsSubmitted / effWorking) * 100) : 0;
+    const logPct = effWorking > 0 ? Math.min(100, Math.round((logsSubmitted / effWorking) * 100)) : 0;
 
-    // — Activity (auto-pulled from activity_log) —
-    // Match by both possible identities: user account name and user_id link
-    const acts = db.prepare(`
-      SELECT type, COUNT(*) as n
-      FROM activity_log
-      WHERE substr(created_at,1,10) BETWEEN ? AND ?
-        AND (actor_name = ? OR actor_user_id IN (SELECT id FROM users WHERE emp_id=? OR LOWER(email)=LOWER(?)))
-      GROUP BY type`).all(start, end, emp.name, emp.emp_id, emp.email || '');
-    const actByType = {}; acts.forEach(a => actByType[a.type] = a.n);
+    // — Activity + Outbound Chat Replies —
+    const empActs = monthActivities.filter(a => matchesEmployeeActivity(a, ctx));
+    const empChats = monthOutboundMsgs.filter(msg => ctx.aliases.has(String(msg.sent_by || '').trim().toLowerCase()));
+
+    const actByType = {};
+    const actionsByDay = new Map();
+    const chatsByDay = new Map();
+    const touchedLeadIdsMonth = new Set();
+
     let actScore = 0;
-    Object.entries(ACT_WEIGHTS).forEach(([type, w]) => actScore += (actByType[type] || 0) * w);
-    const groupTotals = Object.fromEntries(Object.entries(ACT_GROUPS).map(([g, types]) =>
+    let todayEvents = 0;
+    let todayWeighted = 0;
+
+    for (const a of empActs) {
+      actByType[a.type] = (actByType[a.type] || 0) + 1;
+      const w = KPI_ACT_WEIGHTS[a.type] || 1;
+      actScore += w;
+      const d = toDhakaDate(a.created_at);
+      if (d) {
+        actionsByDay.set(d, (actionsByDay.get(d) || 0) + 1);
+        if (d === today) {
+          todayEvents++;
+          todayWeighted += w;
+        }
+      }
+      if (a.lead_id && ['note', 'lead_status_changed', 'reply_to_student', 'application_stage_changed', 'uni_app_status', 'lead_payment', 'lead_updated_via_app', 'lead_created'].includes(a.type)) {
+        touchedLeadIdsMonth.add(Number(a.lead_id));
+      }
+    }
+
+    for (const msg of empChats) {
+      const d = toDhakaDate(msg.created_at);
+      if (d) {
+        chatsByDay.set(d, (chatsByDay.get(d) || 0) + 1);
+        if (d === today) {
+          todayEvents++;
+          todayWeighted += 1;
+        }
+      }
+    }
+    if (empChats.length > 0) {
+      actByType.chat_outbound = empChats.length;
+      actScore += empChats.length;
+    }
+
+    const groupTotals = Object.fromEntries(Object.entries(KPI_ACT_GROUPS).map(([g, types]) =>
       [g, types.reduce((s, t) => s + (actByType[t] || 0), 0)]
     ));
+    groupTotals.communication = (groupTotals.communication || 0) + empChats.length;
     const totalEvents = Object.values(actByType).reduce((s, n) => s + n, 0);
 
-    // — Composite Score (0-100). Attendance 30 + Office Work 20 + Activity 50.
-    // Activity is normalised against a "good day = 12 weighted points" expectation.
-    const attendanceScore = Math.min(30, (attendancePct / 100) * 30);
-    const logsScore       = Math.min(20, (logPct / 100) * 20);
-    const targetActScore  = Math.max(1, effWorking * 12);
-    const activityScore   = Math.min(50, (actScore / targetActScore) * 50);
-    const score = Math.round(attendanceScore + logsScore + activityScore);
+    // Build daily series up to cutoff day in month
+    const attDates = new Set(attLogs.map(l => l.date));
+    const dailySeries = [];
+    if (today >= start) {
+      for (let d = 1; d <= cutoffDayNum; d++) {
+        const ds = `${month}-${String(d).padStart(2, '0')}`;
+        const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        const actions = actionsByDay.get(ds) || 0;
+        const chatReplies = chatsByDay.get(ds) || 0;
+        dailySeries.push({
+          date: ds,
+          actions,
+          chatReplies,
+          totalWork: actions + chatReplies,
+          hasAttendance: attDates.has(ds),
+          hasLog: logDates.has(ds),
+          isWeekend: dow === 5 || dow === 6,
+        });
+      }
+    }
+
+    // — Assigned Leads, Funnel & SLA Bottlenecks —
+    const empLeads = allLeads.filter(l => matchesEmployeeLead(l, emp, ctx));
+    const newThisMonth = empLeads.filter(l => {
+      const dAdded = l.date_added ? String(l.date_added).slice(0, 7) : null;
+      const dCreated = toDhakaDate(l.created_at)?.slice(0, 7);
+      return dAdded === month || dCreated === month;
+    }).length;
+    const activeLeads = empLeads.filter(l => !CLOSED_LEAD_STATUSES.has(l.lead_status));
+    const positiveCount = empLeads.filter(l => l.lead_status === 'Positive').length;
+    const visitedCount = empLeads.filter(l => l.lead_status === 'Office Visited').length;
+    const fileOpenedCount = empLeads.filter(l => l.lead_status === 'File Opened').length;
+    const enrolledCount = empLeads.filter(l => l.lead_status === 'Enrolled').length;
+    const admittedCount = empLeads.filter(l => l.lead_status === 'Admitted').length;
+
+    let uncontactedOverdue = 0;
+    let followupsDueToday = 0;
+    let followupsOverdue = 0;
+    let collectedThisMonth = 0;
+    let revenueAllTime = 0;
+    let collectedAllTime = 0;
+
+    for (const l of empLeads) {
+      revenueAllTime += Number(l.service_fee) || 0;
+      collectedAllTime += Number(l.paid) || 0;
+      if (l.lead_id && monthIncomeByLeadRef.has(l.lead_id)) {
+        collectedThisMonth += monthIncomeByLeadRef.get(l.lead_id) || 0;
+      }
+      if (!CLOSED_LEAD_STATUSES.has(l.lead_status)) {
+        if (l.next_followup === today) followupsDueToday++;
+        else if (l.next_followup && l.next_followup < today) followupsOverdue++;
+        if (l.lead_status === 'New Lead' && !lastTouchByLead.has(Number(l.id))) {
+          const created = parseSqliteUtcDate(l.created_at) || parseSqliteUtcDate(l.date_added);
+          const ageHours = created ? (nowMs - created.getTime()) / 3600000 : 0;
+          if (ageHours >= maxSlaHours) uncontactedOverdue++;
+        }
+      }
+    }
+
+    const totalLeadIssues = uncontactedOverdue + followupsOverdue;
+    const slaCompliancePct = activeLeads.length > 0
+      ? Math.max(0, Math.round(100 - (totalLeadIssues / activeLeads.length) * 100))
+      : 100;
+
+    // — Task & Directive Workflow —
+    const empTasks = allTasks.filter(t => matchesEmployeeTask(t, ctx));
+    const tasksOpen = empTasks.filter(t => t.status === 'open').length;
+    const tasksInProgress = empTasks.filter(t => t.status === 'in_progress').length;
+    const tasksBlocked = empTasks.filter(t => t.status === 'blocked').length;
+    const tasksOverdue = empTasks.filter(t => t.status !== 'done' && t.due_date && t.due_date < today).length;
+    const tasksDoneMonth = empTasks.filter(t => {
+      if (t.status !== 'done') return false;
+      const doneDate = toDhakaDate(t.completed_at || t.updated_at || t.created_at);
+      return doneDate && doneDate >= start && doneDate <= end;
+    }).length;
+    const activeTaskCount = tasksOpen + tasksInProgress + tasksBlocked;
+    const totalRelevantTasks = activeTaskCount + tasksDoneMonth;
+    const taskCompletionPct = totalRelevantTasks > 0
+      ? Math.round((tasksDoneMonth / totalRelevantTasks) * 100)
+      : 100;
+
+    // — 4-Pillar Composite Score (0-100): Attendance 25 + Daily Logs 15 + Activity 35 + Execution & SLA 25 —
+    const attendanceScore = Math.min(25, (attendancePct / 100) * 25);
+    const disciplineScore = Math.min(15, (logPct / 100) * 15);
+    const targetActScore  = Math.max(1, effWorking * targetDailyActions);
+    const activityScore   = Math.min(35, (actScore / targetActScore) * 35);
+
+    let executionScore;
+    if (empLeads.length > 0) {
+      const slaPart = (touchedLeadIdsMonth.size > 0 || uncontactedOverdue === 0)
+        ? (slaCompliancePct / 100) * 10
+        : 0;
+      const taskPart = totalRelevantTasks > 0
+        ? (taskCompletionPct / 100) * 10
+        : Math.min(10, (touchedLeadIdsMonth.size / Math.max(1, effWorking)) * 5);
+      const outcomePart = targets.target_enrolled > 0
+        ? Math.min(5, ((fileOpenedCount + admittedCount + enrolledCount) / targets.target_enrolled) * 5)
+        : Math.min(5, fileOpenedCount * 0.5 + admittedCount * 1 + enrolledCount * 2);
+      executionScore = slaPart + taskPart + outcomePart;
+    } else {
+      const taskPart = totalRelevantTasks > 0 ? (taskCompletionPct / 100) * 15 : 0;
+      const throughputPart = Math.min(10, (actScore / targetActScore) * 10);
+      executionScore = taskPart + throughputPart;
+    }
+
+    const score = Math.round(attendanceScore + disciplineScore + activityScore + executionScore);
+
+    // — Today's Live Workflow State —
+    const todayDow = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1, Number(today.slice(8, 10)))).getUTCDay();
+    const isWorkingDayToday = todayDow !== 5 && todayDow !== 6;
+    let workflowStage = 'on_track';
+    if (isWorkingDayToday && !todayAtt) {
+      workflowStage = 'not_checked_in';
+    } else if (uncontactedOverdue > 0 || followupsOverdue > 0 || tasksOverdue > 0) {
+      workflowStage = 'needs_attention';
+    } else if (todayAtt && !todayAtt.check_out && !todayLogSubmitted) {
+      workflowStage = 'in_progress';
+    } else if (todayLogSubmitted) {
+      workflowStage = 'complete';
+    }
 
     return {
       id: emp.id,
-      emp_id: emp.emp_id, name: emp.name, role: emp.role,
-      attendance: { present, late, absent, workingDays: effWorking, totalHours: +hours.toFixed(1), avgCheckIn: avgIn, attendancePct },
-      office_work: { logsSubmitted, logPct, streak, effWorking },
-      activity:    { total: totalEvents, score: actScore, by_type: actByType, by_group: groupTotals },
+      emp_id: emp.emp_id,
+      name: emp.name,
+      role: emp.role,
+      email: emp.email || null,
+      attendance: {
+        present, late, absent,
+        workingDays: effWorking,
+        totalHours: +hours.toFixed(1),
+        avgCheckIn: avgIn,
+        attendancePct,
+        today: todayAtt ? {
+          checkedIn: true,
+          checkIn: todayAtt.check_in || null,
+          checkOut: todayAtt.check_out || null,
+          status: todayAtt.status || 'Present',
+          source: todayAtt.source || 'manual',
+        } : { checkedIn: false, checkIn: null, checkOut: null, status: 'Absent', source: null },
+      },
+      office_work: { logsSubmitted, logPct, streak, effWorking, todayLogSubmitted },
+      activity: {
+        total: totalEvents,
+        score: actScore,
+        chatReplies: empChats.length,
+        todayEvents,
+        todayWeighted,
+        by_type: actByType,
+        by_group: groupTotals,
+      },
+      leads: {
+        totalAssigned: empLeads.length,
+        activePipeline: activeLeads.length,
+        newThisMonth,
+        touchedThisMonth: touchedLeadIdsMonth.size,
+        positive: positiveCount,
+        officeVisited: visitedCount,
+        fileOpened: fileOpenedCount,
+        admitted: admittedCount,
+        enrolled: enrolledCount,
+        uncontactedOverdue,
+        followupsDueToday,
+        followupsOverdue,
+        slaCompliancePct,
+        revenueAllTime,
+        collectedAllTime,
+        collectedThisMonth,
+      },
+      tasks: {
+        open: tasksOpen,
+        inProgress: tasksInProgress,
+        blocked: tasksBlocked,
+        totalActive: activeTaskCount,
+        doneMonth: tasksDoneMonth,
+        overdue: tasksOverdue,
+        completionPct: taskCompletionPct,
+      },
+      targets,
+      dailySeries,
+      workflowState: {
+        stage: workflowStage,
+        checkedIn: !!todayAtt,
+        checkedOut: !!todayAtt?.check_out,
+        logSubmitted: todayLogSubmitted,
+        urgentCount: uncontactedOverdue + followupsOverdue + tasksOverdue,
+        dailyTargetPct: Math.min(100, Math.round((todayWeighted / targetDailyActions) * 100)),
+      },
+      scoreBreakdown: {
+        attendance: Math.round(attendanceScore),
+        discipline: Math.round(disciplineScore),
+        activity: Math.round(activityScore),
+        execution: Math.round(executionScore),
+      },
       score,
     };
-  }).sort((a, b) => b.score - a.score);
+  }).sort((a, b) => b.score - a.score || b.activity.todayEvents - a.activity.todayEvents);
 
-  res.json({ month, workingDays, effWorking, employees: rows });
+  const teamSummary = {
+    activeStaff: rows.length,
+    checkedInToday: rows.filter(r => r.attendance.today.checkedIn).length,
+    logsSubmittedToday: rows.filter(r => r.office_work.todayLogSubmitted).length,
+    todayActions: rows.reduce((s, r) => s + r.activity.todayEvents, 0),
+    overdueFollowups: rows.reduce((s, r) => s + r.leads.followupsOverdue, 0),
+    uncontactedSla: rows.reduce((s, r) => s + r.leads.uncontactedOverdue, 0),
+    overdueTasks: rows.reduce((s, r) => s + r.tasks.overdue, 0),
+    avgScore: rows.length > 0 ? Math.round(rows.reduce((s, r) => s + r.score, 0) / rows.length) : 0,
+  };
+
+  return { month, today, workingDays, effWorking, teamSummary, employees: rows };
+}
+
+function buildEmployeeDrilldown(emp, monthParam) {
+  const month = normalizeMonthParam(monthParam);
+  const [y, m] = month.split('-').map(Number);
+  const start = `${month}-01`;
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const end = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+  const today = dhakaTodayIso();
+
+  const report = computeEmployeeKpiReport(month, { onlyEmp: emp });
+  const summary = report.employees[0] || null;
+
+  const allEmployees = db.prepare("SELECT emp_id, email FROM employees WHERE active='Yes'").all();
+  const empByEmail = new Map();
+  allEmployees.forEach(e => {
+    const em = String(e.email || '').trim().toLowerCase();
+    if (em) empByEmail.set(em, e.emp_id);
+  });
+  const allUsers = db.prepare("SELECT id, name, email, emp_id, consultant_name, role, active FROM users").all();
+  const ctx = resolveEmployeeContext(emp, allUsers, empByEmail);
+
+  const attendance = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date").all(emp.emp_id, start, end);
+  const logs = db.prepare("SELECT * FROM daily_logs WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date DESC").all(emp.emp_id, start, end);
+
+  const winStart = shiftIsoDays(start, -1);
+  const winEnd = shiftIsoDays(end, 1);
+  const actRows = db.prepare("SELECT * FROM activity_log WHERE substr(created_at,1,10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 1200").all(winStart, winEnd);
+  const activity = actRows.filter(a => {
+    const d = toDhakaDate(a.created_at);
+    return d && d >= start && d <= end && matchesEmployeeActivity(a, ctx);
+  }).slice(0, 500);
+
+  const msgRows = db.prepare(`
+    SELECT m.id, m.conversation_id, m.sent_by, m.type, m.content, m.created_at,
+           c.channel_type, c.lead_id, co.name AS contact_name, co.phone AS contact_phone
+    FROM messages m
+    LEFT JOIN conversations c ON m.conversation_id = c.id
+    LEFT JOIN contacts co ON c.contact_id = co.id
+    WHERE m.direction='out' AND substr(m.created_at,1,10) BETWEEN ? AND ?
+    ORDER BY m.id DESC LIMIT 600
+  `).all(winStart, winEnd);
+  const chatMessages = msgRows.filter(msg => {
+    const d = toDhakaDate(msg.created_at);
+    return d && d >= start && d <= end && ctx.aliases.has(String(msg.sent_by || '').trim().toLowerCase());
+  });
+
+  const allTasks = db.prepare("SELECT * FROM management_tasks WHERE status != 'cancelled' ORDER BY CASE status WHEN 'blocked' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'open' THEN 2 ELSE 3 END, due_date ASC, id DESC").all();
+  const tasks = allTasks.filter(t => matchesEmployeeTask(t, ctx)).filter(t => {
+    if (t.status !== 'done') return true;
+    const doneDate = toDhakaDate(t.completed_at || t.updated_at || t.created_at);
+    return doneDate && doneDate >= start && doneDate <= end;
+  });
+
+  // Actionable leads needing attention (SLA breaches & due/overdue follow-ups)
+  const allLeads = db.prepare("SELECT id, lead_id, client_name, phone, destination, lead_status, assigned_consultant, assigned_employee_id, next_followup, created_at, date_added FROM leads").all();
+  const humanTouchRows = db.prepare(`
+    SELECT lead_id, MAX(created_at) as last_touch
+    FROM activity_log
+    WHERE lead_id IS NOT NULL AND actor_user_id IS NOT NULL
+      AND type IN ('note','lead_status_changed','reply_to_student','application_stage_changed','uni_app_status','lead_payment','lead_updated_via_app')
+    GROUP BY lead_id
+  `).all();
+  const lastTouchByLead = new Map(humanTouchRows.map(r => [Number(r.lead_id), r.last_touch]));
+  const maxSlaHours = summary?.targets?.max_sla_hours || 24;
+  const nowMs = Date.now();
+
+  const bottleneckLeads = [];
+  for (const l of allLeads) {
+    if (!matchesEmployeeLead(l, emp, ctx) || CLOSED_LEAD_STATUSES.has(l.lead_status)) continue;
+    let issueType = null;
+    let ageHours = null;
+    if (l.next_followup && l.next_followup < today) {
+      issueType = 'overdue_followup';
+    } else if (l.next_followup === today) {
+      issueType = 'due_today';
+    } else if (l.lead_status === 'New Lead' && !lastTouchByLead.has(Number(l.id))) {
+      const created = parseSqliteUtcDate(l.created_at) || parseSqliteUtcDate(l.date_added);
+      ageHours = created ? Math.round((nowMs - created.getTime()) / 3600000) : 0;
+      if (ageHours >= maxSlaHours) issueType = 'sla_breach';
+    }
+    if (issueType) {
+      bottleneckLeads.push({
+        id: l.id,
+        lead_id: l.lead_id,
+        client_name: l.client_name,
+        phone: l.phone,
+        destination: l.destination,
+        lead_status: l.lead_status,
+        next_followup: l.next_followup,
+        created_at: l.created_at,
+        issue_type: issueType,
+        age_hours: ageHours,
+      });
+    }
+  }
+  const issuePriority = { overdue_followup: 0, due_today: 1, sla_breach: 2 };
+  bottleneckLeads.sort((a, b) => (issuePriority[a.issue_type] - issuePriority[b.issue_type]) || ((b.age_hours || 0) - (a.age_hours || 0)));
+
+  // Unified Chronological Workflow Timeline
+  const timeline = [];
+  for (const a of activity) {
+    let cat = 'lead';
+    if (a.type === 'attendance_in') cat = 'attendance';
+    else if (a.type === 'daily_log_submitted' || a.type === 'daily_log_updated') cat = 'log';
+    else if (a.type === 'task_completed' || a.type === 'task_assigned' || a.type === 'task_updated') cat = 'task';
+    else if (a.type === 'application_stage_changed' || a.type === 'uni_app_status') cat = 'application';
+    else if (a.type === 'payment_recorded' || a.type === 'lead_payment') cat = 'payment';
+    else if (a.type === 'reply_to_student') cat = 'chat';
+    else if (a.type.startsWith('approval_')) cat = 'approval';
+
+    let detailsText = '';
+    if (a.details) {
+      try {
+        const parsed = JSON.parse(a.details);
+        if (typeof parsed === 'string') detailsText = parsed;
+        else if (parsed?.title) detailsText = parsed.title;
+        else if (parsed?.message) detailsText = parsed.message;
+        else if (parsed?.university) detailsText = parsed.university;
+      } catch {
+        detailsText = String(a.details);
+      }
+    }
+
+    timeline.push({
+      id: `act-${a.id}`,
+      ts: a.created_at,
+      localDate: toDhakaDate(a.created_at),
+      localTime: toDhakaTime(a.created_at),
+      category: cat,
+      title: a.type.replace(/_/g, ' '),
+      subtitle: [a.lead_name, a.to_value ? `→ ${a.to_value}` : null, a.amount ? `৳${Number(a.amount).toLocaleString()}` : null, detailsText].filter(Boolean).join(' · '),
+      lead_id: a.lead_id || null,
+      lead_name: a.lead_name || null,
+    });
+  }
+  for (const msg of chatMessages.slice(0, 150)) {
+    timeline.push({
+      id: `msg-${msg.id}`,
+      ts: msg.created_at,
+      localDate: toDhakaDate(msg.created_at),
+      localTime: toDhakaTime(msg.created_at),
+      category: 'chat',
+      title: `${msg.channel_type || 'chat'} reply`,
+      subtitle: `${msg.contact_name || msg.contact_phone || 'Contact'}${msg.content ? ` · "${String(msg.content).slice(0, 70)}"` : ''}`,
+      lead_id: msg.lead_id || null,
+      conversation_id: msg.conversation_id,
+    });
+  }
+  for (const att of attendance) {
+    if (att.check_in && !activity.some(a => a.type === 'attendance_in' && toDhakaDate(a.created_at) === att.date)) {
+      timeline.push({
+        id: `att-${att.id}`,
+        ts: `${att.date} ${att.check_in}:00`,
+        localDate: att.date,
+        localTime: att.check_in,
+        category: 'attendance',
+        title: `check-in (${att.status})`,
+        subtitle: `Via ${att.source || 'manual'}${att.check_out ? ` · Out ${att.check_out}` : ''}`,
+      });
+    }
+  }
+  timeline.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+
+  return {
+    employee: emp,
+    month,
+    today,
+    summary,
+    attendance,
+    logs,
+    tasks,
+    bottleneckLeads: bottleneckLeads.slice(0, 30),
+    chatStats: {
+      totalOutboundMonth: chatMessages.length,
+      todayOutbound: chatMessages.filter(c => toDhakaDate(c.created_at) === today).length,
+    },
+    workflowTimeline: timeline.slice(0, 200),
+    activity,
+  };
+}
+
+// Employee KPI & Workflow dashboard — Attendance + Office Work + Activity + SLA + Tasks per employee.
+app.get('/api/employee-kpi', (req, res) => requireManagerOrAdmin(req, res, () => {
+  res.json(computeEmployeeKpiReport(req.query.month));
 }));
+
+// Personal Employee KPI & Workflow trace for the logged-in user (self-service).
+app.get('/api/employee-kpi/me', (req, res) => {
+  const emp = findEmployeeForUser(req.user);
+  const month = normalizeMonthParam(req.query.month);
+  if (!emp) return res.json({ linked: false, month, employee: null });
+  const drilldown = buildEmployeeDrilldown(emp, month);
+  res.json({ linked: true, ...drilldown });
+});
 
 // ─── REPORTS — weekly / monthly performance digest ─────────────────────────
 // Comprehensive aggregation across all subsystems in one JSON response so
@@ -8316,22 +8946,11 @@ app.get('/api/reports', (req, res) => requireManagerOrAdmin(req, res, () => {
   });
 }));
 
-// Per-employee drilldown — full activity feed + daily logs for one person
+// Per-employee drilldown — full workflow trace, SLA bottlenecks, tasks, daily logs & activity
 app.get('/api/employee-kpi/:emp_id', (req, res) => requireManagerOrAdmin(req, res, () => {
-  const month = req.query.month || new Date().toISOString().slice(0, 7);
-  const start = `${month}-01`;
-  const endDate = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5)), 0);
-  const end = endDate.toISOString().slice(0, 10);
-  const emp = db.prepare("SELECT * FROM employees WHERE emp_id=?").get(req.params.emp_id);
+  const emp = db.prepare("SELECT * FROM employees WHERE emp_id=? OR CAST(id AS TEXT)=?").get(req.params.emp_id, req.params.emp_id);
   if (!emp) return res.status(404).json({ error: 'Employee not found' });
-
-  const attendance = db.prepare("SELECT * FROM attendance WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date").all(emp.emp_id, start, end);
-  const logs       = db.prepare("SELECT * FROM daily_logs WHERE emp_id=? AND date BETWEEN ? AND ? ORDER BY date DESC").all(emp.emp_id, start, end);
-  const activity   = db.prepare(`SELECT * FROM activity_log
-    WHERE substr(created_at,1,10) BETWEEN ? AND ?
-      AND (actor_name = ? OR actor_user_id IN (SELECT id FROM users WHERE emp_id=? OR LOWER(email)=LOWER(?)))
-    ORDER BY id DESC LIMIT 500`).all(start, end, emp.name, emp.emp_id, emp.email || '');
-  res.json({ employee: emp, month, attendance, logs, activity });
+  res.json(buildEmployeeDrilldown(emp, req.query.month));
 }));
 
 // ─────────────────────────────────────────────────────────
